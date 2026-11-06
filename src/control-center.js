@@ -311,7 +311,9 @@ export class ControlCenter {
     return transaction(this.db, () => {
       const task = this.db.prepare('SELECT status, lease_id FROM tasks WHERE id = ?').get(taskId);
       if (!task) throw new ControlCenterError('not_found', 'Task not found');
-      if (['succeeded', 'failed', 'cancelled'].includes(task.status))
+      if (task.status === 'cancellation_requested' || task.status === 'cancelled')
+        return this.getTask(taskId);
+      if (['succeeded', 'failed'].includes(task.status))
         throw new ControlCenterError('invalid_transition', 'Terminal task cannot be cancelled');
       const activeLease = task.lease_id ? this.db.prepare(`SELECT id FROM leases WHERE id = ? AND status = 'active' AND expires_at > ?`).get(task.lease_id, now()) : null;
       const next = task.status === 'queued' || !activeLease ? 'cancelled' : 'cancellation_requested';

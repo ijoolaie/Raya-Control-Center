@@ -143,6 +143,9 @@ test('independent HTTP client observes cooperative cancellation and acknowledges
     const requested = await request('/tasks/' + taskId + '/cancel-request', { method: 'POST', headers: operator, body: '{}' });
     assert.equal(requested.status, 200);
     assert.equal(requested.body.task.status, 'cancellation_requested');
+    const repeatedRequest = await request('/tasks/' + taskId + '/cancel-request', { method: 'POST', headers: operator, body: '{}' });
+    assert.equal(repeatedRequest.status, 200);
+    assert.equal(repeatedRequest.body.task.status, 'cancellation_requested');
 
     const cancellationStatus = await request('/tasks/' + taskId + '/lease-status', { token: participantToken, leaseToken });
     assert.equal(cancellationStatus.status, 200);
@@ -166,6 +169,7 @@ test('independent HTTP client observes cooperative cancellation and acknowledges
     const events = await request('/events?entityType=task&entityId=' + taskId, { headers: operator });
     const eventTypes = events.body.events.map(event => event.eventType);
     assert.ok(eventTypes.includes('task.cancellation_requested'));
+    assert.equal(eventTypes.filter(type => type === 'task.cancellation_requested').length, 1);
     assert.ok(eventTypes.includes('task.cancelled'));
   });
 });

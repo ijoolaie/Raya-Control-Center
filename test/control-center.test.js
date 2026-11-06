@@ -94,10 +94,16 @@ test('cancellation is cooperative and queued work cancels immediately', () => {
   const { db, center, participant, token } = fixture();
   const queued = center.createTask({ type: 'demo.queued' });
   assert.equal(center.requestCancellation(queued.id).status, 'cancelled');
+  const queuedEventCount = center.listEvents({ entityType: 'task', entityId: queued.id }).length;
+  assert.equal(center.requestCancellation(queued.id).status, 'cancelled');
+  assert.equal(center.listEvents({ entityType: 'task', entityId: queued.id }).length, queuedEventCount);
   const task = center.createTask({ type: 'demo.running' });
   const claim = center.claimTask({ participantId: participant.id, token });
   center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token });
   assert.equal(center.requestCancellation(task.id).status, 'cancellation_requested');
+  const requestedEventCount = center.listEvents({ entityType: 'task', entityId: task.id }).length;
+  assert.equal(center.requestCancellation(task.id).status, 'cancellation_requested');
+  assert.equal(center.listEvents({ entityType: 'task', entityId: task.id }).length, requestedEventCount);
   assert.equal(center.acknowledgeCancellation({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token }).status, 'cancelled');
   db.close();
 });

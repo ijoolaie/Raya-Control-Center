@@ -89,3 +89,7 @@ Clients should branch on HTTP status and stable `error.code`, not human-readable
 ## Verification
 
 The repository test `test/client-contract.test.js` starts a real loopback HTTP server and behaves as an independent client. It verifies registration, task creation, claim, start, progress, heartbeat, completion, stale lease rejection, audit events, lease-bound cancellation-status polling, foreign-lease rejection, and cooperative cancellation/acknowledgement. It is an API contract test, not a remote deployment or penetration test.
+
+### Cancellation request retry semantics
+
+The operator cancellation endpoint is idempotent. Repeating `POST /tasks/{id}/cancel-request` while the task is already `cancellation_requested` or `cancelled` returns the current Task without changing timestamps or appending another audit event. Requests against tasks that completed successfully or failed remain invalid transitions. This makes an operator retry safe after an ambiguous HTTP response. Participant cancellation acknowledgement remains lease-bound; after an ambiguous acknowledgement response, read the Task state rather than blindly repeating the acknowledgement.
