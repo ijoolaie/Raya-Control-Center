@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 1 — durable core foundation.
+**Status:** Phase 1 Ã¢â‚¬â€ durable core foundation.
 
 ## Ownership and scope
 
@@ -19,8 +19,8 @@ This repository is the sole implementation home for Raya Control Center. It owns
 - SQLite persistence using Node.js built-in `node:sqlite` (Node.js 22.13+).
 - Versioned schema migration and WAL mode for file-backed databases.
 - Participant registration, scoped credentials, authentication, and revocation.
-- Task creation, explicit lifecycle transitions, atomic claims, and time-bounded leases.
-- Cooperative cancellation and append-only event history.
+- Task creation, explicit lifecycle transitions, authenticated atomic claims, and time-bounded leases.
+- Cooperative cancellation, expired-lease reconciliation to blocked state, and database-enforced append-only event history.
 - Lease-bound worker updates; stale or foreign lease tokens are rejected.
 
 ## Requirements

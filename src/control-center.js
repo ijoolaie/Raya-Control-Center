@@ -46,11 +46,13 @@ export class ControlCenter {
     const id = randomUUID();
     const token = randomBytes(32).toString('base64url');
     const timestamp = now();
+    transaction(this.db, () => {
     this.db.prepare(`INSERT INTO participants
       (id, display_name, kind, scopes_json, token_hash, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(id, displayName.trim(), kind, json([...new Set(scopes)]), hash(token), timestamp, timestamp);
     appendEvent(this.db, { entityType: 'participant', entityId: id, eventType: 'participant.registered', data: { kind, scopes: [...new Set(scopes)] } });
+    });
     return { participant: this.getParticipant(id), token };
   }
 
@@ -96,15 +98,18 @@ export class ControlCenter {
     const id = randomUUID();
     const timestamp = now();
     try {
+      transaction(this.db, () => {
       this.db.prepare(`INSERT INTO tasks
         (id, type, status, payload_json, priority, created_by, idempotency_key, created_at, updated_at)
         VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)`)
         .run(id, type, payloadText, priority, createdBy, idempotencyKey, timestamp, timestamp);
+    appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority } });
+      });
     } catch (error) {
+      if (error instanceof ControlCenterError) throw error;
       if (String(error.message).includes('UNIQUE')) throw new ControlCenterError('conflict', 'Task id or idempotency key already exists');
       throw error;
     }
-    appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority } });
     return this.getTask(id);
   }
 
@@ -121,9 +126,9 @@ export class ControlCenter {
     if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs < 1000 || leaseDurationMs > 3_600_000)
       throw new ControlCenterError('validation_error', 'Lease duration must be 1s..1h');
     return transaction(this.db, () => {
-      const participant = this.db.prepare(`SELECT id, scopes_json FROM participants
+      const participant = this.db.prepare(`SELECT id, scopes_json, token_hash FROM participants
         WHERE id = ? AND status = 'active'`).get(participantId);
-      if (!participant) throw new ControlCenterError('authentication_required', 'Active participant required');
+      if (!participant || !verifyToken(token, participant.token_hash)) throw new ControlCenterError('authentication_required', 'Valid participant credentials required');
       if (!parse(participant.scopes_json).includes('tasks:claim'))
         throw new ControlCenterError('insufficient_scope', 'Participant lacks tasks:claim scope');
       const leaseToken = randomBytes(32).toString('base64url');
@@ -159,6 +164,8 @@ export class ControlCenter {
   }
 
   heartbeatLease({ taskId, participantId, leaseToken, leaseDurationMs = this.leaseDurationMs }) {
+    if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs < 1000 || leaseDurationMs > 3_600_000)
+      throw new ControlCenterError('validation_error', 'Lease duration must be 1s..1h');
     return this.#withLease({ taskId, participantId, leaseToken }, () => {
       const timestamp = now();
       const expiresAt = new Date(Date.now() + leaseDurationMs).toISOString();
@@ -192,11 +199,12 @@ export class ControlCenter {
 
   requestCancellation(taskId) {
     return transaction(this.db, () => {
-      const task = this.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId);
+      const task = this.db.prepare('SELECT status, lease_id FROM tasks WHERE id = ?').get(taskId);
       if (!task) throw new ControlCenterError('not_found', 'Task not found');
       if (['succeeded', 'failed', 'cancelled'].includes(task.status))
         throw new ControlCenterError('invalid_transition', 'Terminal task cannot be cancelled');
-      const next = task.status === 'queued' ? 'cancelled' : 'cancellation_requested';
+      const activeLease = task.lease_id ? this.db.prepare(`SELECT id FROM leases WHERE id = ? AND status = 'active' AND expires_at > ?`).get(task.lease_id, now()) : null;
+      const next = task.status === 'queued' || !activeLease ? 'cancelled' : 'cancellation_requested';
       const timestamp = now();
       this.db.prepare('UPDATE tasks SET status = ?, updated_at = ?, finished_at = ? WHERE id = ?')
         .run(next, timestamp, next === 'cancelled' ? timestamp : null, taskId);
@@ -231,6 +239,26 @@ export class ControlCenter {
       if (!lease || Date.parse(lease.expires_at) <= Date.now() || !verifyToken(leaseToken, lease.token_hash))
         throw new ControlCenterError('lease_mismatch', 'Active lease required');
       return work(task);
+    });
+  }
+
+  reconcileExpiredLeases() {
+    return transaction(this.db, () => {
+      const expired = this.db.prepare(`SELECT l.id AS lease_id, l.task_id, l.participant_id, t.status AS task_status
+        FROM leases l JOIN tasks t ON t.id = l.task_id
+        WHERE l.status = 'active' AND l.expires_at <= ?
+        ORDER BY l.expires_at ASC`).all(now());
+      const reconciled = [];
+      for (const item of expired) {
+        const timestamp = now();
+        this.db.prepare(`UPDATE leases SET status = 'expired', released_at = ? WHERE id = ? AND status = 'active'`).run(timestamp, item.lease_id);
+        if (['claimed', 'running', 'cancellation_requested'].includes(item.task_status)) {
+          this.db.prepare(`UPDATE tasks SET status = 'blocked', lease_id = NULL, assigned_participant_id = NULL, updated_at = ? WHERE id = ?`).run(timestamp, item.task_id);
+          appendEvent(this.db, { entityType: 'task', entityId: item.task_id, eventType: 'task.lease_expired_blocked', data: { previousStatus: item.task_status, leaseId: item.lease_id } });
+          reconciled.push(item.task_id);
+        }
+      }
+      return reconciled;
     });
   }
 

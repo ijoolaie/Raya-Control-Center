@@ -65,6 +65,10 @@ const migrations = [
       );
       CREATE INDEX events_entity ON events(entity_type, entity_id, sequence);
     `
+  },
+  {
+    version: 2,
+    sql: "CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END; CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;"
   }
 ];
 
