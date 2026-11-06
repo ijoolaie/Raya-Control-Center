@@ -3,6 +3,14 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 const now = () => new Date().toISOString();
 const hash = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const json = value => JSON.stringify(value);
+const canonicalJson = value => {
+  const normalized = JSON.parse(JSON.stringify(value));
+  const sort = item => Array.isArray(item) ? item.map(sort)
+    : item && typeof item === 'object'
+      ? Object.fromEntries(Object.keys(item).sort().map(key => [key, sort(item[key])]))
+      : item;
+  return JSON.stringify(sort(normalized));
+};
 const parse = value => JSON.parse(value);
 
 export class ControlCenterError extends Error {
@@ -124,26 +132,41 @@ export class ControlCenter {
     if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 200))
       throw new ControlCenterError('validation_error', 'idempotencyKey must contain 1..200 characters');
     let payloadText;
-    try { payloadText = json(payload); }
+    try { payloadText = canonicalJson(payload); }
     catch { throw new ControlCenterError('validation_error', 'Task payload must be JSON serializable'); }
     if (typeof payloadText !== 'string' || Buffer.byteLength(payloadText) > 16_384)
       throw new ControlCenterError('validation_error', 'Task payload exceeds 16 KiB or is not serializable');
     const id = randomUUID();
     const timestamp = now();
+    let taskId = id;
+    let idempotentReplay = false;
     try {
       transaction(this.db, () => {
-      this.db.prepare(`INSERT INTO tasks
-        (id, type, status, payload_json, priority, created_by, idempotency_key, created_at, updated_at)
-        VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)`)
-        .run(id, type, payloadText, priority, createdBy, idempotencyKey, timestamp, timestamp);
-    appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority } });
+        if (idempotencyKey !== null) {
+          const existing = this.db.prepare(`SELECT id, type, payload_json, priority
+            FROM tasks WHERE idempotency_key = ?`).get(idempotencyKey);
+          if (existing) {
+            if (existing.type !== type || existing.payload_json !== payloadText || existing.priority !== priority)
+              throw new ControlCenterError('conflict', 'Idempotency key was already used for a different task request');
+            taskId = existing.id;
+            idempotentReplay = true;
+            return;
+          }
+        }
+        this.db.prepare(`INSERT INTO tasks
+          (id, type, status, payload_json, priority, created_by, idempotency_key, created_at, updated_at)
+          VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)`)
+          .run(id, type, payloadText, priority, createdBy, idempotencyKey, timestamp, timestamp);
+        appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority } });
       });
     } catch (error) {
       if (error instanceof ControlCenterError) throw error;
       if (String(error.message).includes('UNIQUE')) throw new ControlCenterError('conflict', 'Task id or idempotency key already exists');
       throw error;
     }
-    return this.getTask(id);
+    const task = this.getTask(taskId);
+    Object.defineProperty(task, 'idempotentReplay', { value: idempotentReplay, enumerable: false });
+    return task;
   }
 
   getTask(id) {

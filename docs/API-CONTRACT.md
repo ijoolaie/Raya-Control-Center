@@ -45,6 +45,7 @@ All non-empty request bodies must be JSON objects and are limited to 16 KiB.
 
 - Register: `{ "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"] }`
 - Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
+- Task creation with an idempotency key returns `201` for the first creation and `200` with `idempotentReplay: true` for an identical replay. Reusing the key with a different type, payload, or priority returns `409 conflict`.
 - Claim: `{ "leaseDurationMs": 30000 }`
 - Heartbeat: `{ "leaseDurationMs": 30000 }`
 - Progress: `{ "percent": 50, "message": "Halfway", "details": {} }` (percent may be null; message max 240 chars; details max 2 KiB).

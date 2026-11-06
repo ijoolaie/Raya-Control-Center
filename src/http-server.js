@@ -158,7 +158,7 @@ export function createControlServer({ db, operatorToken }) {
           type: body.type, payload: body.payload, priority: body.priority,
           idempotencyKey: body.idempotencyKey
         });
-        send(res, 201, { task });
+        send(res, task.idempotentReplay ? 200 : 201, { task, idempotentReplay: task.idempotentReplay });
         return;
       }
 

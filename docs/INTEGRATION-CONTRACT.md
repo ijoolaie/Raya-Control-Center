@@ -40,6 +40,8 @@ Participant starts (Participant token + lease token)
 
 A task claim is atomic. The claim response contains the Task and the lease ID, token, and expiry. The lease token is required for every worker lifecycle mutation. A Participant can only mutate the Task associated with its own active, unexpired lease.
 
+Task creation accepts an optional globally unique `idempotencyKey`. Retrying the same create request with the same key, type, payload, and priority returns the original Task (HTTP 200, `idempotentReplay: true`) without creating another Task or audit event. Reusing that key with different task input returns `409 conflict`. Keep the key stable across retries; do not generate a new key after a timeout.
+
 ## Client sequence
 
 1. Receive and securely store a Participant token during provisioning.
@@ -65,7 +67,7 @@ For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-reques
 - `421 misdirected_request`: Host header is not an accepted loopback host.
 - `500 internal_error`: unexpected server error; response does not disclose internal details.
 
-Clients should branch on HTTP status and stable `error.code`, not human-readable error messages. Do not automatically retry a mutation after an ambiguous network failure unless the operation is known to be idempotent or the client has reconciled the Task state first.
+Clients should branch on HTTP status and stable `error.code`, not human-readable error messages. Task creation can be retried safely only when the original idempotency key and identical request fields are reused. Do not blindly retry claim, start, heartbeat, progress, complete, fail, or cancellation mutations after an ambiguous network failure; reconcile the authoritative Task/Lease state first.
 
 ## Lease loss and recovery
 

@@ -67,6 +67,8 @@ With the server running and RAYA_CC_OPERATOR_TOKEN set:
     npm run cli -- health
     npm run cli -- participant register --name local-worker --scope tasks:claim
     npm run cli -- task create --type example.job
+
+For API clients, supply a stable `idempotencyKey` when creating a Task. If the response is lost, resend the same type, payload, priority, and key: the API returns the existing Task with HTTP 200 and `idempotentReplay: true`. A key reused with different task input is rejected with `409 conflict`.
     npm run cli -- task get TASK_ID
     npm run cli -- task cancel TASK_ID
     npm run cli -- events --limit 25

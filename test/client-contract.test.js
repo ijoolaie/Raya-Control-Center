@@ -27,6 +27,25 @@ async function createHarness(run) {
   }
 }
 
+test('HTTP task creation safely replays identical idempotency keys after an ambiguous response', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const body = JSON.stringify({ type: 'contract.idempotent', payload: { operation: 'safe-create' }, priority: 2, idempotencyKey: 'http-create-replay-1' });
+    const first = await request('/tasks', { method: 'POST', headers: operator, body });
+    assert.equal(first.status, 201);
+    assert.equal(first.body.idempotentReplay, false);
+    const replay = await request('/tasks', { method: 'POST', headers: operator, body });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.idempotentReplay, true);
+    assert.equal(replay.body.task.id, first.body.task.id);
+    const conflict = await request('/tasks', {
+      method: 'POST', headers: operator,
+      body: JSON.stringify({ type: 'contract.idempotent', payload: { operation: 'different' }, priority: 2, idempotencyKey: 'http-create-replay-1' })
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error.code, 'conflict');
+  });
+});
+
 test('independent HTTP client completes a task using the documented participant and lease contract', async () => {
   await createHarness(async ({ request, operator }) => {
     const registration = await request('/participants/register', {

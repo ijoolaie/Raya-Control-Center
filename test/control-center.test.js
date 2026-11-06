@@ -50,6 +50,24 @@ test('participant credentials are returned once and authentication is revocable'
   db.close();
 });
 
+test('task creation is idempotent for an identical key and rejects key reuse with different input', () => {
+  const { db, center } = fixture();
+  const request = { type: 'demo.idempotent', payload: { value: 1, label: 'same' }, priority: 4, idempotencyKey: 'create-once-1' };
+  const first = center.createTask(request);
+  assert.equal(first.idempotentReplay, false);
+  const eventCount = center.listEvents({ entityType: 'task', entityId: first.id }).length;
+  const replay = center.createTask({ ...request, payload: { label: 'same', value: 1 } });
+  assert.equal(replay.id, first.id);
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(center.listTasks({ type: 'demo.idempotent' }).length, 1);
+  assert.equal(center.listEvents({ entityType: 'task', entityId: first.id }).length, eventCount);
+  assert.throws(() => center.createTask({ ...request, payload: { value: 2 } }),
+    error => error.code === 'conflict');
+  assert.throws(() => center.createTask({ ...request, priority: 5 }),
+    error => error.code === 'conflict');
+  db.close();
+});
+
 test('claim is exclusive and task lifecycle is lease-bound', () => {
   const { db, center, participant, token } = fixture();
   const task = center.createTask({ type: 'demo.work', payload: { safe: true } });
