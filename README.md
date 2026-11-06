@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 1 Ã¢â‚¬â€ durable core foundation.
+**Status:** Phase 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â durable core foundation.
 
 ## Ownership and scope
 

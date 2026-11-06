@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter, ControlCenterError } from '../src/control-center.js';
 
@@ -81,6 +82,40 @@ test('expired leases cannot mutate task state', () => {
 });
 
 
+
+
+test('two independent SQLite connections cannot claim the same task', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-race-'));
+  const filename = join(dir, 'race.sqlite');
+  let db = openDatabase(filename);
+  const center = new ControlCenter(db);
+  const registered = center.registerParticipant({ displayName: 'race-worker', scopes: ['tasks:claim'] });
+  const task = center.createTask({ type: 'demo.concurrent' });
+  db.close();
+
+  const runWorker = () => new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../test-support/claim-worker.js', import.meta.url), {
+      workerData: { filename, participantId: registered.participant.id, token: registered.token }
+    });
+    worker.once('message', resolve);
+    worker.once('error', reject);
+    worker.once('exit', code => { if (code !== 0) reject(new Error('claim worker exited ' + code)); });
+  });
+
+  try {
+    const claims = await Promise.all([runWorker(), runWorker()]);
+    assert.equal(claims.filter(Boolean).length, 1);
+    assert.equal(claims.filter(Boolean)[0].taskId, task.id);
+    db = openDatabase(filename);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM leases WHERE task_id = ? AND status = 'active'").get(task.id).count, 1);
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.close();
+    db = null;
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 
 test('participant and task writes roll back when their audit event cannot be recorded', () => {
   const db = openDatabase(':memory:');
