@@ -18,6 +18,43 @@ function decodePathPart(value) {
   catch { throw new ControlCenterError('validation_error', 'Malformed URL path encoding'); }
 }
 
+function validateQuery(method, url) {
+  const path = url.pathname;
+  let allowed = null;
+  if (method === 'GET' && path === BASE + '/health') allowed = [];
+  else if (method === 'GET' && path === BASE + '/participants') allowed = ['status', 'kind', 'limit', 'offset'];
+  else if (method === 'GET' && path === BASE + '/tasks') allowed = ['status', 'type', 'assignedParticipantId', 'limit', 'offset'];
+  else if (method === 'GET' && path === BASE + '/events') allowed = ['entityType', 'entityId', 'limit'];
+  else if (method === 'GET' && new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) allowed = [];
+  else if (method === 'POST' && new RegExp('^' + BASE + '/participants/[^/]+/revoke$').test(path)) allowed = [];
+  else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) allowed = [];
+  else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) allowed = [];
+  else if (method === 'POST' && (
+    path === BASE + '/participants/register' ||
+    path === BASE + '/maintenance/reconcile-expired-leases' ||
+    path === BASE + '/tasks' ||
+    path === BASE + '/tasks/claim' ||
+    new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').test(path)
+  )) allowed = [];
+
+  if (allowed === null) return;
+  const seen = new Set();
+  for (const [name, value] of url.searchParams) {
+    if (!allowed.includes(name)) {
+      throw new ControlCenterError('validation_error', 'Unsupported query parameter: ' + name);
+    }
+    if (seen.has(name)) {
+      throw new ControlCenterError('validation_error', 'Duplicate query parameter: ' + name);
+    }
+    if (value.length === 0) {
+      throw new ControlCenterError('validation_error', 'Query parameter must not be empty: ' + name);
+    }
+    if ((name === 'limit' || name === 'offset') && !/^(0|[1-9][0-9]*)$/.test(value)) {
+      throw new ControlCenterError('validation_error', name + ' must be a non-negative decimal integer');
+    }
+    seen.add(name);
+  }
+}
 function bearer(req) {
   const value = req.headers.authorization;
   const match = typeof value === 'string' && /^Bearer ([A-Za-z0-9_-]{32,})$/.exec(value);
@@ -84,6 +121,7 @@ export function createControlServer({ db, operatorToken }) {
       }
 
       const url = new URL(req.url || '/', 'http://127.0.0.1');
+      validateQuery(req.method || 'GET', url);
       if (url.pathname === BASE + '/health' && req.method === 'GET') {
         db.prepare('SELECT 1 AS ok').get();
         send(res, 200, { status: 'ok', api: 'control/v1' });

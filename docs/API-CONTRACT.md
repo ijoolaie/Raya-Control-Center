@@ -34,7 +34,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | POST | `/tasks/{id}/complete` | Participant + lease header | Complete task |
 | POST | `/tasks/{id}/fail` | Participant + lease header | Fail task |
 | POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
-| GET | /tasks/{id}/lease-status | Participant + lease header | Read own active task status and cancellation signal |
+| GET | `/tasks/{id}/lease-status` | Participant + lease header | Read own active task status and cancellation signal |
 | POST | `/tasks/{id}/cancel-request` | Operator | Request cooperative cancellation |
 | GET | `/events` | Operator | Read bounded event history |
 | POST | `/maintenance/reconcile-expired-leases` | Operator | Reconcile expired leases |
@@ -54,6 +54,17 @@ All non-empty request bodies must be JSON objects and are limited to 16 KiB.
 
 Worker routes use the authenticated participant identity and `X-Lease-Token`; clients must not send participant IDs in request bodies. A successful empty claim returns `{ "claim": null }`.
 
+## Query parameters
+
+Query parameters are route-specific and strict:
+
+- `GET /participants`: `status`, `kind`, `limit`, `offset`.
+- `GET /tasks`: `status`, `type`, `assignedParticipantId`, `limit`, `offset`.
+- `GET /events`: `entityType`, `entityId`, `limit`.
+- Other implemented routes do not accept query parameters.
+- Unknown or repeated parameter names, empty values, and non-decimal `limit`/`offset` values return `400 validation_error`.
+- `limit` and `offset` must use non-negative decimal integer notation; endpoint-specific range limits still apply.
+
 ## Common rules
 
 - UTC timestamps.
@@ -64,7 +75,7 @@ Worker routes use the authenticated participant identity and `X-Lease-Token`; cl
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
 - Repeating participant revocation returns the current revoked Participant without another state change or audit event; an unknown participant ID remains `404 not_found`.
-- A Participant may poll GET /tasks/{id}/lease-status with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
+- A Participant may poll `GET /tasks/{id}/lease-status` with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
 - API errors never expose stack traces or database details.
 - Request bodies and authorization headers are not logged.
 - Clients should use HTTP status and `error.code`, not parse human-readable error messages.

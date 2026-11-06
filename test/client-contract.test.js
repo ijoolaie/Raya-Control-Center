@@ -281,3 +281,23 @@ test('server startup reconciles expired leases before accepting requests', { tim
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('HTTP query parsing rejects unknown, duplicate, empty, and non-canonical parameters', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const cases = [
+      ['/tasks?unexpected=1', 400],
+      ['/tasks?status=queued&status=running', 400],
+      ['/tasks?limit=', 400],
+      ['/tasks?limit=1e2', 400],
+      ['/health?debug=true', 400],
+      ['/events?entityId=', 400],
+      ['/tasks?limit=1&offset=0', 200]
+    ];
+    for (const [path, expectedStatus] of cases) {
+      const response = await request(path, { headers: operator });
+      assert.equal(response.status, expectedStatus, path);
+      if (expectedStatus === 400) {
+        assert.equal(response.body.error.code, 'validation_error', path);
+      }
+    }
+  });
+});
