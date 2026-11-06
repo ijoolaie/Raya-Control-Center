@@ -63,6 +63,7 @@ Query parameters are route-specific and strict:
 - `GET /events`: `entityType`, `entityId`, `limit`.
 - Other implemented routes do not accept query parameters.
 - Unknown or repeated parameter names, empty values, and non-decimal `limit`/`offset` values return `400 validation_error`.
+- Malformed percent-encoding in a recognized path parameter returns `400 validation_error`; validly encoded but unknown resource IDs return `404 not_found`.
 - `limit` and `offset` must use non-negative decimal integer notation; endpoint-specific range limits still apply.
 
 ## Common rules

@@ -290,6 +290,8 @@ test('HTTP query parsing rejects unknown, duplicate, empty, and non-canonical pa
       ['/tasks?limit=1e2', 400],
       ['/health?debug=true', 400],
       ['/events?entityId=', 400],
+      ['/tasks/%ZZ', 400],
+      ['/tasks/%E0%A4%A', 400],
       ['/tasks?limit=1&offset=0', 200]
     ];
     for (const [path, expectedStatus] of cases) {
