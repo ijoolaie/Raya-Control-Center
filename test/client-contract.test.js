@@ -30,6 +30,7 @@ async function createHarness(run) {
   try {
     await run({ db, request, operator, operatorToken, server });
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     db.close();
   }
@@ -454,5 +455,59 @@ test('Node HTTP parser rejects conflicting Content-Length and Transfer-Encoding 
     });
     assert.match(raw, /^HTTP\/1\.1 400/);
     assert.equal(raw.includes('"task"'), false);
+  });
+});
+
+test('HTTP parser enforces the configured header-size limit with 431', async () => {
+  await createHarness(async ({ server }) => {
+    const raw = await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => socket.write(
+        'GET /control/v1/health HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\n' +
+        'X-Oversized: ' + 'x'.repeat(9 * 1024) + '\r\n\r\n'
+      ));
+      socket.on('data', chunk => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+    assert.match(raw, /^HTTP\/1\.1 431/);
+  });
+});
+
+test('client disconnect during an incomplete request body does not take down the server', async () => {
+  await createHarness(async ({ server }) => {
+    await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      socket.once('connect', () => {
+        socket.write(
+          'POST /control/v1/tasks HTTP/1.1\r\n' +
+          'Host: 127.0.0.1\r\n' +
+          'Content-Type: application/json\r\n' +
+          'Content-Length: 100\r\n\r\n' +
+          '{"type":"incomplete'
+        );
+        socket.destroy();
+        resolve();
+      });
+      socket.once('error', error => {
+        if (error.code !== 'ECONNRESET') reject(error);
+      });
+    });
+    const response = await fetch('http://127.0.0.1:' + server.address().port + '/control/v1/health');
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'ok', api: 'control/v1' });
+  });
+});
+
+test('HTTP server applies explicit header, request, keep-alive, and socket request limits', async () => {
+  await createHarness(async ({ server }) => {
+    assert.equal(server.headersTimeout, 10_000);
+    assert.equal(server.requestTimeout, 30_000);
+    assert.equal(server.connectionsCheckingInterval, 1_000);
+    assert.equal(server.keepAliveTimeout, 5_000);
+    assert.equal(server.maxRequestsPerSocket, 100);
   });
 });

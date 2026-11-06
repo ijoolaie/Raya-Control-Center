@@ -115,8 +115,19 @@ Query parameters are route-specific and strict:
 | 409 | `conflict`, `invalid_transition`, `lease_mismatch` | State or lease conflict |
 | 413 | `payload_too_large` | Request body exceeds 16 KiB |
 | 421 | `misdirected_request` | Host is not loopback |
+| 431 | HTTP parser | Request header block exceeds 8 KiB; parser-level response before route handling |
 | 500 | `internal_error` | Unexpected internal failure; generic message only |
 
 Error codes used: `authentication_required`, `insufficient_scope`, `not_found`, `method_not_allowed`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
 
 Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in task payloads or event data.
+
+## HTTP connection and resource limits
+
+- The HTTP parser accepts request headers up to 8 KiB; larger header blocks are rejected with HTTP 431 before route handling.
+- Header receipt is bounded by headersTimeout (10 seconds), checked at a 1-second interval.
+- Complete request receipt is bounded by requestTimeout (30 seconds), independently of application body parsing.
+- Keep-alive connections use a 5-second timeout and are limited to 100 requests per socket.
+- Request bodies remain limited to 16 KiB and must be fully received before JSON parsing or state mutation.
+- If a client aborts a request or disconnects before a response completes, the handler does not attempt to write an error response to the closed connection. A disconnected client must treat the operation outcome as unknown and use the documented idempotency/reconciliation mechanisms before retrying non-idempotent work.
+- Node HTTP parser owns malformed framing and header-timeout responses; these failures occur before application route handling and may use Node parser-level response bodies rather than the API error envelope.

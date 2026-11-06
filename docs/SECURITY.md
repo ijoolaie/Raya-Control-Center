@@ -11,7 +11,7 @@ The initial deployment assumes a single trusted machine but does not assume ever
 5. **Operator separation:** operator token is separate from participant tokens; stored as a hash in the local settings table and shown only at bootstrap/rotation.
 6. **Lease enforcement:** every worker mutation checks participant identity, task ownership, active lease status, expiry, and lease token.
 7. **Revocation safety:** revoking a participant revokes its active leases and moves affected nonterminal tasks to blocked; uncertain work is not retried automatically.
-8. **Input validation:** strict JSON object validation, bounded request bodies (16 KiB), bounded task payloads, and parameterized SQL.
+8. **Input and connection limits:** strict JSON object validation, an 8 KiB header limit, 10-second header receipt timeout (1-second check interval), 30-second request receipt timeout, 16 KiB body limit, bounded task payloads, and parameterized SQL.
 9. **Audit:** append-only events for claims, transitions, cancellation, revocation, and reconciliation.
 10. **Redaction:** no full prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in logs/events.
 11. **Safe errors:** do not reveal token verifiers, stack traces, SQL details, or internal filesystem paths to clients.
@@ -38,7 +38,9 @@ A cancellation request is a coordination signal, not proof that external executi
 - a valid lease holder can perform only its own task lifecycle operations;
 - revoking a participant blocks its active tasks;
 - non-loopback Host headers are rejected;
+- oversized headers are rejected by the HTTP parser;
 - oversized, malformed, non-object, and wrong-content-type request bodies are rejected;
+- client disconnects during incomplete requests do not cause writes to destroyed responses or crash the server;
 - validation errors do not echo credentials or request-body contents;
 - API errors do not expose stack traces or internal details;
 - event history is append-only.

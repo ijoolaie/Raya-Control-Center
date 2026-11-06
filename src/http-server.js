@@ -124,7 +124,13 @@ export function createControlServer({ db, operatorToken }) {
   const center = new ControlCenter(db);
   const operatorHash = hash(operatorToken).toString('hex');
 
-  return createServer(async (req, res) => {
+  const server = createServer({
+    maxHeaderSize: 8 * 1024,
+    headersTimeout: 10_000,
+    requestTimeout: 30_000,
+    connectionsCheckingInterval: 1_000,
+    keepAliveTimeout: 5_000
+  }, async (req, res) => {
     try {
       let hostName;
       try { hostName = new URL('http://' + String(req.headers.host || '')).hostname.toLowerCase(); }
@@ -285,8 +291,11 @@ export function createControlServer({ db, operatorToken }) {
       const status = error instanceof ControlCenterError ? statusFor(error) : 500;
       const code = error instanceof ControlCenterError ? error.code : 'internal_error';
       const message = status === 500 ? 'Internal server error' : error.message;
-      if (!res.headersSent) send(res, status, { error: { code, message } });
+      if ((req.aborted && status !== 413) || res.destroyed || res.writableEnded) return;
+      if (!res.headersSent) send(res, status, { error: { code, message } }, status === 413 ? { connection: 'close' } : {});
       else res.destroy();
     }
   });
+  server.maxRequestsPerSocket = 100;
+  return server;
 }

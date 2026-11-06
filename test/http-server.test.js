@@ -121,6 +121,7 @@ test('HTTP API separates operator and participant credentials and enforces lease
     assert.equal(reconcile.status, 200);
     assert.deepEqual((await reconcile.json()).blockedTaskIds, []);
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     db.close();
   }
@@ -178,6 +179,7 @@ test('CLI can register participants and create/read tasks through the local API'
     assert.equal(listedTasks.code, 0, listedTasks.stderr);
     assert.equal(JSON.parse(listedTasks.stdout).tasks[0].type, 'cli.integration');
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     db.close();
   }
@@ -196,7 +198,9 @@ test('HTTP API rejects request bodies larger than 16 KiB', async () => {
       body: JSON.stringify({ type: 'oversize.test', payload: 'x'.repeat(17_000) })
     });
     assert.equal(response.status, 413);
+    assert.equal(response.headers.get('connection'), 'close');
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(error => error ? reject(error) : resolve()));
     db.close();
   }
@@ -229,6 +233,7 @@ test('operator list endpoints filter and paginate participants and tasks', async
     const unauthenticated = await fetch(base + '/tasks');
     assert.equal(unauthenticated.status, 401);
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     db.close();
   }
