@@ -23,7 +23,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | POST | `/participants/register` | Operator | Register participant; returns token once |
 | GET | `/participants` | Operator | List participants with bounded filters and pagination |
 | GET | `/participants/{id}` | Operator | Read participant metadata |
-| POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks |
+| POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks; safe to repeat |
 | POST | `/tasks` | Operator | Create task |
 | GET | `/tasks` | Operator | List tasks with bounded filters and pagination |
 | GET | `/tasks/{id}` | Operator | Read task |
@@ -63,6 +63,7 @@ Worker routes use the authenticated participant identity and `X-Lease-Token`; cl
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
+- Repeating participant revocation returns the current revoked Participant without another state change or audit event; an unknown participant ID remains `404 not_found`.
 - A Participant may poll GET /tasks/{id}/lease-status with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
 - API errors never expose stack traces or database details.
 - Request bodies and authorization headers are not logged.

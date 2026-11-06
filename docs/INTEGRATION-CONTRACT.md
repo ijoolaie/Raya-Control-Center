@@ -93,3 +93,7 @@ The repository test `test/client-contract.test.js` starts a real loopback HTTP s
 ### Cancellation request retry semantics
 
 The operator cancellation endpoint is idempotent. Repeating `POST /tasks/{id}/cancel-request` while the task is already `cancellation_requested` or `cancelled` returns the current Task without changing timestamps or appending another audit event. Requests against tasks that completed successfully or failed remain invalid transitions. This makes an operator retry safe after an ambiguous HTTP response. Participant cancellation acknowledgement remains lease-bound; after an ambiguous acknowledgement response, read the Task state rather than blindly repeating the acknowledgement.
+
+### Participant revocation retry semantics
+
+The operator endpoint `POST /participants/{id}/revoke` is idempotent. Repeating the request after the Participant is already revoked returns its current metadata with HTTP 200 and does not append another `participant.revoked` event. Active leases and affected Tasks are changed only by the first successful revocation. An unknown Participant ID still returns `404 not_found`. This permits safe retry after an ambiguous HTTP response.

@@ -99,9 +99,11 @@ export class ControlCenter {
 
   revokeParticipant(id) {
     return transaction(this.db, () => {
-      const result = this.db.prepare(`UPDATE participants SET status = 'revoked', updated_at = ?
+      const existing = this.db.prepare('SELECT status FROM participants WHERE id = ?').get(id);
+      if (!existing) throw new ControlCenterError('not_found', 'Participant not found');
+      if (existing.status === 'revoked') return this.getParticipant(id);
+      this.db.prepare(`UPDATE participants SET status = 'revoked', updated_at = ?
         WHERE id = ? AND status != 'revoked'`).run(now(), id);
-      if (!result.changes) throw new ControlCenterError('not_found', 'Participant not found or already revoked');
       const affectedTasks = this.db.prepare(`SELECT t.id, t.status, l.id AS lease_id
         FROM tasks t JOIN leases l ON l.id = t.lease_id
         WHERE l.participant_id = ? AND l.status = 'active'

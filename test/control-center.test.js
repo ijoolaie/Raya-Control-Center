@@ -256,6 +256,11 @@ test('revoking a participant also revokes its active lease', () => {
   const task = center.createTask({ type: 'demo.revoke' });
   const claim = center.claimTask({ participantId: participant.id, token });
   center.revokeParticipant(participant.id);
+  const participantEventCount = center.listEvents({ entityType: 'participant', entityId: participant.id }).filter(event => event.eventType === 'participant.revoked').length;
+  assert.equal(participantEventCount, 1);
+  assert.equal(center.revokeParticipant(participant.id).status, 'revoked');
+  assert.equal(center.listEvents({ entityType: 'participant', entityId: participant.id }).filter(event => event.eventType === 'participant.revoked').length, 1);
+  assert.throws(() => center.revokeParticipant('missing-participant'), error => error.code === 'not_found');
   assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'revoked');
   assert.equal(center.getTask(task.id).status, 'blocked');
   assert.equal(center.getTask(task.id).leaseId, null);

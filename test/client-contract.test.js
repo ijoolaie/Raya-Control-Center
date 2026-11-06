@@ -194,6 +194,13 @@ test('revoking a participant invalidates its token and blocks its leased task', 
     const revoked = await request('/participants/' + participantId + '/revoke', { method: 'POST', headers: operator, body: '{}' });
     assert.equal(revoked.status, 200);
     assert.equal(revoked.body.participant.status, 'revoked');
+    const repeatedRevocation = await request('/participants/' + participantId + '/revoke', {
+      method: 'POST', headers: operator, body: '{}'
+    });
+    assert.equal(repeatedRevocation.status, 200);
+    assert.equal(repeatedRevocation.body.participant.status, 'revoked');
+    const participantEvents = await request('/events?entityType=participant&entityId=' + participantId, { headers: operator });
+    assert.equal(participantEvents.body.events.filter(event => event.eventType === 'participant.revoked').length, 1);
 
     const staleParticipant = await request('/tasks/claim', { method: 'POST', token: participantToken, body: '{}' });
     assert.equal(staleParticipant.status, 401);
