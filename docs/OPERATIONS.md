@@ -73,3 +73,24 @@ With the server running and RAYA_CC_OPERATOR_TOKEN set:
     npm run cli -- reconcile
 
 The participant registration command displays its credential once. Treat stdout as secret-bearing output and save the token securely.
+
+## SQLite backup and restore
+
+Backups use SQLite VACUUM INTO to create a consistent snapshot, including committed data in the WAL. The backup command can run while the Control Center is active:
+
+    npm run db:backup
+    npm run db:backup -- D:/Backups/raya-control-center.sqlite
+
+The default destination is a timestamped file under .backups. Existing destination files are never overwritten. Set RAYA_CC_DATABASE if the live database is not at the default path.
+
+Restore is deliberately offline:
+
+1. Stop the Control Center process and ensure no other process has the database open.
+2. Confirm the target database has no -wal or -shm sidecars.
+3. Run:
+
+       npm run db:restore -- D:/Backups/raya-control-center.sqlite
+
+The restore validates SQLite integrity, foreign-key consistency, and the schema version before replacing the target. The previous database file is retained beside it with a .pre-restore-<id> suffix for rollback. The command refuses to proceed when WAL sidecars exist; it does not try to delete or merge live WAL state. Start the server only after restore has completed successfully.
+
+Backups contain credential verifier hashes, participant metadata, task payloads, and event history. Store them as sensitive application data and restrict access accordingly.
