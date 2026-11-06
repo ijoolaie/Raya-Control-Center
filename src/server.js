@@ -45,10 +45,14 @@ function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(maintenance);
+  const forceClose = setTimeout(() => server.closeAllConnections(), 10_000);
+  forceClose.unref();
   server.close(() => {
+    clearTimeout(forceClose);
     db.close();
     process.exit(0);
   });
+  server.closeIdleConnections();
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

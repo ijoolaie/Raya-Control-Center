@@ -478,7 +478,7 @@ test('HTTP parser enforces the configured header-size limit with 431', async () 
 });
 
 test('client disconnect during an incomplete request body does not take down the server', async () => {
-  await createHarness(async ({ server }) => {
+  await createHarness(async ({ db, server }) => {
     await new Promise((resolve, reject) => {
       const socket = createConnection(server.address().port, '127.0.0.1');
       socket.once('connect', () => {
@@ -499,6 +499,7 @@ test('client disconnect during an incomplete request body does not take down the
     const response = await fetch('http://127.0.0.1:' + server.address().port + '/control/v1/health');
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: 'ok', api: 'control/v1' });
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 0);
   });
 });
 
@@ -509,5 +510,33 @@ test('HTTP server applies explicit header, request, keep-alive, and socket reque
     assert.equal(server.connectionsCheckingInterval, 1_000);
     assert.equal(server.keepAliveTimeout, 5_000);
     assert.equal(server.maxRequestsPerSocket, 100);
+  });
+});
+
+test('client disconnect during a response does not take down the server', async () => {
+  await createHarness(async ({ db, operatorToken, server }) => {
+    const center = new ControlCenter(db);
+    for (let index = 0; index < 100; index += 1) {
+      center.createTask({ type: 'disconnect.response', payload: { index, data: 'x'.repeat(120) } });
+    }
+    await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      socket.once('connect', () => socket.write(
+        'GET /control/v1/events HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\n' +
+        'Authorization: Bearer ' + operatorToken + '\r\n' +
+        'Connection: close\r\n\r\n'
+      ));
+      socket.once('data', () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.once('error', error => {
+        if (error.code === 'ECONNRESET') resolve();
+        else reject(error);
+      });
+    });
+    const health = await fetch('http://127.0.0.1:' + server.address().port + '/control/v1/health');
+    assert.equal(health.status, 200);
   });
 });

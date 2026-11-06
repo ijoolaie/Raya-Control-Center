@@ -16,6 +16,8 @@ The initial deployment assumes a single trusted machine but does not assume ever
 10. **Redaction:** no full prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in logs/events.
 11. **Safe errors:** do not reveal token verifiers, stack traces, SQL details, or internal filesystem paths to clients.
 12. **Browser isolation:** no CORS is enabled; Host-header validation rejects DNS-rebinding hostnames.
+13. **Graceful shutdown:** stop accepting requests, close idle connections, bound active-request drain to 10 seconds, and close SQLite only after HTTP connections are closed.
+
 
 ## Operator and participant separation
 Operator actions are distinct from worker actions. A worker cannot register privileged participants, revoke unrelated identities, create tasks, cancel arbitrary tasks, or inspect event history. Worker lifecycle operations require both a participant bearer token and the separate active lease token. The claim operation additionally requires the `tasks:claim` scope.

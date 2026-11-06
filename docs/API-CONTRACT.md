@@ -131,3 +131,7 @@ Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments
 - Request bodies remain limited to 16 KiB and must be fully received before JSON parsing or state mutation.
 - If a client aborts a request or disconnects before a response completes, the handler does not attempt to write an error response to the closed connection. A disconnected client must treat the operation outcome as unknown and use the documented idempotency/reconciliation mechanisms before retrying non-idempotent work.
 - Node HTTP parser owns malformed framing and header-timeout responses; these failures occur before application route handling and may use Node parser-level response bodies rather than the API error envelope.
+## Process shutdown
+
+- SIGINT and SIGTERM stop new connections, close idle keep-alive connections, and allow active requests up to 10 seconds to finish.
+- Remaining HTTP connections are force-closed after the grace period; SQLite is closed only after the HTTP server finishes closing.
