@@ -18,7 +18,10 @@ The initial deployment assumes a single trusted machine but does not assume ever
 12. **Browser isolation:** no CORS is enabled; Host-header validation rejects DNS-rebinding hostnames.
 
 ## Operator and participant separation
-Operator actions are distinct from worker actions. A worker cannot register privileged participants, revoke unrelated identities, create tasks, cancel arbitrary tasks, or inspect event history. Worker lifecycle operations require both a participant bearer token and the separate active lease token.
+Operator actions are distinct from worker actions. A worker cannot register privileged participants, revoke unrelated identities, create tasks, cancel arbitrary tasks, or inspect event history. Worker lifecycle operations require both a participant bearer token and the separate active lease token. The claim operation additionally requires the `tasks:claim` scope.
+
+## Logging policy
+The HTTP request handler currently does not emit request logs. Do not add raw request logging. If structured operational logging is introduced later, it must use an explicit allowlist of fields and must never serialize Authorization, X-Lease-Token, request bodies, task payloads/results, or arbitrary error objects. Log event codes and correlation identifiers only where those values are already safe and bounded.
 
 ## Remote access
 Remote ingress is disabled in MVP. Do not expose the local API through a tunnel, reverse proxy, or port forward. Any future remote mode requires a separate threat-model review, authenticated transport, TLS, credential rotation, replay protection, origin policy, and explicit operator enablement.
@@ -28,10 +31,14 @@ A cancellation request is a coordination signal, not proof that external executi
 
 ## Security acceptance tests
 - revoked participants cannot authenticate or act;
-- insufficient scopes are rejected;
-- stale/foreign lease tokens are rejected;
+- operator credentials cannot access participant-only routes;
+- participant credentials cannot access operator-only routes;
+- participants without `tasks:claim` are rejected;
+- stale, missing, or foreign lease tokens are rejected;
+- a valid lease holder can perform only its own task lifecycle operations;
 - revoking a participant blocks its active tasks;
 - non-loopback Host headers are rejected;
-- oversized and malformed request bodies are rejected;
-- secrets do not appear in logs or event payloads;
-- unauthorized state transitions are rejected.
+- oversized, malformed, non-object, and wrong-content-type request bodies are rejected;
+- validation errors do not echo credentials or request-body contents;
+- API errors do not expose stack traces or internal details;
+- event history is append-only.
