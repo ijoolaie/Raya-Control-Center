@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "check": "node --check src/db.js && node --check src/control-center.js && node --check src/operator-auth.js && node --check src/http-server.js && node --check src/server.js && node --check src/rotate-operator-token.js",
-    "start": "node src/server.js"
+    "check": "node --check src/db.js && node --check src/control-center.js && node --check src/operator-auth.js && node --check src/http-server.js && node --check src/server.js && node --check src/rotate-operator-token.js && node --check src/cli.js",
+    "start": "node src/server.js",
+    "cli": "node src/cli.js"
   }
 }

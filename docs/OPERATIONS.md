@@ -36,9 +36,9 @@ The rotation command changes the database hash immediately. The old server proce
 
 ## Configuration
 
-- RAYA_CC_PORT ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â TCP port, default 4317.
-- RAYA_CC_DATABASE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â SQLite file path, default .data/control-center.sqlite.
-- RAYA_CC_OPERATOR_TOKEN ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â operator token, minimum 32 characters.
+- RAYA_CC_PORT ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â TCP port, default 4317.
+- RAYA_CC_DATABASE ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â SQLite file path, default .data/control-center.sqlite.
+- RAYA_CC_OPERATOR_TOKEN ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â operator token, minimum 32 characters.
 
 The API is local-only. Do not expose it through a reverse proxy, tunnel, port forward, or wildcard bind. Remote ingress is explicitly outside the MVP.
 
@@ -59,3 +59,17 @@ Expected response:
     status api
     ------ ---
     ok     control/v1
+
+## CLI
+
+With the server running and RAYA_CC_OPERATOR_TOKEN set:
+
+    npm run cli -- health
+    npm run cli -- participant register --name local-worker --scope tasks:claim
+    npm run cli -- task create --type example.job
+    npm run cli -- task get TASK_ID
+    npm run cli -- task cancel TASK_ID
+    npm run cli -- events --limit 25
+    npm run cli -- reconcile
+
+The participant registration command displays its credential once. Treat stdout as secret-bearing output and save the token securely.

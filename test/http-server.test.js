@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
+import { spawn } from 'node:child_process';
 import { openDatabase } from '../src/db.js';
 import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
 import { createControlServer } from '../src/http-server.js';
@@ -116,6 +117,55 @@ test('HTTP API separates operator and participant credentials and enforces lease
     });
     assert.equal(reconcile.status, 200);
     assert.deepEqual((await reconcile.json()).blockedTaskIds, []);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
+
+test('CLI can register participants and create/read tasks through the local API', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'cli-operator-token-'.repeat(3);
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+
+  const runCli = args => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['src/cli.js', ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env, RAYA_CC_URL: base, RAYA_CC_OPERATOR_TOKEN: operatorToken }
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', code => resolve({ code, stdout, stderr }));
+  });
+
+  try {
+    const health = await runCli(['health']);
+    assert.equal(health.code, 0);
+    assert.match(health.stdout, /"status": "ok"/);
+
+    const registered = await runCli(['participant', 'register', '--name', 'cli-worker', '--scope', 'tasks:claim']);
+    assert.equal(registered.code, 0, registered.stderr);
+    const participant = JSON.parse(registered.stdout);
+    assert.equal(participant.participant.displayName, 'cli-worker');
+    assert.equal(typeof participant.token, 'string');
+
+    const created = await runCli(['task', 'create', '--type', 'cli.integration', '--payload', '{"source":"cli"}']);
+    assert.equal(created.code, 0, created.stderr);
+    const task = JSON.parse(created.stdout).task;
+
+    const fetched = await runCli(['task', 'get', task.id]);
+    assert.equal(fetched.code, 0, fetched.stderr);
+    assert.equal(JSON.parse(fetched.stdout).task.payload.source, 'cli');
+
+    const events = await runCli(['events', '--entity-type', 'task', '--limit', '10']);
+    assert.equal(events.code, 0, events.stderr);
+    assert.ok(JSON.parse(events.stdout).events.length >= 1);
   } finally {
     await new Promise(resolve => server.close(resolve));
     db.close();
