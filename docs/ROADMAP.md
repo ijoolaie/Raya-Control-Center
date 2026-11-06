@@ -46,6 +46,10 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [x] Task create/read/list/cancel and worker claim/lifecycle endpoints.
 - [x] Separate participant bearer and lease-token authentication.
 - [x] Strict 16 KiB request-size and JSON validation.
+- [x] HTTP header limit (8 KiB), bounded header/request receipt timeouts, bounded keep-alive, and per-socket request count.
+- [x] Raw TCP coverage for oversized headers, malformed framing/UTF-8, incomplete request-body disconnects, and response disconnects.
+- [x] Safe 413 connection closure and destroyed-response handling.
+- [x] Graceful SIGINT/SIGTERM shutdown: close idle connections, drain active requests for up to 10 seconds, then force-close before closing SQLite.
 - [x] Startup and periodic expired-lease reconciliation; operator-triggered reconciliation endpoint.
 - [x] CLI for participant registration/read/revocation, task create/read/cancel, events, health, and lease reconciliation.
 - [x] Consistent SQLite backup and validated offline restore with rollback file.
