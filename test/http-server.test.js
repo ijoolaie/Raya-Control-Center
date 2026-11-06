@@ -92,6 +92,9 @@ test('HTTP API separates operator and participant credentials and enforces lease
       method: 'POST', headers: leaseHeaders, body: '{}'
     });
     assert.equal(started.status, 200);
+    const progress = await fetch(base + '/tasks/' + created.task.id + '/progress', { method: 'POST', headers: leaseHeaders, body: JSON.stringify({ percent: 50, message: 'Halfway' }) });
+    assert.equal(progress.status, 200);
+    assert.equal((await progress.json()).task.progress.percent, 50);
 
     const completed = await fetch(base + '/tasks/' + created.task.id + '/complete', {
       method: 'POST', headers: leaseHeaders, body: JSON.stringify({ result: { ok: true } })

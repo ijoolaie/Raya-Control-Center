@@ -73,6 +73,10 @@ const migrations = [
   {
     version: 3,
     sql: "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);"
+  },
+  {
+    version: 4,
+    sql: "ALTER TABLE tasks ADD COLUMN progress_json TEXT;"
   }
 ];
 

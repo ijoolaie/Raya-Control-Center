@@ -152,7 +152,7 @@ export class ControlCenter {
     return { id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json),
       priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id,
       leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at,
-      startedAt: row.started_at, finishedAt: row.finished_at };
+      startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null };
   }
 
   listTasks({ status, type, assignedParticipantId, limit = 50, offset = 0 } = {}) {
@@ -167,7 +167,7 @@ export class ControlCenter {
     if (type) { sql += ' AND type = ?'; args.push(type); }
     if (assignedParticipantId) { sql += ' AND assigned_participant_id = ?'; args.push(assignedParticipantId); }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
-    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at }));
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null }));
   }
 
   claimTask({ participantId, token, leaseDurationMs = this.leaseDurationMs }) {
@@ -211,6 +211,30 @@ export class ControlCenter {
     });
   }
 
+  updateTaskProgress({ taskId, participantId, leaseToken, percent = null, message = '', details = {} }) {
+    if (percent !== null && (!Number.isInteger(percent) || percent < 0 || percent > 100))
+      throw new ControlCenterError('validation_error', 'Progress percent must be null or an integer from 0 to 100');
+    if (typeof message !== 'string' || message.length > 240)
+      throw new ControlCenterError('validation_error', 'Progress message must be at most 240 characters');
+    if (!details || typeof details !== 'object' || Array.isArray(details))
+      throw new ControlCenterError('validation_error', 'Progress details must be a JSON object');
+    let detailsText;
+    try { detailsText = json(details); }
+    catch { throw new ControlCenterError('validation_error', 'Progress details must be JSON serializable'); }
+    if (Buffer.byteLength(detailsText) > 2048)
+      throw new ControlCenterError('validation_error', 'Progress details exceed 2 KiB');
+    return this.#withLease({ taskId, participantId, leaseToken }, task => {
+      if (task.status !== 'running')
+        throw new ControlCenterError('invalid_transition', 'Progress can only be reported for running tasks');
+      const timestamp = now();
+      const progress = { percent, message, details, updatedAt: timestamp };
+      this.db.prepare('UPDATE tasks SET progress_json = ?, updated_at = ? WHERE id = ?')
+        .run(json(progress), timestamp, taskId);
+      appendEvent(this.db, { actorId: participantId, entityType: 'task', entityId: taskId,
+        eventType: 'task.progress_updated', data: { percent, message } });
+      return this.getTask(taskId);
+    });
+  }
   heartbeatLease({ taskId, participantId, leaseToken, leaseDurationMs = this.leaseDurationMs }) {
     if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs < 1000 || leaseDurationMs > 3_600_000)
       throw new ControlCenterError('validation_error', 'Lease duration must be 1s..1h');

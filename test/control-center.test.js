@@ -21,7 +21,7 @@ test('migrates a clean database and preserves task state across database reopen'
   const filename = join(dir, 'state.sqlite');
   try {
     let db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
     const task = new ControlCenter(db).createTask({ type: 'persist.check', payload: { durable: true } });
     db.close();
     db = openDatabase(filename);
@@ -32,11 +32,11 @@ test('migrates a clean database and preserves task state across database reopen'
 });
 
 
-test('schema migration upgrades an existing version 2 database to version 3', () => {
+test('schema migration upgrades an existing version 3 database to version 4', () => {
   const db = openDatabase(':memory:');
-  db.exec('DROP TABLE settings; PRAGMA user_version = 2');
+  db.exec('ALTER TABLE tasks DROP COLUMN progress_json; PRAGMA user_version = 3');
   migrate(db);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get().count, 1);
   db.close();
 });
@@ -191,6 +191,20 @@ test('heartbeat validates lease duration and extends an active lease', () => {
   db.close();
 });
 
+test('task progress is lease-bound, independent from heartbeat, and audited', () => {
+  const { db, center, participant, token } = fixture();
+  const task = center.createTask({ type: 'demo.progress' });
+  const claim = center.claimTask({ participantId: participant.id, token });
+  assert.throws(() => center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, percent: 10 }), error => error.code === 'invalid_transition');
+  center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token });
+  const updated = center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, percent: 35, message: 'Downloading', details: { completed: 7, total: 20 } });
+  assert.equal(updated.progress.percent, 35);
+  assert.equal(updated.progress.message, 'Downloading');
+  assert.equal(center.listEvents({ entityType: 'task', entityId: task.id })[0].eventType, 'task.progress_updated');
+  assert.throws(() => center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: 'invalid', percent: 40 }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, percent: 101 }), error => error.code === 'validation_error');
+  db.close();
+});
 test('event history rejects updates and deletes', () => {
   const { db, center } = fixture();
   const event = center.listEvents({ limit: 1 })[0];

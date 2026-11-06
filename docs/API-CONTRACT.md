@@ -26,6 +26,7 @@ Default bind: `127.0.0.1` only. Default port: `4317`.
 | POST | `/tasks/claim` | Participant + `tasks:claim` scope | Claim next eligible task |
 | POST | `/tasks/{id}/start` | Participant + lease header | Start claimed task |
 | POST | `/tasks/{id}/heartbeat` | Participant + lease header | Renew lease |
+| POST | `/tasks/{id}/progress` | Participant + lease header | Report task progress |
 | POST | `/tasks/{id}/complete` | Participant + lease header | Complete task |
 | POST | `/tasks/{id}/fail` | Participant + lease header | Fail task |
 | POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
@@ -40,6 +41,7 @@ All non-empty request bodies must be JSON objects and are limited to 16 KiB.
 - Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
 - Claim: `{ "leaseDurationMs": 30000 }`
 - Heartbeat: `{ "leaseDurationMs": 30000 }`
+- Progress: `{ "percent": 50, "message": "Halfway", "details": {} }` (percent may be null; message max 240 chars; details max 2 KiB).
 - Complete: `{ "result": { "ok": true } }`
 - Fail: `{ "reason": "bounded diagnostic" }`
 
@@ -52,7 +54,7 @@ Worker routes use the authenticated participant identity and `X-Lease-Token`; cl
 - No CORS and no wildcard network binding.
 - Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`.
 - Task state changes and their audit events commit atomically.
-- Heartbeat is not progress.
+- Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
 - API errors never expose stack traces or database details.
 - Request bodies and authorization headers are not logged.

@@ -182,7 +182,7 @@ export function createControlServer({ db, operatorToken }) {
         return;
       }
 
-      const taskAction = new RegExp('^' + BASE + '/tasks/([^/]+)/(start|heartbeat|complete|fail|cancel-ack|cancel-request)$').exec(url.pathname);
+      const taskAction = new RegExp('^' + BASE + '/tasks/([^/]+)/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').exec(url.pathname);
       if (taskAction && req.method === 'POST') {
         const taskId = decodePathPart(taskAction[1]);
         const action = taskAction[2];
@@ -197,6 +197,7 @@ export function createControlServer({ db, operatorToken }) {
         const lease = { taskId, participantId: participant.id, leaseToken };
         if (action === 'start') send(res, 200, { task: center.startTask(lease) });
         else if (action === 'heartbeat') send(res, 200, center.heartbeatLease({ ...lease, leaseDurationMs: body.leaseDurationMs }));
+        else if (action === 'progress') send(res, 200, { task: center.updateTaskProgress({ ...lease, percent: body.percent ?? null, message: body.message ?? '', details: body.details ?? {} }) });
         else if (action === 'complete') send(res, 200, { task: center.completeTask({ ...lease, result: body.result }) });
         else if (action === 'fail') send(res, 200, { task: center.failTask({ ...lease, reason: body.reason }) });
         else if (action === 'cancel-ack') send(res, 200, { task: center.acknowledgeCancellation(lease) });
