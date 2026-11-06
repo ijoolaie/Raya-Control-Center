@@ -40,7 +40,9 @@ Participant starts (Participant token + lease token)
 
 A task claim is atomic. The claim response contains the Task and the lease ID, token, and expiry. The lease token is required for every worker lifecycle mutation. A Participant can only mutate the Task associated with its own active, unexpired lease.
 
-Task creation accepts an optional globally unique `idempotencyKey`. Retrying the same create request with the same key, type, payload, and priority returns the original Task (HTTP 200, `idempotentReplay: true`) without creating another Task or audit event. Reusing that key with different task input returns `409 conflict`. Keep the key stable across retries; do not generate a new key after a timeout.
+Concurrent claim requests are serialized by the SQLite transaction boundary: one eligible Task can be granted to at most one Participant. Competing callers receive either their own claim or `{ "claim": null }`; they must not infer ownership from a timeout or from a locally cached queue view. The lease and `task.claimed` audit event are committed together.
+
+Task creation accepts an optional globally unique `idempotencyKey`. Retrying the same create request with the same key, type, payload, and priority returns the original Task (HTTP 200, `idempotentReplay: true`) without creating another Task or audit event. Reusing that key with different task input returns `409 conflict`. Keep the key stable across retries; do not generate a new key after a timeout. Concurrent identical requests using the same key also create exactly one Task and one `task.queued` event; one response is the initial `201`, and the replay response is `200`.
 
 ## Client sequence
 
@@ -53,7 +55,7 @@ Task creation accepts an optional globally unique `idempotencyKey`. Retrying the
 7. Finish with `POST /tasks/{id}/complete` or `POST /tasks/{id}/fail`.
 8. Discard the lease token after a terminal response. A released/expired/revoked lease cannot be reused.
 
-For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-request`. The Participant polls GET /tasks/{id}/lease-status with its Participant bearer and active X-Lease-Token. The response exposes only task ID, lifecycle status, cancellation flag, update time, and lease expiry (not the task payload). After observing cancellationRequested=true, the Participant stops its external work safely, then calls `POST /tasks/{id}/cancel-ack` with the still-active lease. The acknowledgement is not proof that arbitrary external side effects were rolled back.
+For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-request`. The Participant polls `GET /tasks/{id}/lease-status` with its Participant bearer and active `X-Lease-Token`. The response exposes only task ID, lifecycle status, cancellation flag, update time, and lease expiry (not the task payload). After observing `cancellationRequested=true`, the Participant stops its external work safely, then calls `POST /tasks/{id}/cancel-ack` with the still-active lease. The acknowledgement is not proof that arbitrary external side effects were rolled back.
 
 ## Response and error contract
 
@@ -88,7 +90,7 @@ Clients should branch on HTTP status and stable `error.code`, not human-readable
 
 ## Verification
 
-The repository test `test/client-contract.test.js` starts a real loopback HTTP server and behaves as an independent client. It verifies registration, task creation, claim, start, progress, heartbeat, completion, stale lease rejection, audit events, lease-bound cancellation-status polling, foreign-lease rejection, and cooperative cancellation/acknowledgement. It is an API contract test, not a remote deployment or penetration test.
+The repository test `test/client-contract.test.js` starts a real loopback HTTP server and behaves as an independent client. It verifies registration, task creation, claim, start, progress, heartbeat, completion, stale lease rejection, audit events, lease-bound cancellation-status polling, foreign-lease rejection, and cooperative cancellation/acknowledgement. It also issues concurrent claim requests from two Participants and concurrent identical task-creation requests, asserting exclusive claim ownership and one idempotent creation/audit event. It is an API contract test, not a remote deployment or penetration test.
 
 ### Cancellation request retry semantics
 

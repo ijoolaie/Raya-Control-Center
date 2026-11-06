@@ -301,3 +301,56 @@ test('HTTP query parsing rejects unknown, duplicate, empty, and non-canonical pa
     }
   });
 });
+
+test('concurrent HTTP claims grant a task to exactly one participant', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const registrations = await Promise.all([
+      request('/participants/register', { method: 'POST', headers: operator, body: JSON.stringify({ displayName: 'race-worker-a', scopes: ['tasks:claim'] }) }),
+      request('/participants/register', { method: 'POST', headers: operator, body: JSON.stringify({ displayName: 'race-worker-b', scopes: ['tasks:claim'] }) })
+    ]);
+    for (const response of registrations) assert.equal(response.status, 201);
+    const created = await request('/tasks', {
+      method: 'POST', headers: operator,
+      body: JSON.stringify({ type: 'contract.concurrent-claim', payload: { work: 'single-owner' } })
+    });
+    assert.equal(created.status, 201);
+    const taskId = created.body.task.id;
+
+    const claims = await Promise.all(registrations.map(registration =>
+      request('/tasks/claim', { method: 'POST', token: registration.body.token, body: '{}' })
+    ));
+    for (const response of claims) assert.equal(response.status, 200);
+    const winners = claims.filter(response => response.body.claim?.task?.id === taskId);
+    const empty = claims.filter(response => response.body.claim === null);
+    assert.equal(winners.length, 1);
+    assert.equal(empty.length, 1);
+
+    const task = await request('/tasks/' + taskId, { headers: operator });
+    assert.equal(task.status, 200);
+    assert.equal(task.body.task.status, 'claimed');
+    assert.equal(task.body.task.assignedParticipantId, winners[0].body.claim.task.assignedParticipantId);
+    const events = await request('/events?entityType=task&entityId=' + taskId, { headers: operator });
+    assert.equal(events.body.events.filter(event => event.eventType === 'task.claimed').length, 1);
+  });
+});
+
+test('concurrent HTTP task creation with one idempotency key creates one task and one audit event', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const body = JSON.stringify({
+      type: 'contract.concurrent-idempotency',
+      payload: { operation: 'one-creation' },
+      priority: 3,
+      idempotencyKey: 'concurrent-http-create-unique'
+    });
+    const responses = await Promise.all([
+      request('/tasks', { method: 'POST', headers: operator, body }),
+      request('/tasks', { method: 'POST', headers: operator, body })
+    ]);
+    assert.deepEqual(responses.map(response => response.status).sort(), [200, 201]);
+    assert.equal(responses[0].body.task.id, responses[1].body.task.id);
+    assert.equal(responses.filter(response => response.body.idempotentReplay === false).length, 1);
+    assert.equal(responses.filter(response => response.body.idempotentReplay === true).length, 1);
+    const events = await request('/events?entityType=task&entityId=' + responses[0].body.task.id, { headers: operator });
+    assert.equal(events.body.events.filter(event => event.eventType === 'task.queued').length, 1);
+  });
+});
