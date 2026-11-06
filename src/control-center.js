@@ -58,12 +58,13 @@ export class ControlCenter {
 
   authenticateParticipant(token) {
     if (typeof token !== 'string') return null;
-    const rows = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, token_hash
-      FROM participants WHERE status = 'active'`).all();
-    const row = rows.find(candidate => verifyToken(token, candidate.token_hash));
-    if (!row) return null;
+    const candidateHash = hash(token);
+    const row = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, token_hash
+      FROM participants WHERE status = 'active' AND token_hash = ?`).get(candidateHash);
+    if (!row || !verifyToken(token, row.token_hash)) return null;
     const timestamp = now();
-    this.db.prepare('UPDATE participants SET last_seen_at = ?, updated_at = ? WHERE id = ?').run(timestamp, timestamp, row.id);
+    this.db.prepare('UPDATE participants SET last_seen_at = ?, updated_at = ? WHERE id = ?')
+      .run(timestamp, timestamp, row.id);
     return { id: row.id, displayName: row.display_name, kind: row.kind, scopes: parse(row.scopes_json) };
   }
 
@@ -80,9 +81,22 @@ export class ControlCenter {
       const result = this.db.prepare(`UPDATE participants SET status = 'revoked', updated_at = ?
         WHERE id = ? AND status != 'revoked'`).run(now(), id);
       if (!result.changes) throw new ControlCenterError('not_found', 'Participant not found or already revoked');
+      const affectedTasks = this.db.prepare(`SELECT t.id, t.status, l.id AS lease_id
+        FROM tasks t JOIN leases l ON l.id = t.lease_id
+        WHERE l.participant_id = ? AND l.status = 'active'
+          AND t.status IN ('claimed', 'running', 'cancellation_requested')`).all(id);
+      const timestamp = now();
       this.db.prepare(`UPDATE leases SET status = 'revoked', released_at = ?
-        WHERE participant_id = ? AND status = 'active'`).run(now(), id);
-      appendEvent(this.db, { entityType: 'participant', entityId: id, eventType: 'participant.revoked' });
+        WHERE participant_id = ? AND status = 'active'`).run(timestamp, id);
+      for (const task of affectedTasks) {
+        this.db.prepare(`UPDATE tasks SET status = 'blocked', lease_id = NULL,
+          assigned_participant_id = NULL, updated_at = ? WHERE id = ?`).run(timestamp, task.id);
+        appendEvent(this.db, { entityType: 'task', entityId: task.id,
+          eventType: 'task.participant_revoked_blocked',
+          data: { previousStatus: task.status, leaseId: task.lease_id, participantId: id } });
+      }
+      appendEvent(this.db, { entityType: 'participant', entityId: id,
+        eventType: 'participant.revoked', data: { blockedTaskIds: affectedTasks.map(task => task.id) } });
       return this.getParticipant(id);
     });
   }
@@ -92,9 +106,15 @@ export class ControlCenter {
       throw new ControlCenterError('validation_error', 'Invalid task type');
     if (!Number.isSafeInteger(priority) || priority < -1000 || priority > 1000)
       throw new ControlCenterError('validation_error', 'Priority must be an integer from -1000 to 1000');
-    const payloadText = json(payload);
-    if (Buffer.byteLength(payloadText) > 16_384)
-      throw new ControlCenterError('validation_error', 'Task payload exceeds 16 KiB');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+      throw new ControlCenterError('validation_error', 'Task payload must be a JSON object');
+    if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 200))
+      throw new ControlCenterError('validation_error', 'idempotencyKey must contain 1..200 characters');
+    let payloadText;
+    try { payloadText = json(payload); }
+    catch { throw new ControlCenterError('validation_error', 'Task payload must be JSON serializable'); }
+    if (typeof payloadText !== 'string' || Buffer.byteLength(payloadText) > 16_384)
+      throw new ControlCenterError('validation_error', 'Task payload exceeds 16 KiB or is not serializable');
     const id = randomUUID();
     const timestamp = now();
     try {
@@ -176,11 +196,20 @@ export class ControlCenter {
   }
 
   completeTask({ taskId, participantId, leaseToken, result = {} }) {
+    if (!result || typeof result !== 'object' || Array.isArray(result))
+      throw new ControlCenterError('validation_error', 'Task result must be a JSON object');
+    let resultText;
+    try { resultText = json(result); }
+    catch { throw new ControlCenterError('validation_error', 'Task result must be JSON serializable'); }
+    if (typeof resultText !== 'string' || Buffer.byteLength(resultText) > 16_384)
+      throw new ControlCenterError('validation_error', 'Task result exceeds 16 KiB or is not serializable');
     return this.#finishTask({ taskId, participantId, leaseToken, status: 'succeeded', eventType: 'task.succeeded', data: result });
   }
 
   failTask({ taskId, participantId, leaseToken, reason = 'unspecified' }) {
-    return this.#finishTask({ taskId, participantId, leaseToken, status: 'failed', eventType: 'task.failed', data: { reason: String(reason).slice(0, 500) } });
+    if (typeof reason !== 'string' || reason.length > 500)
+      throw new ControlCenterError('validation_error', 'Failure reason must be a string of at most 500 characters');
+    return this.#finishTask({ taskId, participantId, leaseToken, status: 'failed', eventType: 'task.failed', data: { reason } });
   }
 
   #finishTask({ taskId, participantId, leaseToken, status, eventType, data }) {

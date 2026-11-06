@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { openDatabase } from '../src/db.js';
+import { openDatabase, migrate } from '../src/db.js';
 import { ControlCenter, ControlCenterError } from '../src/control-center.js';
 
 function fixture(options) {
@@ -21,7 +21,7 @@ test('migrates a clean database and preserves task state across database reopen'
   const filename = join(dir, 'state.sqlite');
   try {
     let db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
     const task = new ControlCenter(db).createTask({ type: 'persist.check', payload: { durable: true } });
     db.close();
     db = openDatabase(filename);
@@ -29,6 +29,16 @@ test('migrates a clean database and preserves task state across database reopen'
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+
+test('schema migration upgrades an existing version 2 database to version 3', () => {
+  const db = openDatabase(':memory:');
+  db.exec('DROP TABLE settings; PRAGMA user_version = 2');
+  migrate(db);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get().count, 1);
+  db.close();
 });
 
 test('participant credentials are returned once and authentication is revocable', () => {
@@ -153,6 +163,24 @@ test('participant and task writes roll back when their audit event cannot be rec
   db.close();
 });
 
+
+test('task payloads and completion metadata are bounded JSON objects', () => {
+  const { db, center, participant, token } = fixture();
+  assert.throws(() => center.createTask({ type: 'demo.bad-payload', payload: 'not-an-object' }),
+    error => error.code === 'validation_error');
+  const task = center.createTask({ type: 'demo.result-bounds' });
+  const claim = center.claimTask({ participantId: participant.id, token });
+  assert.throws(() => center.completeTask({
+    taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token,
+    result: { diagnostic: 'x'.repeat(17_000) }
+  }), error => error.code === 'validation_error');
+  assert.throws(() => center.failTask({
+    taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, reason: { secret: true }
+  }), error => error.code === 'validation_error');
+  assert.equal(center.getTask(task.id).status, 'claimed');
+  db.close();
+});
+
 test('heartbeat validates lease duration and extends an active lease', () => {
   const { db, center, participant, token } = fixture();
   const task = center.createTask({ type: 'demo.heartbeat' });
@@ -191,6 +219,10 @@ test('revoking a participant also revokes its active lease', () => {
   const claim = center.claimTask({ participantId: participant.id, token });
   center.revokeParticipant(participant.id);
   assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'revoked');
-  assert.equal(center.getTask(task.id).status, 'claimed');
+  assert.equal(center.getTask(task.id).status, 'blocked');
+  assert.equal(center.getTask(task.id).leaseId, null);
+  assert.equal(center.getTask(task.id).assignedParticipantId, null);
+  assert.equal(center.listEvents({ entityId: task.id, limit: 1 })[0].eventType, 'task.participant_revoked_blocked');
+  assert.throws(() => center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token }), error => error.code === 'lease_mismatch');
   db.close();
 });

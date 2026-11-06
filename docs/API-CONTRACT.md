@@ -1,49 +1,64 @@
-# API Contract (proposed v1)
+# API Contract v1
 
-The API is a versioned boundary between the Control Center and future clients. This is a contract proposal, not an implemented API.
-
-Base path: /control/v1  
-Default bind: loopback only.
+This contract describes the implemented local API. Base path: `/control/v1`.
+Default bind: `127.0.0.1` only. Default port: `4317`.
 
 ## Authentication
-Participant endpoints require a participant credential. Credentials are scoped and revocable. Operator endpoints use a separate local operator mechanism. Tokens are sent in the Authorization header and must never appear in URLs or logs.
+
+- Operator endpoints require `Authorization: Bearer <operator-token>`.
+- Participant endpoints require `Authorization: Bearer <participant-token>`.
+- Worker lifecycle endpoints additionally require `X-Lease-Token: <lease-token>`.
+- The participant token and lease token are distinct credentials.
+- Tokens must never appear in URLs, request bodies, logs, or error messages.
+- Operator token is generated on first start and displayed once. Later starts require `RAYA_CC_OPERATOR_TOKEN`.
+- Rotate with `node src/rotate-operator-token.js`; the new token is displayed once.
 
 ## Endpoints
-| Method | Path | Purpose |
-|---|---|---|
-| POST | /participants/register | Register a participant (operator/bootstrap policy applies) |
-| POST | /participants/heartbeat | Update participant liveness |
-| GET | /participants | List participants (operator scope) |
-| GET | /participants/{id} | Read participant metadata |
-| POST | /participants/{id}/revoke | Revoke a participant (operator scope) |
-| POST | /tasks | Create a task |
-| GET | /tasks | List/filter tasks |
-| GET | /tasks/{id} | Read task status and safe metadata |
-| POST | /tasks/{id}/claim | Atomically claim eligible task |
-| POST | /tasks/{id}/start | Report start under active lease |
-| POST | /tasks/{id}/heartbeat | Renew lease / report liveness |
-| POST | /tasks/{id}/progress | Report bounded progress metadata |
-| POST | /tasks/{id}/complete | Report success under active lease |
-| POST | /tasks/{id}/fail | Report failure under active lease |
-| POST | /tasks/{id}/cancel-request | Request cooperative cancellation |
-| POST | /tasks/{id}/cancel-ack | Acknowledge cancellation by current owner |
-| GET | /events | Query authorized, redacted event history |
-| GET | /health | Local process and storage health |
 
-Exact request/response schemas are to be defined alongside implementation and OpenAPI generation.
+| Method | Path | Authentication | Purpose |
+|---|---|---|---|
+| GET | `/health` | None | Process/API health |
+| POST | `/participants/register` | Operator | Register participant; returns token once |
+| GET | `/participants/{id}` | Operator | Read participant metadata |
+| POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks |
+| POST | `/tasks` | Operator | Create task |
+| GET | `/tasks/{id}` | Operator | Read task |
+| POST | `/tasks/claim` | Participant + `tasks:claim` scope | Claim next eligible task |
+| POST | `/tasks/{id}/start` | Participant + lease header | Start claimed task |
+| POST | `/tasks/{id}/heartbeat` | Participant + lease header | Renew lease |
+| POST | `/tasks/{id}/complete` | Participant + lease header | Complete task |
+| POST | `/tasks/{id}/fail` | Participant + lease header | Fail task |
+| POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
+| POST | `/tasks/{id}/cancel-request` | Operator | Request cooperative cancellation |
+| GET | `/events` | Operator | Read bounded event history |
+
+## Request bodies
+
+All non-empty request bodies must be JSON objects and are limited to 16 KiB.
+
+- Register: `{ "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"] }`
+- Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
+- Claim: `{ "leaseDurationMs": 30000 }`
+- Heartbeat: `{ "leaseDurationMs": 30000 }`
+- Complete: `{ "result": { "ok": true } }`
+- Fail: `{ "reason": "bounded diagnostic" }`
+
+Worker routes use the authenticated participant identity and `X-Lease-Token`; clients must not send participant IDs in request bodies.
 
 ## Common rules
-- JSON request/response bodies.
+
 - UTC timestamps.
 - Stable machine-readable error codes.
-- Bounded pagination; deterministic ordering.
-- Idempotency keys for commands that clients may safely retry.
-- State changes and corresponding events commit atomically.
-- Task updates require a valid active lease unless explicitly an operator action.
+- No CORS and no wildcard network binding.
+- Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`.
+- Task state changes and their audit events commit atomically.
 - Heartbeat is not progress.
 - Cancellation request is not cancellation acknowledgement.
+- API errors never expose stack traces or database details.
+- Request bodies and authorization headers are not logged.
 
-## Error categories
-authentication_required, invalid_credential, participant_revoked, insufficient_scope, not_found, invalid_transition, lease_required, lease_expired, lease_mismatch, conflict, validation_error, rate_limited, internal_error.
+## Error codes
 
-Do not expose internal stack traces or database details.
+`authentication_required`, `insufficient_scope`, `not_found`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
+
+Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in task payloads or event data.

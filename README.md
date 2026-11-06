@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â durable core foundation.
+**Status:** Phase 2 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â local HTTP API implementation and verification in progress.
 
 ## Ownership and scope
 
@@ -14,31 +14,60 @@ This repository is the sole implementation home for Raya Control Center. It owns
 - **Raya-MCP:** future MCP adapter/client; not developed here.
 - Integration requirements may be documented here; external repositories are out of scope.
 
-## Current implementation
+## Implemented
 
-- SQLite persistence using Node.js built-in `node:sqlite` (Node.js 22.13+).
-- Versioned schema migration and WAL mode for file-backed databases.
+- SQLite persistence with versioned migrations and WAL mode.
 - Participant registration, scoped credentials, authentication, and revocation.
-- Task creation, explicit lifecycle transitions, authenticated atomic claims, and time-bounded leases.
-- Cooperative cancellation, expired-lease reconciliation to blocked state, and database-enforced append-only event history.
-- Lease-bound worker updates; stale or foreign lease tokens are rejected.
+- Durable tasks, atomic claims, time-bounded leases, and lease-bound lifecycle changes.
+- Cooperative cancellation and safe blocking after lease expiry or participant revocation.
+- Database-enforced append-only event history.
+- Loopback-only HTTP API at `/control/v1`.
+- Separate operator and participant bearer credentials; lease tokens are supplied separately in `X-Lease-Token`.
+- One-time operator-token bootstrap and explicit token rotation command.
+- Request-size limits, JSON validation, Host-header allowlist, and safe API errors.
 
-## Requirements
+## Runtime requirements
 
-- Node.js 22.13.0 or newer (tested initially with 22.23.2).
+- Recommended runtime: Node.js 26 Active LTS.
+- Minimum supported runtime: Node.js 24.15.0.
 - npm 10+.
+- The built-in `node:sqlite` API is Release Candidate in Node 24.15+; see the runtime decision in `docs/ROADMAP.md`.
 
 ## Quick start
 
-```powershell
-npm test
-npm run check
-```
+1. Run `npm test` and `npm run check`.
+2. Start with `npm start`.
+3. On first start, save the operator token printed once.
+4. On later starts, set `RAYA_CC_OPERATOR_TOKEN` to that same token.
 
-The database defaults to `.data/control-center.sqlite`; keep this directory private and backed up. The API and CLI are not implemented yet.
+The API listens only on `127.0.0.1`, port `4317` by default.
 
-## Security notes
+To rotate the operator token, run `node src/rotate-operator-token.js`. Save the new token and update `RAYA_CC_OPERATOR_TOKEN` before restarting the server.
 
-Participant and lease tokens are generated with 256 bits of randomness. Only SHA-256 token hashes are stored. Tokens are returned once at creation and must be handled as secrets. This initial core is a library, not yet an exposed network service; loopback-only API enforcement is required before API release.
+Optional environment variables:
+- `RAYA_CC_PORT` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â HTTP port (default `4317`).
+- `RAYA_CC_DATABASE` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â database path (default `.data/control-center.sqlite`).
+- `RAYA_CC_OPERATOR_TOKEN` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator token, at least 32 characters.
 
-Do not store prompts, transcripts, hidden reasoning, credentials, raw tool arguments, or file contents in task payloads or events.
+## API
+
+Base URL: `http://127.0.0.1:4317/control/v1`
+
+- `GET /health`
+- `POST /participants/register` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator credential
+- `GET /participants/{id}` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator credential
+- `POST /participants/{id}/revoke` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator credential
+- `POST /tasks` and `GET /tasks/{id}` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator credential
+- `POST /tasks/claim` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â participant credential with `tasks:claim` scope
+- `POST /tasks/{id}/start|heartbeat|complete|fail|cancel-ack` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â participant bearer plus `X-Lease-Token`
+- `POST /tasks/{id}/cancel-request` and `GET /events` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â operator credential
+
+See `docs/API-CONTRACT.md` for request and response behavior.
+
+## Security
+
+The server binds only to IPv4 loopback and rejects non-loopback Host headers. It does not enable CORS or remote ingress. Operator and participant credentials are separate; lease tokens are distinct from participant credentials. Only token hashes are stored. The API does not log request bodies or authorization headers.
+
+Do not place prompts, transcripts, hidden reasoning, credentials, raw tool arguments, or file contents in task payloads or event data. Store only bounded operational metadata.
+
+The default database is `.data/control-center.sqlite`; protect and back it up as private application data.
