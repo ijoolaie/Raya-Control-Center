@@ -46,9 +46,11 @@ function usage() {
     '  npm run cli -- health',
     '  npm run cli -- participant register --name NAME [--kind worker] [--scope tasks:claim]',
     '  npm run cli -- participant get PARTICIPANT_ID',
+    '  npm run cli -- participant list [--status active] [--kind worker] [--limit 50] [--offset 0]',
     '  npm run cli -- participant revoke PARTICIPANT_ID',
     '  npm run cli -- task create --type TASK.TYPE [--payload JSON] [--priority N] [--idempotency-key KEY]',
     '  npm run cli -- task get TASK_ID',
+    '  npm run cli -- task list [--status queued] [--type TASK.TYPE] [--limit 50] [--offset 0]',
     '  npm run cli -- task cancel TASK_ID',
     '  npm run cli -- events [--entity-type TYPE] [--entity-id ID] [--limit N]',
     '  npm run cli -- reconcile',
@@ -84,6 +86,12 @@ export async function main(args = process.argv.slice(2)) {
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;
   }
+  if (group === 'participant' && action === 'list') {
+    const opts = parseOptions(rest); const query = new URLSearchParams();
+    for (const key of ['status','kind','limit','offset']) if (opts[key] !== undefined) query.set(key, String(opts[key]));
+    const data = await callApi('/participants' + (query.size ? '?' + query.toString() : ''));
+    process.stdout.write(JSON.stringify(data, null, 2) + '\n'); return;
+  }
   if (group === 'participant' && action === 'revoke') {
     if (!rest[0]) throw new Error('Participant ID is required');
     const data = await callApi('/participants/' + encodeURIComponent(rest[0]) + '/revoke', { method: 'POST', body: {} });
@@ -112,6 +120,12 @@ export async function main(args = process.argv.slice(2)) {
     const data = await callApi('/tasks/' + encodeURIComponent(rest[0]));
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;
+  }
+  if (group === 'task' && action === 'list') {
+    const opts = parseOptions(rest); const query = new URLSearchParams();
+    for (const key of ['status','type','assigned-participant-id','limit','offset']) if (opts[key] !== undefined) query.set(key === 'assigned-participant-id' ? 'assignedParticipantId' : key, String(opts[key]));
+    const data = await callApi('/tasks' + (query.size ? '?' + query.toString() : ''));
+    process.stdout.write(JSON.stringify(data, null, 2) + '\n'); return;
   }
   if (group === 'task' && action === 'cancel') {
     if (!rest[0]) throw new Error('Task ID is required');

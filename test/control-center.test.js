@@ -226,3 +226,20 @@ test('revoking a participant also revokes its active lease', () => {
   assert.throws(() => center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token }), error => error.code === 'lease_mismatch');
   db.close();
 });
+
+
+test('participant and task listing applies validated filters and bounded pagination', () => {
+  const { db, center, participant } = fixture();
+  const first = center.createTask({ type: 'list.alpha', payload: { index: 1 } });
+  center.createTask({ type: 'list.beta', payload: { index: 2 } });
+  center.createTask({ type: 'list.alpha', payload: { index: 3 } });
+  assert.equal(center.listParticipants().length, 1);
+  assert.equal(center.listParticipants({ status: 'active', kind: 'worker' })[0].id, participant.id);
+  assert.equal(center.listTasks({ type: 'list.alpha' }).length, 2);
+  assert.equal(center.listTasks({ type: 'list.alpha', limit: 1 }).length, 1);
+  assert.equal(center.listTasks({ type: 'list.alpha', limit: 1, offset: 1 })[0].id, first.id);
+  assert.equal(center.listTasks({ status: 'queued' }).length, 3);
+  assert.throws(() => center.listTasks({ status: 'invalid' }), error => error.code === 'validation_error');
+  assert.throws(() => center.listParticipants({ limit: 101 }), error => error.code === 'validation_error');
+  db.close();
+});

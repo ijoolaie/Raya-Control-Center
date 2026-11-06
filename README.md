@@ -82,3 +82,8 @@ The server binds only to IPv4 loopback and rejects non-loopback Host headers. It
 Do not place prompts, transcripts, hidden reasoning, credentials, raw tool arguments, or file contents in task payloads or event data. Store only bounded operational metadata.
 
 The default database is `.data/control-center.sqlite`; protect and back it up as private application data.
+
+
+## Listing records
+
+Use npm run cli -- participant list --status active to list participants, and npm run cli -- task list --status queued --limit 25 to list tasks. Both commands accept filters and bounded offset pagination; see docs/API-CONTRACT.md.

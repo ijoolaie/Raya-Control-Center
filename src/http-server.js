@@ -111,6 +111,14 @@ export function createControlServer({ db, operatorToken }) {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === BASE + '/participants') {
+        requireOperator();
+        const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+        const offset = url.searchParams.has('offset') ? Number(url.searchParams.get('offset')) : 0;
+        const participants = center.listParticipants({ status: url.searchParams.get('status') || undefined, kind: url.searchParams.get('kind') || undefined, limit, offset });
+        send(res, 200, { participants, page: { limit, offset, count: participants.length } }); return;
+      }
+
       const participantPath = new RegExp('^' + BASE + '/participants/([^/]+)$').exec(url.pathname);
       if (req.method === 'GET' && participantPath) {
         requireOperator();
@@ -133,6 +141,14 @@ export function createControlServer({ db, operatorToken }) {
         const blockedTaskIds = center.reconcileExpiredLeases();
         send(res, 200, { blockedTaskIds });
         return;
+      }
+
+      if (req.method === 'GET' && url.pathname === BASE + '/tasks') {
+        requireOperator();
+        const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+        const offset = url.searchParams.has('offset') ? Number(url.searchParams.get('offset')) : 0;
+        const tasks = center.listTasks({ status: url.searchParams.get('status') || undefined, type: url.searchParams.get('type') || undefined, assignedParticipantId: url.searchParams.get('assignedParticipantId') || undefined, limit, offset });
+        send(res, 200, { tasks, page: { limit, offset, count: tasks.length } }); return;
       }
 
       if (req.method === 'POST' && url.pathname === BASE + '/tasks') {

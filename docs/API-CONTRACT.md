@@ -62,3 +62,13 @@ Worker routes use the authenticated participant identity and `X-Lease-Token`; cl
 `authentication_required`, `insufficient_scope`, `not_found`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
 
 Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in task payloads or event data.
+
+
+## Collection listing
+
+Operator-only collection endpoints:
+
+- GET /control/v1/participants supports status (active, disabled, revoked), kind (worker, adapter, operator_client), limit (1..100, default 50), and offset (0..1,000,000, default 0).
+- GET /control/v1/tasks supports status, type, assignedParticipantId, limit (1..100, default 50), and offset (0..1,000,000, default 0).
+- Responses include the matching collection and page metadata (limit, offset, count). Results are ordered newest first with a stable ID tie-breaker.
+- Invalid filters or pagination values return validation_error. Both endpoints require the operator bearer token.

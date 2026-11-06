@@ -76,6 +76,19 @@ export class ControlCenter {
       scopes: parse(row.scopes_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at };
   }
 
+  listParticipants({ status, kind, limit = 50, offset = 0 } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new ControlCenterError('validation_error', 'Participant limit must be 1..100');
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) throw new ControlCenterError('validation_error', 'Participant offset must be 0..1000000');
+    if (status !== undefined && !['active','disabled','revoked'].includes(status)) throw new ControlCenterError('validation_error', 'Invalid participant status filter');
+    if (kind !== undefined && !['worker','adapter','operator_client'].includes(kind)) throw new ControlCenterError('validation_error', 'Invalid participant kind filter');
+    let sql = 'SELECT id, display_name, kind, status, scopes_json, created_at, updated_at, last_seen_at FROM participants WHERE 1 = 1';
+    const args = [];
+    if (status) { sql += ' AND status = ?'; args.push(status); }
+    if (kind) { sql += ' AND kind = ?'; args.push(kind); }
+    sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, displayName: row.display_name, kind: row.kind, status: row.status, scopes: parse(row.scopes_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at }));
+  }
+
   revokeParticipant(id) {
     return transaction(this.db, () => {
       const result = this.db.prepare(`UPDATE participants SET status = 'revoked', updated_at = ?
@@ -140,6 +153,21 @@ export class ControlCenter {
       priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id,
       leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at,
       startedAt: row.started_at, finishedAt: row.finished_at };
+  }
+
+  listTasks({ status, type, assignedParticipantId, limit = 50, offset = 0 } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new ControlCenterError('validation_error', 'Task limit must be 1..100');
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) throw new ControlCenterError('validation_error', 'Task offset must be 0..1000000');
+    const statuses = ['queued','claimed','running','waiting_approval','blocked','cancellation_requested','succeeded','failed','cancelled'];
+    if (status !== undefined && !statuses.includes(status)) throw new ControlCenterError('validation_error', 'Invalid task status filter');
+    if (type !== undefined && (typeof type !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,159}$/.test(type))) throw new ControlCenterError('validation_error', 'Invalid task type filter');
+    if (assignedParticipantId !== undefined && (typeof assignedParticipantId !== 'string' || !assignedParticipantId.trim() || assignedParticipantId.length > 100)) throw new ControlCenterError('validation_error', 'Invalid assignedParticipantId filter');
+    let sql = 'SELECT * FROM tasks WHERE 1 = 1'; const args = [];
+    if (status) { sql += ' AND status = ?'; args.push(status); }
+    if (type) { sql += ' AND type = ?'; args.push(type); }
+    if (assignedParticipantId) { sql += ' AND assigned_participant_id = ?'; args.push(assignedParticipantId); }
+    sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at }));
   }
 
   claimTask({ participantId, token, leaseDurationMs = this.leaseDurationMs }) {

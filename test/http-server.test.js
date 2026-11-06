@@ -166,6 +166,14 @@ test('CLI can register participants and create/read tasks through the local API'
     const events = await runCli(['events', '--entity-type', 'task', '--limit', '10']);
     assert.equal(events.code, 0, events.stderr);
     assert.ok(JSON.parse(events.stdout).events.length >= 1);
+
+    const listedParticipants = await runCli(['participant', 'list', '--status', 'active']);
+    assert.equal(listedParticipants.code, 0, listedParticipants.stderr);
+    assert.ok(JSON.parse(listedParticipants.stdout).participants.length >= 1);
+
+    const listedTasks = await runCli(['task', 'list', '--type', 'cli.integration']);
+    assert.equal(listedTasks.code, 0, listedTasks.stderr);
+    assert.equal(JSON.parse(listedTasks.stdout).tasks[0].type, 'cli.integration');
   } finally {
     await new Promise(resolve => server.close(resolve));
     db.close();
@@ -187,6 +195,38 @@ test('HTTP API rejects request bodies larger than 16 KiB', async () => {
     assert.equal(response.status, 413);
   } finally {
     await new Promise(resolve => server.close(error => error ? reject(error) : resolve()));
+    db.close();
+  }
+});
+
+
+test('operator list endpoints filter and paginate participants and tasks', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'list-operator-token-'.repeat(3);
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const headers = { authorization: 'Bearer ' + operatorToken, 'content-type': 'application/json' };
+  const call = async (path, options = {}) => fetch(base + path, { headers, ...options });
+  try {
+    const registered = await call('/participants/register', { method: 'POST', body: JSON.stringify({ displayName: 'list-worker', scopes: ['tasks:claim'] }) });
+    assert.equal(registered.status, 201);
+    await call('/tasks', { method: 'POST', body: JSON.stringify({ type: 'list.alpha' }) });
+    await call('/tasks', { method: 'POST', body: JSON.stringify({ type: 'list.beta' }) });
+    const participants = await call('/participants?status=active&kind=worker&limit=10');
+    assert.equal(participants.status, 200);
+    assert.equal((await participants.json()).page.count, 1);
+    const tasks = await call('/tasks?type=list.alpha&limit=1&offset=0');
+    assert.equal(tasks.status, 200);
+    const taskData = await tasks.json();
+    assert.equal(taskData.tasks.length, 1);
+    assert.equal(taskData.tasks[0].type, 'list.alpha');
+    const invalid = await call('/tasks?status=not-a-state');
+    assert.equal(invalid.status, 400);
+    const unauthenticated = await fetch(base + '/tasks');
+    assert.equal(unauthenticated.status, 401);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
     db.close();
   }
 });
