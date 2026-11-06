@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter, ControlCenterError } from '../src/control-center.js';
 
@@ -83,6 +85,29 @@ test('expired leases cannot mutate task state', () => {
 
 
 
+
+
+test('WAL recovery rolls back an uncommitted transaction after process exit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-crash-'));
+  const filename = join(dir, 'crash.sqlite');
+  let db = openDatabase(filename);
+  const task = new ControlCenter(db).createTask({ type: 'demo.crash-recovery' });
+  db.close();
+  db = null;
+  try {
+    const workerPath = new URL('../test-support/crash-worker.js', import.meta.url);
+    const child = spawnSync(process.execPath, [fileURLToPath(workerPath), filename, task.id], { encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    db = openDatabase(filename);
+    assert.equal(new ControlCenter(db).getTask(task.id).status, 'queued');
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.close();
+    db = null;
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 
 test('two independent SQLite connections cannot claim the same task', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'raya-race-'));
