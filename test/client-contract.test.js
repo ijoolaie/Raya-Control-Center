@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer as createNetServer } from 'node:net';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { openDatabase } from '../src/db.js';
+import { ControlCenter } from '../src/control-center.js';
+import { bootstrapOperatorToken } from '../src/operator-auth.js';
 import { createControlServer } from '../src/http-server.js';
 
 async function createHarness(run) {
@@ -194,4 +202,71 @@ test('revoking a participant invalidates its token and blocks its leased task', 
     assert.equal(read.body.task.status, 'blocked');
     assert.equal(read.body.task.leaseId, null);
   });
+});
+
+test('server startup reconciles expired leases before accepting requests', { timeout: 15000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-startup-recovery-'));
+  const filename = join(directory, 'startup.sqlite');
+  let db;
+  let child;
+  let portServer;
+  try {
+    db = openDatabase(filename);
+    const center = new ControlCenter(db);
+    const registered = center.registerParticipant({ displayName: 'startup-recovery-worker', scopes: ['tasks:claim'] });
+    const task = center.createTask({ type: 'contract.startup-recovery' });
+    const claim = center.claimTask({ participantId: registered.participant.id, token: registered.token });
+    center.startTask({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token });
+    db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(claim.lease.id);
+    const operatorToken = bootstrapOperatorToken(db).token;
+    db.close();
+    db = null;
+
+    portServer = createNetServer();
+    await new Promise((resolve, reject) => {
+      portServer.once('error', reject);
+      portServer.listen(0, '127.0.0.1', resolve);
+    });
+    const port = portServer.address().port;
+    await new Promise((resolve, reject) => portServer.close(error => error ? reject(error) : resolve()));
+    portServer = null;
+
+    child = spawn(process.execPath, ['src/server.js'], {
+      cwd: process.cwd(),
+      env: { ...process.env, RAYA_CC_DATABASE: filename, RAYA_CC_PORT: String(port), RAYA_CC_OPERATOR_TOKEN: operatorToken },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    await new Promise((resolve, reject) => {
+      const onData = chunk => {
+        if ((stdout += '') && stdout.includes('Raya Control Center listening on')) {
+          child.stdout.off('data', onData);
+          resolve();
+        }
+      };
+      child.stdout.on('data', onData);
+      child.once('error', reject);
+      child.once('exit', code => reject(new Error('Server exited before listening (' + code + '): ' + stderr)));
+    });
+
+    const response = await fetch('http://127.0.0.1:' + port + '/control/v1/tasks/' + task.id, {
+      headers: { authorization: 'Bearer ' + operatorToken }
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.task.status, 'blocked');
+    assert.equal(result.task.leaseId, null);
+    assert.match(stderr, /Blocked 1 task\(s\) after expired leases/);
+  } finally {
+    if (db) db.close();
+    if (portServer?.listening) await new Promise(resolve => portServer.close(resolve));
+    if (child && child.exitCode === null) {
+      child.kill('SIGTERM');
+      await once(child, 'exit');
+    }
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
