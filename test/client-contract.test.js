@@ -95,6 +95,7 @@ test('independent HTTP client completes a task using the documented participant 
       method: 'POST', token: participantToken, leaseToken, body: JSON.stringify({ leaseDurationMs: 60000 })
     });
     assert.equal(heartbeat.status, 200);
+    assert.deepEqual(Object.keys(heartbeat.body).sort(), ['expiresAt', 'taskId']);
     assert.equal(heartbeat.body.taskId, taskId);
     assert.ok(heartbeat.body.expiresAt);
 

@@ -54,6 +54,26 @@ All non-empty request bodies must be JSON objects and are limited to 16 KiB.
 
 Worker routes use the authenticated participant identity and `X-Lease-Token`; clients must not send participant IDs in request bodies. A successful empty claim returns `{ "claim": null }`.
 
+## Success response shapes
+
+All successful responses use `application/json; charset=utf-8`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. Response bodies are JSON objects with these endpoint-specific top-level fields:
+
+| Endpoint | Success body fields |
+|---|---|
+| `GET /health` | `status`, `api` |
+| `POST /participants/register` | `participant`, `token` (the raw participant token is returned once only) |
+| `GET /participants` | `participants`, `page` (`limit`, `offset`, `count`) |
+| `GET /participants/{id}` and `POST /participants/{id}/revoke` | `participant` |
+| `POST /maintenance/reconcile-expired-leases` | `blockedTaskIds` |
+| `GET /tasks` | `tasks`, `page` (`limit`, `offset`, `count`) |
+| `POST /tasks` | `task`, `idempotentReplay` |
+| `POST /tasks/claim` | `claim` (`null` when no task is available; otherwise `task` and `lease`) |
+| `GET /tasks/{id}` and task lifecycle mutations other than heartbeat | `task` |
+| `POST /tasks/{id}/heartbeat` | `taskId`, `expiresAt` |
+| `GET /tasks/{id}/lease-status` | `status` (`taskId`, `status`, `cancellationRequested`, `updatedAt`, `leaseExpiresAt`) |
+| `GET /events` | `events` |
+
+`POST /tasks` returns `201` for a new Task and `200` for an idempotent replay. Participant registration returns `201`. Other successful endpoints return `200`. The heartbeat response is intentionally a lease-renewal receipt rather than a Task representation; progress and other lifecycle mutations return the updated Task under `task`.
 ## Query parameters
 
 Query parameters are route-specific and strict:
