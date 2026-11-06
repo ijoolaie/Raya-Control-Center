@@ -404,3 +404,55 @@ test('HTTP routes distinguish unsupported methods from unknown paths', async () 
     assert.equal(missing.allow, null);
   });
 });
+test('HTTP rejects malformed UTF-8 JSON bodies instead of replacing invalid bytes', async () => {
+  await createHarness(async ({ server, operatorToken }) => {
+    const body = Buffer.concat([
+      Buffer.from('{"type":"invalid.utf8","payload":"'),
+      Buffer.from([0xff]),
+      Buffer.from('"}')
+    ]);
+    const raw = await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => {
+        socket.write(Buffer.concat([
+          Buffer.from('POST /control/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1\r\n'),
+          Buffer.from('Authorization: Bearer ' + operatorToken + '\r\nContent-Type: application/json\r\n'),
+          Buffer.from('Content-Length: ' + body.length + '\r\nConnection: close\r\n\r\n'),
+          body
+        ]));
+      });
+      socket.on('data', chunk => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+    assert.match(raw, /^HTTP\/1\.1 400/);
+    const responseBody = JSON.parse(raw.slice(raw.indexOf('\r\n\r\n') + 4));
+    assert.equal(responseBody.error.code, 'validation_error');
+    assert.equal(responseBody.error.message, 'Request body must contain valid JSON');
+  });
+});
+
+test('Node HTTP parser rejects conflicting Content-Length and Transfer-Encoding framing', async () => {
+  await createHarness(async ({ server }) => {
+    const raw = await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => socket.write(
+        'POST /control/v1/tasks HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\n' +
+        'Content-Type: application/json\r\n' +
+        'Content-Length: 2\r\n' +
+        'Transfer-Encoding: chunked\r\n' +
+        'Connection: close\r\n\r\n{}'
+      ));
+      socket.on('data', chunk => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+    assert.match(raw, /^HTTP\/1\.1 400/);
+    assert.equal(raw.includes('"task"'), false);
+  });
+});

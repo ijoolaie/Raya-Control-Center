@@ -41,7 +41,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 
 ## Request bodies
 
-All non-empty request bodies must be JSON objects and are limited to 16 KiB.
+All non-empty request bodies must be valid UTF-8 JSON objects and are limited to 16 KiB. Invalid UTF-8 byte sequences are rejected with 400 validation_error; they are never decoded with replacement characters.
 
 - Register: `{ "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"] }`
 - Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
@@ -92,6 +92,7 @@ Query parameters are route-specific and strict:
 - Stable machine-readable error codes in the envelope `{ error: { code, message } }` for failures.
 - A known route used with an unsupported HTTP method returns `405 method_not_allowed` and an `Allow` header listing the supported methods; an unknown route returns `404 not_found`.
 - No CORS and no wildcard network binding.
+- HTTP parser framing errors (including conflicting Content-Length and Transfer-Encoding) are rejected by Node HTTP before route handling.
 - Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`; other hosts receive `421 misdirected_request` without echoing the supplied host.
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.

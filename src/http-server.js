@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
+import { TextDecoder } from 'node:util';
 import { ControlCenter, ControlCenterError } from './control-center.js';
 
 const BASE = '/control/v1';
@@ -97,7 +98,7 @@ async function readJson(req) {
   const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') throw new ControlCenterError('validation_error', 'Content-Type must be application/json');
   let value;
-  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
   catch { throw new ControlCenterError('validation_error', 'Request body must contain valid JSON'); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ControlCenterError('validation_error', 'JSON body must be an object');
