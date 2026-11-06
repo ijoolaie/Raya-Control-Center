@@ -235,6 +235,12 @@ export class ControlCenter {
       return this.getTask(taskId);
     });
   }
+  getLeasedTaskStatus({ taskId, participantId, leaseToken }) {
+    return this.#withLease({ taskId, participantId, leaseToken }, task => {
+      const lease = this.db.prepare("SELECT expires_at FROM leases WHERE id = ? AND status = 'active'").get(task.lease_id);
+      return { taskId: task.id, status: task.status, cancellationRequested: task.status === 'cancellation_requested', updatedAt: task.updated_at, leaseExpiresAt: lease.expires_at };
+    });
+  }
   heartbeatLease({ taskId, participantId, leaseToken, leaseDurationMs = this.leaseDurationMs }) {
     if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs < 1000 || leaseDurationMs > 3_600_000)
       throw new ControlCenterError('validation_error', 'Lease duration must be 1s..1h');

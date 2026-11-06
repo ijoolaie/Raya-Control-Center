@@ -117,6 +117,17 @@ test('independent HTTP client observes cooperative cancellation and acknowledges
     assert.equal(requested.status, 200);
     assert.equal(requested.body.task.status, 'cancellation_requested');
 
+    const cancellationStatus = await request('/tasks/' + taskId + '/lease-status', { token: participantToken, leaseToken });
+    assert.equal(cancellationStatus.status, 200);
+    assert.equal(cancellationStatus.body.status.status, 'cancellation_requested');
+    assert.equal(cancellationStatus.body.status.cancellationRequested, true);
+    assert.equal(Object.hasOwn(cancellationStatus.body.status, 'payload'), false);
+
+    const foreignParticipant = await request('/participants/register', { method: 'POST', headers: operator, body: JSON.stringify({ displayName: 'foreign-client', scopes: ['tasks:claim'] }) });
+    const foreignRead = await request('/tasks/' + taskId + '/lease-status', { token: foreignParticipant.body.token, leaseToken });
+    assert.equal(foreignRead.status, 409);
+    assert.equal(foreignRead.body.error.code, 'lease_mismatch');
+
     const acknowledged = await request('/tasks/' + taskId + '/cancel-ack', {
       method: 'POST', token: participantToken, leaseToken, body: '{}'
     });

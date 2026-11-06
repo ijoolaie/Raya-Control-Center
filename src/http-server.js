@@ -173,6 +173,13 @@ export function createControlServer({ db, operatorToken }) {
         return;
       }
 
+      const leaseStatusPath = new RegExp('^' + BASE + '/tasks/([^/]+)/lease-status$').exec(url.pathname);
+      if (req.method === 'GET' && leaseStatusPath) {
+        const participant = requireParticipant();
+        const status = center.getLeasedTaskStatus({ taskId: decodePathPart(leaseStatusPath[1]), participantId: participant.id, leaseToken: req.headers['x-lease-token'] });
+        send(res, 200, { status });
+        return;
+      }
       const taskPath = new RegExp('^' + BASE + '/tasks/([^/]+)$').exec(url.pathname);
       if (req.method === 'GET' && taskPath) {
         requireOperator();

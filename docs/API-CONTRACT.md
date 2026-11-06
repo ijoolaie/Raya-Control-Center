@@ -34,6 +34,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | POST | `/tasks/{id}/complete` | Participant + lease header | Complete task |
 | POST | `/tasks/{id}/fail` | Participant + lease header | Fail task |
 | POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
+| GET | /tasks/{id}/lease-status | Participant + lease header | Read own active task status and cancellation signal |
 | POST | `/tasks/{id}/cancel-request` | Operator | Request cooperative cancellation |
 | GET | `/events` | Operator | Read bounded event history |
 | POST | `/maintenance/reconcile-expired-leases` | Operator | Reconcile expired leases |
@@ -61,6 +62,7 @@ Worker routes use the authenticated participant identity and `X-Lease-Token`; cl
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
+- A Participant may poll GET /tasks/{id}/lease-status with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
 - API errors never expose stack traces or database details.
 - Request bodies and authorization headers are not logged.
 - Clients should use HTTP status and `error.code`, not parse human-readable error messages.

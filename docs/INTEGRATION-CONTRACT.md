@@ -51,7 +51,7 @@ A task claim is atomic. The claim response contains the Task and the lease ID, t
 7. Finish with `POST /tasks/{id}/complete` or `POST /tasks/{id}/fail`.
 8. Discard the lease token after a terminal response. A released/expired/revoked lease cannot be reused.
 
-For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-request`. The Participant observes the request through its agreed polling/coordination mechanism, stops its external work safely, then calls `POST /tasks/{id}/cancel-ack` with the still-active lease. The acknowledgement is not proof that arbitrary external side effects were rolled back.
+For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-request`. The Participant polls GET /tasks/{id}/lease-status with its Participant bearer and active X-Lease-Token. The response exposes only task ID, lifecycle status, cancellation flag, update time, and lease expiry (not the task payload). After observing cancellationRequested=true, the Participant stops its external work safely, then calls `POST /tasks/{id}/cancel-ack` with the still-active lease. The acknowledgement is not proof that arbitrary external side effects were rolled back.
 
 ## Response and error contract
 
@@ -86,4 +86,4 @@ Clients should branch on HTTP status and stable `error.code`, not human-readable
 
 ## Verification
 
-The repository test `test/client-contract.test.js` starts a real loopback HTTP server and behaves as an independent client. It verifies registration, task creation, claim, start, progress, heartbeat, completion, stale lease rejection, audit events, and cooperative cancellation/acknowledgement. It is an API contract test, not a remote deployment or penetration test.
+The repository test `test/client-contract.test.js` starts a real loopback HTTP server and behaves as an independent client. It verifies registration, task creation, claim, start, progress, heartbeat, completion, stale lease rejection, audit events, lease-bound cancellation-status polling, foreign-lease rejection, and cooperative cancellation/acknowledgement. It is an API contract test, not a remote deployment or penetration test.
