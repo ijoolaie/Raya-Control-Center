@@ -69,7 +69,8 @@ Query parameters are route-specific and strict:
 ## Common rules
 
 - UTC timestamps.
-- Stable machine-readable error codes.
+- Stable machine-readable error codes in the envelope `{ error: { code, message } }` for failures.
+- A known route used with an unsupported HTTP method returns `405 method_not_allowed` and an `Allow` header listing the supported methods; an unknown route returns `404 not_found`.
 - No CORS and no wildcard network binding.
 - Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`.
 - Task state changes and their audit events commit atomically.

@@ -25,7 +25,7 @@ async function createHarness(run) {
     const text = await response.text();
     let body;
     try { body = text ? JSON.parse(text) : null; } catch { throw new Error('API returned non-JSON response'); }
-    return { status: response.status, body };
+    return { status: response.status, body, allow: response.headers.get('allow') };
   };
   try {
     await run({ db, request, operator, operatorToken });
@@ -354,5 +354,32 @@ test('concurrent HTTP task creation with one idempotency key creates one task an
     assert.equal(responses.filter(response => response.body.idempotentReplay === true).length, 1);
     const events = await request('/events?entityType=task&entityId=' + responses[0].body.task.id, { headers: operator });
     assert.equal(events.body.events.filter(event => event.eventType === 'task.queued').length, 1);
+  });
+});
+
+test('HTTP routes distinguish unsupported methods from unknown paths', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const cases = [
+      ['/health', 'POST', 'GET'],
+      ['/participants/register', 'GET', 'POST'],
+      ['/tasks', 'PUT', 'GET, POST'],
+      ['/tasks/claim', 'GET', 'POST'],
+      ['/tasks/example-id', 'POST', 'GET'],
+      ['/tasks/example-id/heartbeat', 'GET', 'POST']
+    ];
+    for (const [path, method, allow] of cases) {
+      const response = await request(path, { method, headers: operator });
+      assert.equal(response.status, 405, method + ' ' + path);
+      assert.deepEqual(response.body.error, {
+        code: 'method_not_allowed',
+        message: 'Method not allowed'
+      });
+      assert.equal(response.allow, allow, method + ' ' + path);
+    }
+
+    const missing = await request('/not-a-route', { method: 'PUT', headers: operator });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error.code, 'not_found');
+    assert.equal(missing.allow, null);
   });
 });

@@ -61,13 +61,26 @@ function bearer(req) {
   return match ? match[1] : null;
 }
 
-function send(res, status, value) {
+function allowedMethods(path) {
+  if (path === BASE + '/health' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
+  if (path === BASE + '/participants/register' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
+  if (path === BASE + '/tasks') return ['GET', 'POST'];
+  if (new RegExp('^' + BASE + '/participants/[^/]+/revoke$').test(path)) return ['POST'];
+  if (new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) return ['GET'];
+  if (new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) return ['GET'];
+  if (new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').test(path)) return ['POST'];
+  if (new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) return ['GET'];
+  return null;
+}
+
+function send(res, status, value, headers = {}) {
   const body = JSON.stringify(value);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(body),
     'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff'
+    'x-content-type-options': 'nosniff',
+    ...headers
   });
   res.end(body);
 }
@@ -122,6 +135,11 @@ export function createControlServer({ db, operatorToken }) {
 
       const url = new URL(req.url || '/', 'http://127.0.0.1');
       validateQuery(req.method || 'GET', url);
+      const methods = allowedMethods(url.pathname);
+      if (methods && !methods.includes(req.method || 'GET')) {
+        send(res, 405, { error: { code: 'method_not_allowed', message: 'Method not allowed' } }, { allow: methods.join(', ') });
+        return;
+      }
       if (url.pathname === BASE + '/health' && req.method === 'GET') {
         db.prepare('SELECT 1 AS ok').get();
         send(res, 200, { status: 'ok', api: 'control/v1' });
