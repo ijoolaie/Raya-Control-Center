@@ -1,0 +1,13 @@
+{
+  "name": "raya-control-center",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first coordination control center",
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "check": "node --check src/db.js && node --check src/control-center.js"
+  }
+}

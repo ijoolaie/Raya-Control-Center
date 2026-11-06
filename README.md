@@ -4,49 +4,41 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 0 — repository and product foundation.
+**Status:** Phase 1 — durable core foundation.
 
 ## Ownership and scope
 
-This repository is the sole implementation home for Raya Control Center. It owns the authoritative records for participants, tasks, leases, authorization decisions, and audit events.
+This repository is the sole implementation home for Raya Control Center. It owns authoritative participant, task, lease, authorization, and audit records.
 
-External systems are future clients, not owners of control-plane state:
-- **Raya-Agent:** future worker/participant integration. Not developed in this repository.
-- **Raya-MCP:** future MCP adapter/integration. Not developed in this repository.
-- Other applications may integrate through documented APIs when explicitly supported.
+- **Raya-Agent:** future worker/participant client; not developed here.
+- **Raya-MCP:** future MCP adapter/client; not developed here.
+- Integration requirements may be documented here; external repositories are out of scope.
 
-Integration requirements may be documented here. Changes to those external projects are out of scope.
+## Current implementation
 
-## Principles
+- SQLite persistence using Node.js built-in `node:sqlite` (Node.js 22.13+).
+- Versioned schema migration and WAL mode for file-backed databases.
+- Participant registration, scoped credentials, authentication, and revocation.
+- Task creation, explicit lifecycle transitions, atomic claims, and time-bounded leases.
+- Cooperative cancellation and append-only event history.
+- Lease-bound worker updates; stale or foreign lease tokens are rejected.
 
-- Local-first; useful on one machine before distributed deployment.
-- Durable state; process memory is never authoritative.
-- Explicit ownership through atomic claims and time-bounded leases.
-- Observable lifecycle transitions and append-only, redacted audit events.
-- Least privilege, scoped credentials, and revocation.
-- Cooperative cancellation; never claim to forcibly stop an external process.
-- Never store full prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents.
+## Requirements
 
-## MVP
+- Node.js 22.13.0 or newer (tested initially with 22.23.2).
+- npm 10+.
 
-1. SQLite persistence and schema migrations.
-2. Participant registration, authentication, heartbeat, and revocation.
-3. Task lifecycle, atomic claim, lease renewal, and expiry handling.
-4. Append-only event history with redaction.
-5. Loopback-only API and minimal CLI.
-6. Restart, concurrency, authorization, and failure-mode tests.
+## Quick start
 
-A graphical dashboard and multi-machine deployment are later phases.
+```powershell
+npm test
+npm run check
+```
 
-## Documentation
+The database defaults to `.data/control-center.sqlite`; keep this directory private and backed up. The API and CLI are not implemented yet.
 
-- Architecture: docs/ARCHITECTURE.md
-- Roadmap: docs/ROADMAP.md
-- Data model: docs/DATA-MODEL.md
-- Security: docs/SECURITY.md
-- API contract: docs/API-CONTRACT.md
-- Ownership decision: docs/adr/0001-control-center-ownership.md
+## Security notes
 
-## Development status
+Participant and lease tokens are generated with 256 bits of randomness. Only SHA-256 token hashes are stored. Tokens are returned once at creation and must be handled as secrets. This initial core is a library, not yet an exposed network service; loopback-only API enforcement is required before API release.
 
-No runtime implementation is claimed yet. Phase 0 establishes product boundaries and contracts. Local implementation and test execution require the dedicated Raya-Control-Center workspace to be available to the development environment.
+Do not store prompts, transcripts, hidden reasoning, credentials, raw tool arguments, or file contents in task payloads or events.
