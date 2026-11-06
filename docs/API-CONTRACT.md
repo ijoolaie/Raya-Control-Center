@@ -92,7 +92,7 @@ Query parameters are route-specific and strict:
 - Stable machine-readable error codes in the envelope `{ error: { code, message } }` for failures.
 - A known route used with an unsupported HTTP method returns `405 method_not_allowed` and an `Allow` header listing the supported methods; an unknown route returns `404 not_found`.
 - No CORS and no wildcard network binding.
-- Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`.
+- Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`; other hosts receive `421 misdirected_request` without echoing the supplied host.
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
@@ -104,6 +104,18 @@ Query parameters are route-specific and strict:
 
 ## Error codes
 
-`authentication_required`, `insufficient_scope`, `not_found`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
+| HTTP status | Error code | Meaning |
+|---:|---|---|
+| 400 | `validation_error` | Invalid path, query, or request body |
+| 401 | `authentication_required` | Missing or invalid credentials |
+| 403 | `insufficient_scope` | Participant lacks required scope |
+| 404 | `not_found` | Unknown route or resource |
+| 405 | `method_not_allowed` | Known route with unsupported method; includes `Allow` |
+| 409 | `conflict`, `invalid_transition`, `lease_mismatch` | State or lease conflict |
+| 413 | `payload_too_large` | Request body exceeds 16 KiB |
+| 421 | `misdirected_request` | Host is not loopback |
+| 500 | `internal_error` | Unexpected internal failure; generic message only |
+
+Error codes used: `authentication_required`, `insufficient_scope`, `not_found`, `method_not_allowed`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
 
 Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in task payloads or event data.
