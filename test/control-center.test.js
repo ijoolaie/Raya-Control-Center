@@ -236,8 +236,12 @@ test('participant and task listing applies validated filters and bounded paginat
   assert.equal(center.listParticipants().length, 1);
   assert.equal(center.listParticipants({ status: 'active', kind: 'worker' })[0].id, participant.id);
   assert.equal(center.listTasks({ type: 'list.alpha' }).length, 2);
-  assert.equal(center.listTasks({ type: 'list.alpha', limit: 1 }).length, 1);
-  assert.equal(center.listTasks({ type: 'list.alpha', limit: 1, offset: 1 })[0].id, first.id);
+  const firstPage = center.listTasks({ type: 'list.alpha', limit: 1 });
+  assert.equal(firstPage.length, 1);
+  const secondPage = center.listTasks({ type: 'list.alpha', limit: 1, offset: 1 });
+  assert.equal(secondPage.length, 1);
+  assert.notEqual(secondPage[0].id, firstPage[0].id);
+  assert.equal(secondPage[0].type, 'list.alpha');
   assert.equal(center.listTasks({ status: 'queued' }).length, 3);
   assert.throws(() => center.listTasks({ status: 'invalid' }), error => error.code === 'validation_error');
   assert.throws(() => center.listParticipants({ limit: 101 }), error => error.code === 'validation_error');
