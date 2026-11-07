@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: 57b64f9778de0267773f2163b95549d4bac14034
+Reviewed commit: 3b586e724b5d992c497c24015b9f33de3e00bec5
 
 ## Scope
 
@@ -88,7 +88,7 @@ This closes the observed userinfo and alternate request-target authority gaps. B
 ### SEC-003 — CLI API override could send the Operator token to a remote host
 
 Severity: **High**
-Status: **Remediated in working tree; CI pending**
+Status: **Remediated; CI verified on 2026-11-07**
 
 Evidence (pre-remediation):
 - `src/cli.js` accepted `RAYA_CC_URL` without validating its protocol, hostname, or path.
