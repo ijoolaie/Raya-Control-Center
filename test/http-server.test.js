@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { request as httpRequest } from 'node:http';
+import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
 import { openDatabase } from '../src/db.js';
 import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
@@ -21,6 +21,38 @@ test('operator token is bootstrapped once, verified on restart, and rotatable', 
   assert.notEqual(rotated, first.token);
   assert.equal(bootstrapOperatorToken(db, rotated).created, false);
   db.close();
+});
+
+test('operator token rotation is immediate and invalidates the previous token', async () => {
+  const db = openDatabase(':memory:');
+  const originalToken = 'operator-rotation-original-token-123456';
+  const server = createControlServer({ db, operatorToken: originalToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const call = (token, path, options = {}) => fetch(base + path, {
+    ...options, headers: { authorization: 'Bearer ' + token, ...(options.headers || {}) }
+  });
+  try {
+    const unauthenticated = await fetch(base + '/operator/rotate-token', { method: 'POST' });
+    assert.equal(unauthenticated.status, 401);
+
+    const rotated = await call(originalToken, '/operator/rotate-token', { method: 'POST' });
+    assert.equal(rotated.status, 200);
+    const result = await rotated.json();
+    assert.equal(result.rotated, true);
+    assert.equal(typeof result.token, 'string');
+    assert.notEqual(result.token, originalToken);
+
+    assert.equal((await call(originalToken, '/tasks')).status, 401);
+    assert.equal((await call(result.token, '/tasks')).status, 200);
+    assert.equal((await call(result.token, '/operator/rotate-token', { method: 'POST' })).status, 200);
+    assert.equal((await call(result.token, '/tasks')).status, 401);
+    db.close();
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    try { db.close(); } catch {}
+  }
 });
 
 test('HTTP API separates operator and participant credentials and enforces lease token', async () => {
@@ -212,6 +244,35 @@ test('CLI rejects remote and malformed API overrides before sending operator cre
     assert.notEqual(result.code, 0, url);
     assert.match(result.stderr, /RAYA_CC_URL must/);
     assert.equal(result.stderr.includes(token), false);
+  }
+});
+
+test('CLI redacts the operator token if an API error echoes it', async () => {
+  const token = 'cli-token-must-never-appear-in-error-output';
+  const fake = createHttpServer((req, res) => {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { code: 'internal_error', message: 'upstream echoed ' + req.headers.authorization } }));
+  });
+  await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = 'http://127.0.0.1:' + fake.address().port + '/control/v1';
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['src/cli.js', 'task', 'list'], {
+        cwd: process.cwd(), env: { ...process.env, RAYA_CC_URL: base, RAYA_CC_OPERATOR_TOKEN: token },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stdout = ''; let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', code => resolve({ code, stdout, stderr }));
+    });
+    assert.notEqual(result.code, 0);
+    assert.equal((result.stdout + result.stderr).includes(token), false);
+    assert.match(result.stderr, /\[REDACTED\]/);
+  } finally {
+    fake.closeAllConnections();
+    await new Promise(resolve => fake.close(resolve));
   }
 });
 

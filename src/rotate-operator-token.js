@@ -1,10 +1,2 @@
-import { openDatabase } from './db.js';
-import { rotateOperatorToken } from './operator-auth.js';
-
-const db = openDatabase(process.env.RAYA_CC_DATABASE || '.data/control-center.sqlite');
-try {
-  const token = rotateOperatorToken(db);
-  process.stdout.write('New Raya Control Center operator token (save it now):\n' + token + '\n');
-} finally {
-  db.close();
-}
+process.stderr.write('Offline token rotation is disabled because it cannot update the running HTTP server credential.\nUse: npm run cli -- operator rotate\n');
+process.exitCode = 2;

@@ -58,6 +58,18 @@ The rotation command changes the database hash immediately. The old server proce
 
 The API is local-only. Do not expose it through a reverse proxy, tunnel, port forward, or wildcard bind. Remote ingress is explicitly outside the MVP.
 
+## Operator token rotation
+
+Rotate the Operator credential through the running local API while the current token is still available:
+
+```powershell
+npm run cli -- operator rotate
+```
+
+The command returns the replacement token once. Save it securely before closing the terminal. The old token is invalidated immediately for subsequent requests; update the environment used to start the Control Center and all Operator CLI sessions to the new value before restarting or issuing more commands. Do not paste the token into tickets, chat, source files, or shell history. The token is returned in CLI standard output, so avoid transcript capture and redirected logs.
+
+Direct offline rotation through `src/rotate-operator-token.js` is disabled because it could update the database hash without updating the in-memory HTTP server credential.
+
 ## Windows data-directory permissions
 
 The database, WAL/SHM sidecars, and backups contain sensitive application state. On Windows, the default NTFS ACL inherited from a broadly writable parent directory may allow other local accounts to read or modify these files. Inspect the configured data directory and any separate backup directory before using the application with real data.

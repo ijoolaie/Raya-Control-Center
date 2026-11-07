@@ -28,10 +28,11 @@ function parseOptions(args) {
 
 async function callApi(path, { method = 'GET', body, operator = true } = {}) {
   const headers = {};
+  let operatorToken;
   if (operator) {
-    const token = process.env.RAYA_CC_OPERATOR_TOKEN;
-    if (!token) throw new Error('Set RAYA_CC_OPERATOR_TOKEN before using operator commands.');
-    headers.authorization = 'Bearer ' + token;
+    operatorToken = process.env.RAYA_CC_OPERATOR_TOKEN;
+    if (!operatorToken) throw new Error('Set RAYA_CC_OPERATOR_TOKEN before using operator commands.');
+    headers.authorization = 'Bearer ' + operatorToken;
   }
   if (body !== undefined) headers['content-type'] = 'application/json';
   const response = await fetch(BASE + path, {
@@ -41,7 +42,9 @@ async function callApi(path, { method = 'GET', body, operator = true } = {}) {
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
     const error = data.error || {};
-    throw new Error(response.status + ' ' + (error.code || 'http_error') + ': ' + (error.message || 'Request failed'));
+    const message = String(error.message || 'Request failed');
+    const safeMessage = operatorToken ? message.split(operatorToken).join('[REDACTED]') : message;
+    throw new Error(response.status + ' ' + (error.code || 'http_error') + ': ' + safeMessage);
   }
   return data;
 }
@@ -61,6 +64,7 @@ function usage() {
     '  npm run cli -- task cancel TASK_ID',
     '  npm run cli -- events [--entity-type TYPE] [--entity-id ID] [--limit N]',
     '  npm run cli -- reconcile',
+    '  npm run cli -- operator rotate',
     '',
     'Set RAYA_CC_OPERATOR_TOKEN for operator commands and RAYA_CC_URL to override the API base URL.'
   ].join('\n');
@@ -148,6 +152,11 @@ export async function main(args = process.argv.slice(2)) {
     if (opts.limit !== undefined) query.set('limit', String(opts.limit));
     const data = await callApi('/events' + (query.size ? '?' + query.toString() : ''));
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+    return;
+  }
+  if (group === 'operator' && action === 'rotate') {
+    const data = await callApi('/operator/rotate-token', { method: 'POST', body: {} });
+    process.stdout.write('New operator token (save it now; it is shown only once):\n' + data.token + '\n');
     return;
   }
   if (group === 'reconcile') {

@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { TextDecoder } from 'node:util';
 import { ControlCenter, ControlCenterError } from './control-center.js';
+import { rotateOperatorToken } from './operator-auth.js';
 
 const BASE = '/control/v1';
 const MAX_BODY_BYTES = 16 * 1024;
@@ -46,6 +47,7 @@ function validateQuery(method, url) {
   else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) allowed = [];
   else if (method === 'POST' && (
     path === BASE + '/participants/register' ||
+    path === BASE + '/operator/rotate-token' ||
     path === BASE + '/maintenance/reconcile-expired-leases' ||
     path === BASE + '/tasks' ||
     path === BASE + '/tasks/claim' ||
@@ -79,7 +81,7 @@ function bearer(req) {
 function allowedMethods(path) {
   if (DASHBOARD_ASSETS.has(path)) return ['GET'];
   if (path === BASE + '/health' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
-  if (path === BASE + '/participants/register' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
+  if (path === BASE + '/participants/register' || path === BASE + '/operator/rotate-token' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
   if (path === BASE + '/tasks') return ['GET', 'POST'];
   if (new RegExp('^' + BASE + '/participants/[^/]+/revoke$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) return ['GET'];
@@ -137,7 +139,7 @@ export function createControlServer({ db, operatorToken }) {
     throw new TypeError('A valid operator token (at least 32 characters) is required');
   }
   const center = new ControlCenter(db);
-  const operatorHash = hash(operatorToken).toString('hex');
+  let operatorHash = hash(operatorToken).toString('hex');
 
   const server = createServer({
     maxHeaderSize: 8 * 1024,
@@ -208,6 +210,14 @@ export function createControlServer({ db, operatorToken }) {
         if (!participant) throw new ControlCenterError('authentication_required', 'Valid participant credentials required');
         return participant;
       };
+
+      if (req.method === 'POST' && url.pathname === BASE + '/operator/rotate-token') {
+        requireOperator();
+        const rotatedToken = rotateOperatorToken(db);
+        operatorHash = hash(rotatedToken).toString('hex');
+        send(res, 200, { token: rotatedToken, rotated: true });
+        return;
+      }
 
       if (req.method === 'POST' && url.pathname === BASE + '/participants/register') {
         requireOperator();

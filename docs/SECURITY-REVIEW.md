@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: 7475dbd8593f3d21e36958f0a9f390a4c4db4114
+Reviewed commit: working tree after live operator-token rotation changes
 
 ## Scope
 
@@ -116,6 +116,14 @@ The implementation now uses `lstat` for endpoint checks so the final source/dest
 
 Backup/restore fault injection now covers both installation failure with successful rollback and rollback failure. The first case verifies the original live database is restored with all committed records intact. The second verifies the original database remains preserved at the reported rollback path when the rollback rename itself fails. Windows directory junctions and symbolic-link parent components are also covered by regression tests. Same-directory installation no longer overwrites a destination that appears concurrently. Concurrent ancestor replacement, non-NTFS hard-link behavior, and permission/ACL behavior still require review and targeted tests. Do not treat these changes as protection against a hostile process running with the same Windows user privileges.
 
+## Operator token rotation and CLI error output
+
+Operator-token rotation is now performed through an authenticated POST to `/control/v1/operator/rotate-token`. The handler validates the current in-memory credential, writes a new SHA-256 token hash to SQLite, updates the in-memory credential before responding, and returns the new random token once. Regression coverage proves unauthenticated rotation is rejected, the prior token fails immediately after rotation, and the replacement token works. The CLI exposes `npm run cli -- operator rotate`. The former offline rotation script now exits without opening or modifying the database because it could desynchronize the DB hash from the running server credential.
+
+CLI API error messages redact the configured Operator token if a server response echoes it. A local fake-server regression test intentionally echoes the Bearer header in a 500 response and verifies the token does not appear in stdout/stderr. Successful participant-registration responses and the explicit rotation command still display their one-time credentials by design; operators must protect terminal output and avoid transcript/log capture.
+
+Residual risks: the one-time replacement token is transmitted over loopback HTTP and printed to CLI stdout; local processes running as the same user may inspect or capture it. If the rotation response is lost after the server commits the new hash, the replacement token cannot be recovered from SQLite; recovery requires an explicit local administrative procedure not yet implemented. The environment variable for the server and CLI must be updated by the operator before restart or further authenticated CLI calls.
+
 ## Windows filesystem permissions
 
 A local Windows inspection of the repository current .data directory found inherited Authenticated Users: Modify and Users: Read & Execute access. This is an observation about this machine current NTFS ACL, not a claim about all Windows installations. The existing data directory and its files were not modified.
@@ -154,7 +162,8 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).
 - [x] Add and test an opt-in Windows ACL hardening helper for a dedicated data directory.
 - [ ] Apply and verify restrictive ACLs on the actual configured data and backup directories after the operator stops all processes; no live ACL has been changed.
-- [ ] Review token rotation and credential exposure under local filesystem and backup threat scenarios.
+- [x] Make Operator token rotation immediate in the running server and redact echoed credentials from CLI API errors.
+- [ ] Add a documented recovery path for a lost rotation response and independently review token handling under local filesystem and backup threat scenarios.
 - [x] Add regression coverage for credential redaction in HTTP errors, audit events, CLI failures, and dashboard output/source sinks.
 - [ ] Obtain independent adversarial review of credential handling and interactive browser behavior.
 - [ ] Obtain an independent security review from a reviewer who did not implement the controls.
