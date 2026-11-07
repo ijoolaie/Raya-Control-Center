@@ -400,6 +400,24 @@ test('HTTP rejects non-authority Host values including userinfo that disguises a
   });
 });
 
+test('HTTP rejects absolute-form and network-path request targets', async () => {
+  await createHarness(async ({ server }) => {
+    for (const target of ['http://attacker.example/control/v1/health', '//attacker.example/control/v1/health', '/\\attacker.example/control/v1/health']) {
+      const raw = await new Promise((resolve, reject) => {
+        const socket = createConnection(server.address().port, '127.0.0.1');
+        let response = '';
+        socket.setEncoding('utf8');
+        socket.on('connect', () => socket.write('GET ' + target + ' HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n'));
+        socket.on('data', chunk => { response += chunk; });
+        socket.on('end', () => resolve(response));
+        socket.on('error', reject);
+      });
+      assert.match(raw, /^HTTP\/1\.1 400/, 'request target must be origin-form: ' + target);
+      assert.equal(raw.includes('\"status\":\"ok\"'), false);
+    }
+  });
+});
+
 test('HTTP routes distinguish unsupported methods from unknown paths', async () => {
   await createHarness(async ({ request, operator }) => {
     const cases = [

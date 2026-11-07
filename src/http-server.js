@@ -163,7 +163,14 @@ export function createControlServer({ db, operatorToken }) {
         return;
       }
 
-      const url = new URL(req.url || '/', 'http://127.0.0.1');
+      const requestTarget = req.url || '/';
+      // This service accepts origin-form only; absolute-form and network-path
+      // targets must not supply an alternate authority that bypasses Host checks.
+      if (!requestTarget.startsWith('/') || requestTarget.startsWith('//') || requestTarget.includes('\\') || requestTarget.includes('#'))
+        throw new ControlCenterError('validation_error', 'Request target must use origin-form');
+      const url = new URL(requestTarget, 'http://127.0.0.1');
+      if (url.origin !== 'http://127.0.0.1')
+        throw new ControlCenterError('validation_error', 'Request target must use origin-form');
       const dashboardAsset = DASHBOARD_ASSETS.get(url.pathname);
       if (dashboardAsset) {
         if (req.method !== 'GET') {

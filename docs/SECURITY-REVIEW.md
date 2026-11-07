@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: a72518058433e2639acec795fe2dcbdb5e4f5d26
+Reviewed commit: 57b64f9778de0267773f2163b95549d4bac14034
 
 ## Scope
 
@@ -58,7 +58,7 @@ Verification:
 
 Residual risk:
 Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal for new events; it does not detect secrets or encrypt application data at rest. Existing event rows are not rewritten or deleted because the journal is append-only. Any sensitive values already recorded before this fix remain in the live database and in backups made before cleanup.
-### SEC-002 — URL userinfo could disguise a non-loopback Host authority
+### SEC-002 — Host and request-target parsing accepted alternate authority forms
 
 Severity: **Medium**
 Status: **Remediated in working tree; CI pending**
@@ -66,21 +66,24 @@ Status: **Remediated in working tree; CI pending**
 Evidence (pre-remediation):
 - `src/http-server.js` parsed the raw Host header by prepending `http://` and checking only the resulting URL hostname.
 - A Host value such as `attacker.example@localhost` is parsed with hostname `localhost` and username `attacker.example`; the old check therefore accepted a malformed authority containing userinfo.
+- The request handler constructed a URL directly from `req.url`; absolute-form and network-path request targets could supply a different authority while routing continued from the parsed pathname.
 
 Impact:
-The Host allowlist did not strictly validate HTTP authority syntax. A non-canonical Host value could pass the loopback check even though it contained a remote-looking userinfo component.
+The Host allowlist did not strictly validate HTTP authority syntax, and request-target authority was not constrained to origin-form. This created inconsistent interpretation of the authority used for loopback validation versus request routing.
 
 Remediation:
 - Reject authority values containing whitespace, userinfo delimiters, path separators, query/fragment delimiters, or percent escapes before URL parsing.
 - Require the parsed authority to have no username/password, path, query, or fragment, then apply the existing exact loopback hostname allowlist.
+- Accept origin-form request targets only; reject absolute-form, network-path, backslash, and fragment-bearing targets before URL parsing.
 
 Verification:
 - Raw HTTP regression tests verify `attacker.example@localhost`, path-bearing, query-bearing, and fragment-bearing Host values receive HTTP 421.
+- Raw HTTP regression tests verify absolute-form, network-path, and backslash-bearing request targets receive HTTP 400.
 - The existing non-loopback Host test continues to verify safe error output.
-- Targeted HTTP tests: 17/17 passed locally; full suite and CI are pending for this change.
+- Targeted HTTP tests: 18/18 passed locally; full suite and CI are pending for this change.
 
 Residual risk:
-This closes the observed userinfo parsing gap. Broader adversarial HTTP request-target and Host-parser coverage remains open; this is not an independent review.
+This closes the observed userinfo and alternate request-target authority gaps. Broader adversarial HTTP parser coverage remains open; this is not an independent review.
 
 ## Backup and restore hardening in progress
 
