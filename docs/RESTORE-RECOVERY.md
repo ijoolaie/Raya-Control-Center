@@ -8,6 +8,16 @@ This procedure is for an operator who has verified that the Control Center serve
 
 ## 1. Identify the database and inspect artifacts
 
+Run the read-only inspection command first:
+
+```powershell
+$env:RAYA_CC_DATABASE = (Join-Path (Get-Location) '.data\control-center.sqlite')
+npm run db:restore:inspect
+```
+
+The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, and whether each recorded artifact exists. It does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
+
+
 Set the exact paths; do not use a wildcard as a deletion target:
 
 ```powershell

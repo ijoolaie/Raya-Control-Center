@@ -8,9 +8,80 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
-import { createDatabaseBackup, restoreDatabaseBackup } from '../src/database-maintenance.js';
+import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
 import { acquireDatabaseMaintenanceLock } from '../src/database-runtime-lock.js';
+
+
+test('restore inspect reports an absent journal without creating or changing files', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-absent-'));
+  const database = join(directory, 'live.sqlite');
+  const before = readdirSync(directory);
+  try {
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.readOnly, true);
+    assert.equal(report.journal.status, 'absent');
+    assert.equal(report.database.exists, false);
+    assert.deepEqual(readdirSync(directory), before);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('restore inspect reports valid journal artifacts and is strictly read-only', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-valid-'));
+  const database = join(directory, 'live.sqlite');
+  const source = join(directory, 'source.sqlite');
+  const temporary = join(directory, '.live.sqlite.00000000-0000-4000-8000-000000000000.restore');
+  const rollback = database + '.pre-restore-00000000-0000-4000-8000-000000000000';
+  const journalPath = database + '.restore-journal.json';
+  const record = { version: 1, operation: 'restore', pid: 1234, startedAt: '2026-11-07T10:00:00.000Z', source, destination: database, temporary, rollback };
+  try {
+    writeFileSync(source, 'source-bytes');
+    writeFileSync(temporary, 'temporary-bytes');
+    writeFileSync(rollback, 'rollback-bytes');
+    writeFileSync(database + '.runtime.lock', '{"pid":1234}');
+    writeFileSync(journalPath, JSON.stringify(record));
+    const before = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    const report = inspectDatabaseRestore(database);
+    const after = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.journal.record.pid, 1234);
+    assert.equal(report.journal.artifacts.source.exists, true);
+    assert.equal(report.journal.artifacts.destination.exists, false);
+    assert.equal(report.journal.artifacts.temporary.exists, true);
+    assert.equal(report.journal.artifacts.rollback.exists, true);
+    assert.equal(report.locks.runtime.exists, true);
+    assert.deepEqual(after, before, 'inspection must not change names or file contents');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('restore inspect preserves and flags malformed journal JSON', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-malformed-'));
+  const database = join(directory, 'live.sqlite');
+  const journal = database + '.restore-journal.json';
+  try {
+    writeFileSync(journal, '{not-json');
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'malformed');
+    assert.equal(readFileSync(journal, 'utf8'), '{not-json');
+    assert.equal(report.journal.artifacts, null);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('restore inspect flags unsupported journal versions and destination mismatches', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-invalid-'));
+  const database = join(directory, 'live.sqlite');
+  const otherDatabase = join(directory, 'other.sqlite');
+  const journal = database + '.restore-journal.json';
+  const base = { version: 1, operation: 'restore', pid: 42, startedAt: '2026-11-07T10:00:00.000Z', source: join(directory, 'source.sqlite'), destination: database, temporary: join(directory, '.live.sqlite.00000000-0000-4000-8000-000000000000.restore'), rollback: database + '.pre-restore-id' };
+  try {
+    writeFileSync(journal, JSON.stringify({ ...base, version: 2 }));
+    assert.equal(inspectDatabaseRestore(database).journal.status, 'invalid');
+    writeFileSync(journal, JSON.stringify({ ...base, destination: otherDatabase, temporary: join(directory, '.other.sqlite.00000000-0000-4000-8000-000000000000.restore'), rollback: otherDatabase + '.pre-restore-00000000-0000-4000-8000-000000000000' }));
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'invalid');
+    assert.ok(report.journal.warnings.some(warning => warning.includes('does not match')));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('SQLite backup captures committed WAL data and restores a validated database', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-'));

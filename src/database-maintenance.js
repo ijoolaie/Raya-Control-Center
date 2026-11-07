@@ -1,12 +1,82 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 function pathEntryExists(filename) {
   try { lstatSync(filename); return true; }
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
+
+
+function inspectPath(filename) {
+  try {
+    const stat = lstatSync(filename);
+    return { path: filename, exists: true, kind: stat.isSymbolicLink() ? 'symbolic-link' : stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other', size: stat.isFile() ? stat.size : null };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { path: filename, exists: false, kind: null, size: null };
+    return { path: filename, exists: null, kind: null, size: null, error: error.code || 'inspection-failed' };
+  }
+}
+
+export function inspectDatabaseRestore(databasePath) {
+  const destination = resolve(databasePath);
+  const journalPath = destination + '.restore-journal.json';
+  const report = {
+    operation: 'restore-inspect', readOnly: true, database: inspectPath(destination),
+    locks: { runtime: inspectPath(destination + '.runtime.lock'), maintenance: inspectPath(destination + '.maintenance.lock') },
+    journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, warnings: [] }
+  };
+  if (!report.journal.exists) return report;
+  if (report.journal.exists !== true || report.journal.kind !== 'file') {
+    report.journal.status = 'unreadable';
+    report.journal.warnings.push('Journal path is not a readable regular file; preserve it for operator review.');
+    return report;
+  }
+  let record;
+  try { record = JSON.parse(readFileSync(journalPath, 'utf8')); }
+  catch (error) {
+    report.journal.status = 'malformed';
+    report.journal.warnings.push('Journal JSON could not be parsed (' + (error.code || error.name) + '); preserve all artifacts.');
+    return report;
+  }
+  const required = ['source', 'destination', 'temporary', 'rollback'];
+  const absolutePaths = record && required.every(key => typeof record[key] === 'string' && record[key].length > 0 && resolve(record[key]) === record[key]);
+  const recordedDestination = absolutePaths ? record.destination : '';
+  const temporaryName = record?.temporary ? basename(record.temporary) : '';
+  const temporaryPrefix = recordedDestination ? '.' + basename(recordedDestination) + '.' : '';
+  const temporaryToken = temporaryName.startsWith(temporaryPrefix) && temporaryName.endsWith('.restore')
+    ? temporaryName.slice(temporaryPrefix.length, -'.restore'.length) : '';
+  const rollbackPrefix = recordedDestination + '.pre-restore-';
+  const rollbackToken = record?.rollback?.toLowerCase().startsWith(rollbackPrefix.toLowerCase())
+    ? record.rollback.slice(rollbackPrefix.length) : '';
+  const validShape = Boolean(record && typeof record === 'object' && !Array.isArray(record)
+    && record.version === 1 && record.operation === 'restore' && absolutePaths
+    && record.source.toLowerCase() !== recordedDestination.toLowerCase()
+    && dirname(record.temporary).toLowerCase() === dirname(recordedDestination).toLowerCase()
+    && /^[0-9a-f-]{36}$/i.test(temporaryToken)
+    && /^[0-9a-f-]{36}$/i.test(rollbackToken));
+  const destinationMatches = validShape && recordedDestination.toLowerCase() === destination.toLowerCase();
+  report.journal.record = {
+    version: record?.version ?? null, operation: record?.operation ?? null,
+    pid: Number.isSafeInteger(record?.pid) && record.pid > 0 ? record.pid : null,
+    startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
+    source: typeof record?.source === 'string' ? record.source : null,
+    destination: typeof record?.destination === 'string' ? record.destination : null,
+    temporary: typeof record?.temporary === 'string' ? record.temporary : null,
+    rollback: typeof record?.rollback === 'string' ? record.rollback : null
+  };
+  report.journal.valid = Boolean(validShape && destinationMatches);
+  report.journal.status = report.journal.valid ? 'valid' : 'invalid';
+  if (!validShape) report.journal.warnings.push('Journal schema, version, operation, or absolute path fields are invalid.');
+  if (validShape && !destinationMatches) report.journal.warnings.push('Journal destination does not match the database path supplied to inspect.');
+  if (validShape) report.journal.artifacts = {
+    source: inspectPath(record.source), destination: inspectPath(record.destination),
+    temporary: inspectPath(record.temporary), rollback: inspectPath(record.rollback)
+  };
+  report.journal.warnings.push('Artifact presence does not establish which database is authoritative. Lock presence does not establish whether its owner is stale. No files or locks were changed.');
+  return report;
 }
 
 
