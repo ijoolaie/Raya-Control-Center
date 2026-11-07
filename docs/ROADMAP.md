@@ -74,7 +74,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Read-oriented dashboard for task, participant, and health inspection (Operator-authenticated data reads; no mutations exposed).
 - [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
-- [ ] Upgrade and packaging review.
+- [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.
 - [ ] Independent security review before any remote exposure.
 
 ## Phase 5 — Optional remote/multi-machine operation

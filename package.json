@@ -15,5 +15,12 @@
     "cli": "node src/cli.js",
     "db:backup": "node src/db-backup.js",
     "db:restore": "node src/db-restore.js"
-  }
+  },
+  "files": [
+    "src/",
+    "dashboard/",
+    "examples/reference-worker/",
+    "docs/",
+    "README.md"
+  ]
 }
