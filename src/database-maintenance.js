@@ -1,6 +1,6 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { constants, copyFileSync, linkSync, lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { constants, copyFileSync, linkSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -58,6 +58,18 @@ function validateSnapshot(filename) {
   }
 }
 
+function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
+  const prefix = '.' + baseName + '.';
+  for (const entry of readdirSync(directory)) {
+    if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
+    const token = entry.slice(prefix.length, -suffix.length);
+    if (!/^[0-9a-f-]{36}$/i.test(token)) continue;
+    const candidate = resolve(directory, entry);
+    const stat = lstatSync(candidate);
+    // Never follow or remove links/directories during stale-temp cleanup.
+    if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(candidate);
+  }
+}
 function sqlString(value) {
   return "'" + value.replaceAll("'", "''") + "'";
 }
@@ -70,15 +82,16 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
+  cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.tmp');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
-  const db = new DatabaseSync(source);
   try {
-    // VACUUM INTO creates a consistent snapshot that includes committed WAL content.
-    db.exec('VACUUM INTO ' + sqlString(temporary));
-  } finally {
-    db.close();
-  }
-  try {
+    const db = new DatabaseSync(source);
+    try {
+      // VACUUM INTO creates a consistent snapshot that includes committed WAL content.
+      db.exec('VACUUM INTO ' + sqlString(temporary));
+    } finally {
+      db.close();
+    }
     const metadata = validateSnapshot(temporary);
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
     // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
@@ -86,11 +99,10 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     try { rmSync(temporary, { force: true }); } catch { /* The installed backup is valid; a stale temp link is harmless. */ }
     return { path: destination, ...metadata };
   } catch (error) {
-    rmSync(temporary, { force: true });
+    try { rmSync(temporary, { force: true }); } catch {}
     throw error;
   }
 }
-
 function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const source = assertRegularFile(backupPath, 'Backup source');
   const destination = resolve(databasePath);
@@ -103,6 +115,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     throw new Error('Database WAL sidecars exist; stop the server and ensure all database connections are closed before restore');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
+  cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.restore');
   if (pathEntryExists(destination) && !lstatSync(destination).isFile())
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');

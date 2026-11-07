@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,14 +16,20 @@ test('SQLite backup captures committed WAL data and restores a validated databas
   const database = join(directory, 'live.sqlite');
   const backup = join(directory, 'backup.sqlite');
   const restored = join(directory, 'restored.sqlite');
+  const staleBackupTemp = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000000.tmp');
+  const staleRestoreTemp = join(directory, '.restored.sqlite.00000000-0000-4000-8000-000000000000.restore');
   let db;
   try {
     db = openDatabase(database);
     const center = new ControlCenter(db);
     const task = center.createTask({ type: 'backup.snapshot', payload: { committed: true } });
+    writeFileSync(staleBackupTemp, 'stale partial backup');
     const backupResult = createDatabaseBackup(database, backup);
+    assert.equal(existsSync(staleBackupTemp), false);
     assert.equal(backupResult.schemaVersion, 5);
+    writeFileSync(staleRestoreTemp, 'stale partial restore');
     const restoreResult = restoreDatabaseBackup(backup, restored);
+    assert.equal(existsSync(staleRestoreTemp), false);
     assert.equal(restoreResult.schemaVersion, 5);
     const restoredDb = openDatabase(restored);
     assert.deepEqual(new ControlCenter(restoredDb).getTask(task.id).payload, { committed: true });
@@ -239,6 +245,34 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
     assert.equal(existsSync(database + '.runtime.lock'), false);
   } finally {
     release?.();
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('backup removes a partial temporary snapshot when VACUUM INTO fails', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-failure-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.failure.cleanup' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.message, 'injected-vacuum-failure');
+    assert.equal(existsSync(backup), false);
+    assert.deepEqual(
+      (readdirSync(directory)).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')),
+      []
+    );
+  } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

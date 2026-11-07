@@ -132,7 +132,7 @@ npm run db:backup
 npm run db:backup -- D:/Backups/raya-control-center.sqlite
 ```
 
-The default destination is a timestamped file under `.backups`. Existing destination files are never overwritten. Set `RAYA_CC_DATABASE` if the live database is not at the default path.
+The default destination is a timestamped file under `.backups`. The backup and restore commands remove only stale regular temporary files matching their exact destination-specific UUID naming pattern after acquiring the maintenance lock. They do not follow or delete symbolic links, directories, or .pre-restore-* rollback files. If a process is forcibly terminated, first verify and resolve its stale .maintenance.lock using the documented lock procedure; then rerun maintenance to clean abandoned temporary files. Existing destination files are never overwritten. Set `RAYA_CC_DATABASE` if the live database is not at the default path.
 
 Restore is deliberately offline. It acquires the same per-database runtime lock used by server startup, so an active Control Center is rejected before the database can be replaced. It also acquires the maintenance lock to exclude a simultaneous backup:
 
