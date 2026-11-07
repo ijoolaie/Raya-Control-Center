@@ -21,6 +21,7 @@
     "dashboard/",
     "examples/reference-worker/",
     "docs/",
+    "scripts/",
     "README.md"
   ]
 }

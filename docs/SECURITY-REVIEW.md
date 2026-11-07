@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: 3b586e724b5d992c497c24015b9f33de3e00bec5
+Reviewed commit: 7475dbd8593f3d21e36958f0a9f390a4c4db4114
 
 ## Scope
 
@@ -116,6 +116,14 @@ The implementation now uses `lstat` for endpoint checks so the final source/dest
 
 Backup/restore fault injection now covers both installation failure with successful rollback and rollback failure. The first case verifies the original live database is restored with all committed records intact. The second verifies the original database remains preserved at the reported rollback path when the rollback rename itself fails. Windows directory junctions and symbolic-link parent components are also covered by regression tests. Same-directory installation no longer overwrites a destination that appears concurrently. Concurrent ancestor replacement, non-NTFS hard-link behavior, and permission/ACL behavior still require review and targeted tests. Do not treat these changes as protection against a hostile process running with the same Windows user privileges.
 
+## Windows filesystem permissions
+
+A local Windows inspection of the repository current .data directory found inherited Authenticated Users: Modify and Users: Read & Execute access. This is an observation about this machine current NTFS ACL, not a claim about all Windows installations. The existing data directory and its files were not modified.
+
+An opt-in PowerShell helper, scripts/secure-data-acl.ps1, now hardens a dedicated data directory and its descendants to explicit Full Control for only the invoking user, SYSTEM, and local Administrators. It rejects reparse points, checks for open files before changing anything, supports -WhatIf, disables inherited ACLs on each item, and attempts in-memory ACL rollback if an update fails. A disposable-tree test verifies the allowed principals, WhatIf behavior, and refusal when a file is open. The test is included in Windows CI.
+
+Residual risks: this helper is not automatically applied; operators must run it separately for data and backup directories after stopping processes. It does not protect against local Administrators, SYSTEM, malware running as the same user, or offline disk access. The helper test does not establish protection against every NTFS reparse/hard-link race or validate ACL behavior on non-NTFS filesystems.
+
 ## WAL recovery and process termination
 
 The WAL recovery regression launches a child process, opens an immediate write transaction, confirms the uncommitted update is active, and forcibly terminates that process. Reopening the database recovers the prior committed task state (`queued`), and a truncate checkpoint succeeds. The test passed in CI on Node 24 and Node 26 / Windows. Graceful shutdown is tested separately through the same runtime shutdown function used by the SIGINT/SIGTERM handlers: it stops accepting HTTP requests, closes idle connections, completes the close callback, closes SQLite, and permits a successful database reopen. The integration test runs on Windows; delivery of operating-system console signals themselves is not asserted by the test.
@@ -128,10 +136,10 @@ The WAL recovery regression launches a child process, opens an immediate write t
 | Host validation | HTTP handler accepts loopback Host names and rejects others | Inspected; parser edge cases need independent testing |
 | HTTP limits | Header, request, body, keep-alive, and per-socket limits are configured | Inspected; existing integration coverage present |
 | Credential separation | Operator and Participant credentials use distinct routes and checks; lease token is separately required for worker mutations | Inspected; independent adversarial testing pending |
-| Token storage | Operator and Participant token hashes are stored; lease hashes are stored | Inspected; filesystem/database protection is an operational responsibility |
+| Token storage | Operator and Participant token hashes are stored; lease hashes are stored | Application behavior inspected; Windows data ACL helper available but not applied to the live data directory |
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
 | Dashboard | Operator token is held in page memory; dynamic values use `textContent`; no HTML injection sinks, console logging, or payload/result rendering | Static asset and source regression checks pass; interactive browser testing remains pending |
-| Backup/restore | Dedicated backup and offline restore implementation exists | Not yet fully reviewed |
+| Backup/restore | Dedicated backup and offline restore implementation exists; fault-injection covers installation and rollback failures | Path and rollback tests pass; ACLs on backup destinations remain an operator responsibility |
 | Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination and graceful runtime shutdown tests passed in CI on Node 24/26 Windows |
 
 ## Open review work
@@ -144,7 +152,9 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [x] Reject malformed Host authorities that could use URL userinfo to disguise a remote host (SEC-002; CI verified).
 - [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).
-- [ ] Review token rotation, backup exposure, local filesystem permissions, and database file permissions.
+- [x] Add and test an opt-in Windows ACL hardening helper for a dedicated data directory.
+- [ ] Apply and verify restrictive ACLs on the actual configured data and backup directories after the operator stops all processes; no live ACL has been changed.
+- [ ] Review token rotation and credential exposure under local filesystem and backup threat scenarios.
 - [x] Add regression coverage for credential redaction in HTTP errors, audit events, CLI failures, and dashboard output/source sinks.
 - [ ] Obtain independent adversarial review of credential handling and interactive browser behavior.
 - [ ] Obtain an independent security review from a reviewer who did not implement the controls.

@@ -26,3 +26,6 @@ jobs:
         run: npm run check
       - name: Test
         run: npm test
+      - name: Windows data ACL helper test
+        shell: pwsh
+        run: ./test-support/test-data-acl.ps1

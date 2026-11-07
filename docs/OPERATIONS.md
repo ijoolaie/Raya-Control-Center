@@ -58,6 +58,20 @@ The rotation command changes the database hash immediately. The old server proce
 
 The API is local-only. Do not expose it through a reverse proxy, tunnel, port forward, or wildcard bind. Remote ingress is explicitly outside the MVP.
 
+## Windows data-directory permissions
+
+The database, WAL/SHM sidecars, and backups contain sensitive application state. On Windows, the default NTFS ACL inherited from a broadly writable parent directory may allow other local accounts to read or modify these files. Inspect the configured data directory and any separate backup directory before using the application with real data.
+
+An opt-in helper is provided for a dedicated data directory. Stop the Control Center and all workers first, close any process using files in the directory, then run this from the repository root:
+
+```powershell
+.\scripts\secure-data-acl.ps1 -Path .\.data
+```
+
+For a custom RAYA_CC_DATABASE path, pass its containing directory instead. Run the helper separately for a backup directory if backups are stored elsewhere. The helper refuses reparse points and open files, supports -WhatIf, disables inherited ACLs on the selected tree, and grants Full Control only to the current Windows user, SYSTEM, and local Administrators. It snapshots existing ACLs in memory and attempts to restore them if an ACL update fails. It does not change parent directories, other project files, or system-wide permissions.
+
+This is an explicit administrative operation; the application does not modify ACLs automatically. Review the target path carefully before running it. The helper has been tested against a disposable directory tree in Windows CI; the repository actual .data directory has not been modified. Do not run it against a directory shared by unrelated applications or data.
+
 ## Data and backups
 
 The database is application state and contains participant metadata, task payloads, leases, operator credential hash, and event history. Protect it as private data.
