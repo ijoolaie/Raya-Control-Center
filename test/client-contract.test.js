@@ -418,7 +418,7 @@ test('HTTP rejects malformed loopback Host port authorities', async () => {
   });
 });
 
-test('Node HTTP parser rejects duplicate Host headers before application routing', async () => {
+test('HTTP server rejects duplicate Host headers before application routing', async () => {
   await createHarness(async ({ server }) => {
     const raw = await new Promise((resolve, reject) => {
       const socket = createConnection(server.address().port, '127.0.0.1');
