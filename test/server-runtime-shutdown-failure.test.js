@@ -21,7 +21,9 @@ test('shutdown releases SQLite and runtime lock when the listener was already st
     });
     assert.equal(runtime.server.listening, false);
 
-    await assert.rejects(runtime.shutdown(), error => error?.code === 'ERR_SERVER_NOT_RUNNING');
+    const failedShutdown = runtime.shutdown();
+    assert.equal(runtime.shutdown(), failedShutdown, 'a failed shutdown must remain idempotent');
+    await assert.rejects(failedShutdown, error => error?.code === 'ERR_SERVER_NOT_RUNNING');
     assert.equal(existsSync(lockPath), false, 'shutdown error must not strand the runtime lock');
 
     const reopened = openDatabase(databasePath);
