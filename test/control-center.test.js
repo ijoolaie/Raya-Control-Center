@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { openDatabase, migrate } from '../src/db.js';
 import { ControlCenter, ControlCenterError } from '../src/control-center.js';
@@ -124,23 +125,47 @@ test('expired leases cannot mutate task state', () => {
 
 
 
-test('WAL recovery rolls back an uncommitted transaction after process exit', () => {
+test('WAL recovery rolls back an uncommitted transaction after forced process termination', { timeout: 15000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'raya-crash-'));
   const filename = join(dir, 'crash.sqlite');
   let db = openDatabase(filename);
   const task = new ControlCenter(db).createTask({ type: 'demo.crash-recovery' });
   db.close();
   db = null;
+  let child;
   try {
     const workerPath = new URL('../test-support/crash-worker.js', import.meta.url);
-    const child = spawnSync(process.execPath, [fileURLToPath(workerPath), filename, task.id], { encoding: 'utf8' });
-    assert.equal(child.status, 0, child.stderr);
+    child = spawn(process.execPath, [fileURLToPath(workerPath), filename, task.id], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    await new Promise((resolve, reject) => {
+      const onData = () => {
+        if (stdout.includes('TRANSACTION_OPEN')) {
+          child.stdout.off('data', onData);
+          resolve();
+        }
+      };
+      child.stdout.on('data', onData);
+      child.once('error', reject);
+      child.once('exit', (code, signal) => reject(new Error('Crash worker exited before opening transaction (' + code + ', ' + signal + '): ' + stderr)));
+    });
+    const exited = once(child, 'exit');
+    child.kill('SIGTERM');
+    const [code, signal] = await exited;
+    assert.ok(signal !== null || code !== 0, 'child must be terminated without a clean exit');
+    child = null;
     db = openDatabase(filename);
     assert.equal(new ControlCenter(db).getTask(task.id).status, 'queued');
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     db.close();
     db = null;
   } finally {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await once(child, 'exit');
+    }
     if (db) db.close();
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

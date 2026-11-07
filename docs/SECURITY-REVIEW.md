@@ -60,9 +60,13 @@ Residual risk:
 Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal for new events; it does not detect secrets or encrypt application data at rest. Existing event rows are not rewritten or deleted because the journal is append-only. Any sensitive values already recorded before this fix remain in the live database and in backups made before cleanup.
 ## Backup and restore hardening in progress
 
-The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. A regression test verifies directory inputs and destinations are rejected without moving the live database. Local validation: `npm test` 54/54 and `npm run check` passed on Node.js 22.23.2; Node 24/26 CI is pending for this code change.
+The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. Regression tests reject directory inputs and destinations, reject symbolic-link/junction parent components, and verify the live database remains intact. Local validation for the current working tree: `npm test` 55/55 and `npm run check` passed on Node.js 22.23.2. The backup/restore code in commit `b8fb7f1` passed Node 24 and Node 26 Windows CI.
 
 This does not yet complete the backup/restore review. Windows directory junctions and symbolic-link parent components are covered by regression tests. Same-directory installation no longer overwrites a destination that appears concurrently. Concurrent ancestor replacement, rollback fault injection, non-NTFS hard-link behavior, and permission/ACL behavior still require review and targeted tests. Do not treat these changes as protection against a hostile process running with the same Windows user privileges.
+
+## WAL recovery and process termination
+
+The WAL recovery regression now launches a child process, opens an immediate write transaction, confirms the uncommitted update is active, and forcibly terminates that process. Reopening the database recovers the prior committed task state (`queued`), and a truncate checkpoint succeeds. The test passes locally on Windows; CI for the updated forced-termination test is pending. Graceful server shutdown is not established by this test: on Windows, `child.kill('SIGTERM')` terminates the child process and does not prove the application shutdown handler ran.
 
 ## Reviewed controls (implementation inspection only)
 
@@ -76,13 +80,14 @@ This does not yet complete the backup/restore review. Windows directory junction
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
 | Dashboard | Operator token is held in page memory; static assets use restrictive headers; UI is read-only | Inspected; browser/runtime testing pending |
 | Backup/restore | Dedicated backup and offline restore implementation exists | Not yet fully reviewed |
-| Startup recovery | Expired active leases are reconciled before listening and periodically | Inspected; crash/restart fault injection pending |
+| Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination test added (CI pending); graceful server shutdown still requires a platform-appropriate test |
 
 ## Open review work
 
 - [x] Remediate SEC-001 for new events; retain the documented historical-data residual risk.
 - [ ] Review database backup/restore for path traversal, overwrite, symlink, and rollback hazards.
-- [ ] Review startup/shutdown and WAL recovery under forced process termination.
+- [x] Verify WAL rollback after forced child-process termination and database reopen (local Windows test).
+- [ ] Verify graceful server shutdown and startup recovery under additional fault-injection scenarios.
 - [ ] Review URL/Host parsing edge cases and HTTP parser behavior with adversarial raw requests.
 - [ ] Review token rotation, backup exposure, local filesystem permissions, and database file permissions.
 - [ ] Add or identify independent tests for credential leakage through errors, events, CLI output, and dashboard rendering.
