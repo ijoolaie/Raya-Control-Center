@@ -108,3 +108,66 @@ test('HTTP validation errors do not disclose credentials, body contents, or stac
     assert.doesNotMatch(invalidPathText, /operator-boundary-secret|URIError|at \\w/);
   });
 });
+
+test('Participant kind is metadata; Operator authority and tasks:claim scope remain separate', async () => {
+  await withServer(async ({ base, operatorToken }) => {
+    const operatorHeaders = {
+      authorization: 'Bearer ' + operatorToken,
+      'content-type': 'application/json'
+    };
+    const call = (path, options = {}) => fetch(base + path, options);
+    const register = async (displayName, kind, scopes) => {
+      const response = await call('/participants/register', {
+        method: 'POST',
+        headers: operatorHeaders,
+        body: JSON.stringify({ displayName, kind, scopes })
+      });
+      assert.equal(response.status, 201);
+      return response.json();
+    };
+
+    const adapter = await register('mcp-adapter-no-scope', 'adapter', []);
+    const adapterHeaders = {
+      authorization: 'Bearer ' + adapter.token,
+      'content-type': 'application/json'
+    };
+
+    const adapterCannotCreateTask = await call('/tasks', {
+      method: 'POST',
+      headers: adapterHeaders,
+      body: JSON.stringify({ type: 'adapter.must.not.create' })
+    });
+    assert.equal(adapterCannotCreateTask.status, 401);
+
+    const adapterCannotReadEvents = await call('/events', { headers: adapterHeaders });
+    assert.equal(adapterCannotReadEvents.status, 401);
+
+    const adapterWithoutClaimScope = await call('/tasks/claim', {
+      method: 'POST',
+      headers: adapterHeaders,
+      body: '{}'
+    });
+    assert.equal(adapterWithoutClaimScope.status, 403);
+    assert.equal((await adapterWithoutClaimScope.json()).error.code, 'insufficient_scope');
+
+    const adapterWithClaimScope = await register('mcp-adapter-worker-mode', 'adapter', ['tasks:claim']);
+    const workerModeHeaders = {
+      authorization: 'Bearer ' + adapterWithClaimScope.token,
+      'content-type': 'application/json'
+    };
+    const claim = await call('/tasks/claim', {
+      method: 'POST',
+      headers: workerModeHeaders,
+      body: '{}'
+    });
+    assert.equal(claim.status, 200);
+    assert.deepEqual(await claim.json(), { claim: null });
+
+    const workerModeCannotCreateTask = await call('/tasks', {
+      method: 'POST',
+      headers: workerModeHeaders,
+      body: JSON.stringify({ type: 'adapter.must.not.create' })
+    });
+    assert.equal(workerModeCannotCreateTask.status, 401);
+  });
+});

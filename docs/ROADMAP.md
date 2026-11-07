@@ -57,11 +57,12 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
 
 ## Phase 3 — Integration contracts
-**Status: In progress**
+**Status: Requirements defined and tested; runnable consumer deferred**
 - [x] Publish versioned integration contract for Participant, Task, Lease, progress, heartbeat, cancellation, and recovery semantics.
 - [x] Add simulated independent HTTP client contract tests for success, cancellation, and participant revocation.
-- [ ] Define future Raya-Agent participant requirements.
-- [ ] Define future Raya-MCP adapter requirements.
+- [x] Define future Raya-Agent participant requirements in `CONSUMER-REQUIREMENTS.md`.
+- [x] Define future Raya-MCP adapter requirements and credential boundary in `CONSUMER-REQUIREMENTS.md`.
+- [x] Verify Participant kind, Operator credential separation, and current `tasks:claim` scope behavior with an independent HTTP authorization test.
 - [ ] Add a separately packaged runnable example client only if the test contract exposes a concrete integration need.
 
 This phase does not authorize development in either external repository. Raya-Agent and Raya-MCP remain future consumers/adapters only.

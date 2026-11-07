@@ -1,6 +1,6 @@
 # Integration Contract v1
 
-Status: implemented and exercised by an independent HTTP client test.
+Status: implemented and exercised by independent HTTP client tests. Consumer-specific future requirements are defined in [CONSUMER-REQUIREMENTS.md](./CONSUMER-REQUIREMENTS.md).
 Base path: `/control/v1`.
 Transport: HTTP on loopback only in the current MVP. This is not a remote-access contract.
 
@@ -14,6 +14,10 @@ Transport: HTTP on loopback only in the current MVP. This is not a remote-access
 - A successful claim returns a separate lease token. Treat it as a short-lived secret and keep it only for the lifetime of that lease.
 - Never put either token in a URL, task payload, result, progress details, event data, or logs.
 - Revocation is terminal for that Participant credential. Register a replacement Participant rather than attempting to reactivate the old token.
+
+## Current scope semantics
+
+Participant `kind` is descriptive metadata and does not grant privileges. The current API enforces only the `tasks:claim` Participant scope, on the claim route. Start, heartbeat, progress, complete, fail, cancellation acknowledgement, and lease-status reads require a valid Participant token plus the matching active Lease token; they do not currently have distinct per-action scopes. Operator routes always require the Operator credential. Consumers must not assume that arbitrary stored scope names are enforced. See [CONSUMER-REQUIREMENTS.md](./CONSUMER-REQUIREMENTS.md) for the normative consumer boundary and future requirements.
 
 ## Task lifecycle
 
