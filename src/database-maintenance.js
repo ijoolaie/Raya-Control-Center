@@ -27,9 +27,21 @@ export function inspectDatabaseRestore(databasePath) {
   const report = {
     operation: 'restore-inspect', readOnly: true, database: inspectPath(destination),
     locks: { runtime: inspectPath(destination + '.runtime.lock'), maintenance: inspectPath(destination + '.maintenance.lock') },
-    journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, warnings: [] }
+    journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: [] }
   };
   if (!report.journal.exists) {
+    try {
+      const prefix = basename(journalPath) + '.';
+      report.journal.orphanedTemporaryFiles = readdirSync(dirname(journalPath))
+        .filter(name => name.startsWith(prefix) && name.endsWith('.tmp')
+          && /^[0-9a-f-]{36}$/i.test(name.slice(prefix.length, -'.tmp'.length)))
+        .map(name => resolve(dirname(journalPath), name));
+      if (report.journal.orphanedTemporaryFiles.length) {
+        report.journal.warnings.push('Unpublished Restore journal temporary files were found. Preserve them for operator review; their presence does not establish whether Restore began.');
+      }
+    } catch (error) {
+      report.journal.warnings.push('Restore journal temporary files could not be enumerated (' + (error.code || error.name) + ').');
+    }
     report.recovery = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: report.locks, artifacts: { destination: report.database } });
     return report;
   }

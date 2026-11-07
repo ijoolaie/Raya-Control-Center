@@ -11,6 +11,7 @@ const originalUnlink = fs.unlinkSync;
 
 fs.linkSync = (source, target) => {
   if (target === destination && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup'].includes(mode)) throw new Error('injected-install-failure');
+  if (mode === 'crash-before-journal-publish' && target === destination + '.restore-journal.json') process.exit(82);
   const result = originalLink(source, target);
   if (mode === 'crash-after-journal' && target === destination + '.restore-journal.json') process.exit(77);
   return result;

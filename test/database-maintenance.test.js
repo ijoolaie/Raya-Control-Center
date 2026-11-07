@@ -266,6 +266,36 @@ test('restore rolls back the original database when atomic installation fails', 
   }
 });
 
+test('restore inspect reports an unpublished fsynced journal temp after process crash', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-journal-temp-crash-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.journal.temp.original' });
+    createDatabaseBackup(database, backup);
+    db.close();
+    db = null;
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-before-journal-publish', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 82, result.stderr);
+    assert.equal(existsSync(database), true, 'the live database must not have moved before journal publication');
+    assert.equal(existsSync(database + '.restore-journal.json'), false);
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'absent');
+    assert.equal(report.journal.orphanedTemporaryFiles.length, 1);
+    assert.ok(report.journal.warnings.some(warning => warning.includes('Unpublished Restore journal temporary files')));
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true, 'inspection must preserve the unpublished journal');
+    assert.equal(existsSync(database + '.runtime.lock'), true);
+    assert.equal(existsSync(database + '.maintenance.lock'), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore crash simulation classifies journal publication and staging boundaries', () => {
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   const scenarios = [
