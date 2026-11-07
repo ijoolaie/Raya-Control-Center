@@ -1,5 +1,6 @@
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
+import { syncDirectory } from './file-system-durability.js';
 
 function assertNoSymlinkParentComponents(filename) {
   const absolute = resolve(filename);
@@ -46,10 +47,11 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
     descriptor = openSync(lockPath, 'wx', 0o600);
     writeFileSync(descriptor, JSON.stringify(owner) + '\n', 'utf8');
     fsyncSync(descriptor);
+    syncDirectory(dirname(lockPath));
   } catch (error) {
     if (descriptor !== undefined) {
       closeSync(descriptor);
-      try { unlinkSync(lockPath); } catch {}
+      try { unlinkSync(lockPath); syncDirectory(dirname(lockPath)); } catch {}
     }
     if (error.code === 'EEXIST') {
       let detail = 'An existing ' + label + ' lock prevents access.';
@@ -68,7 +70,10 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
     try { closeSync(descriptor); } catch {}
     try {
       const current = JSON.parse(readFileSync(lockPath, 'utf8'));
-      if (current.pid === owner.pid && current.startedAt === owner.startedAt) unlinkSync(lockPath);
+      if (current.pid === owner.pid && current.startedAt === owner.startedAt) {
+        unlinkSync(lockPath);
+        syncDirectory(dirname(lockPath));
+      }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }

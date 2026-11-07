@@ -4,6 +4,7 @@ import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkd
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
+import { syncDirectory } from './file-system-durability.js';
 
 function pathEntryExists(filename) {
   try { lstatSync(filename); return true; }
@@ -149,6 +150,7 @@ function validateSnapshot(filename) {
 
 function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
   const prefix = '.' + baseName + '.';
+  let changed = false;
   for (const entry of readdirSync(directory)) {
     if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
     const token = entry.slice(prefix.length, -suffix.length);
@@ -156,9 +158,11 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
     const candidate = resolve(directory, entry);
     const stat = lstatSync(candidate);
     // Never follow or remove links/directories during stale-temp cleanup.
-    if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(candidate);
+    if (stat.isFile() && !stat.isSymbolicLink()) { unlinkSync(candidate); changed = true; }
   }
+  if (changed) syncDirectory(directory);
 }
+
 function syncFileContents(filename) {
   const descriptor = openSync(filename, 'r+');
   try { fsyncSync(descriptor); }
@@ -197,14 +201,16 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
     // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
     linkSync(temporary, destination);
+    try { syncDirectory(dirname(destination)); }
+    catch (error) { error.publishedArtifact = destination; throw error; }
     const cleanupWarnings = [];
-    try { rmSync(temporary, { force: true }); }
+    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); }
     catch (cleanupError) {
       cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
     }
     return { path: destination, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporary, { force: true }); }
+    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); }
     catch (cleanupError) {
       error.cleanupWarnings = [{
         artifact: 'temporary',
@@ -226,9 +232,10 @@ function createRestoreJournal(journalPath, record) {
     descriptor = undefined;
     // Publish the complete, flushed journal atomically without replacing an earlier recovery record.
     linkSync(temporary, journalPath);
+    syncDirectory(dirname(journalPath));
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
-    try { unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { unlinkSync(temporary); syncDirectory(dirname(journalPath)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
 }
 
@@ -253,6 +260,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
   const rollback = destination + '.pre-restore-' + randomUUID();
   let movedOriginal = false;
+  let installPublished = false;
   let journalCreated = false;
   try {
     createRestoreJournal(journalPath, {
@@ -275,24 +283,27 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
       if (!lstatSync(destination).isFile()) throw new Error('Restore destination must be a regular file');
       renameSync(destination, rollback);
       movedOriginal = true;
+      syncDirectory(dirname(destination));
     }
     // linkSync is atomic and fails if another process created the destination; renameSync could overwrite it on POSIX.
     linkSync(temporary, destination);
+    installPublished = true;
+    syncDirectory(dirname(destination));
     const cleanupWarnings = [];
-    try { rmSync(temporary, { force: true }); }
+    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); }
     catch (cleanupError) {
       cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
     }
-    try { unlinkSync(journalPath); }
+    try { unlinkSync(journalPath); syncDirectory(dirname(journalPath)); }
     catch (cleanupError) {
       cleanupWarnings.push({ artifact: 'journal', path: journalPath, error: cleanupError.code || cleanupError.name });
     }
     return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporary, { force: true }); } catch {}
+    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); } catch {}
     if (movedOriginal) {
       if (!pathEntryExists(destination)) {
-        try { renameSync(rollback, destination); }
+        try { renameSync(rollback, destination); syncDirectory(dirname(destination)); }
         catch (rollbackError) {
           throw new AggregateError([error, rollbackError], 'Restore failed and automatic rollback could not complete; the original database remains at ' + rollback);
         }
@@ -300,9 +311,9 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
         throw new Error('Restore failed because the destination appeared concurrently; the original database remains at ' + rollback, { cause: error });
       }
     }
-    if (journalCreated && (!movedOriginal || pathEntryExists(destination))) {
+    if (journalCreated && ((!movedOriginal && !installPublished) || (movedOriginal && !installPublished && pathEntryExists(destination)))) {
       // No rollback decision remains outstanding; otherwise preserve the journal with the rollback file.
-      try { unlinkSync(journalPath); } catch {}
+      try { unlinkSync(journalPath); syncDirectory(dirname(journalPath)); } catch {}
     }
     throw error;
   }
