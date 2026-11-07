@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -827,6 +828,81 @@ test('backup does not overwrite a destination created after preflight validation
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test('backup remains a transactionally consistent snapshot during a concurrent WAL commit', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-concurrent-wal-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const marker = join(directory, 'vacuum-started.marker');
+  const rowCount = 12000;
+  const payload = 'x'.repeat(2048);
+  let db;
+  let child;
+  let snapshot;
+  try {
+    db = openDatabase(database);
+    db.exec('CREATE TABLE backup_probe (id INTEGER PRIMARY KEY, generation INTEGER NOT NULL, payload TEXT NOT NULL)');
+    const insert = db.prepare('INSERT INTO backup_probe (generation, payload) VALUES (0, ?)');
+    db.exec('BEGIN');
+    try {
+      for (let index = 0; index < rowCount; index += 1) insert.run(payload);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    child = spawn(process.execPath, [fileURLToPath(worker), database, backup, 'concurrent-write', marker], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+
+    const deadline = Date.now() + 15000;
+    while (!existsSync(marker) && child.exitCode === null && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(existsSync(marker), true, 'backup worker did not reach VACUUM INTO: ' + stderr);
+    assert.equal(child.exitCode, null, 'VACUUM should still be active when the competing write begins');
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec('UPDATE backup_probe SET generation = 1');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout), { ok: true });
+
+    snapshot = new DatabaseSync(backup);
+    const integrity = snapshot.prepare('PRAGMA integrity_check').all();
+    assert.equal(integrity.length, 1);
+    assert.equal(integrity[0].integrity_check, 'ok');
+    const generations = snapshot.prepare('SELECT generation, COUNT(*) AS count FROM backup_probe GROUP BY generation ORDER BY generation').all();
+    assert.ok(
+      (generations.length === 1 && generations[0].generation === 0 && generations[0].count === rowCount)
+      || (generations.length === 1 && generations[0].generation === 1 && generations[0].count === rowCount),
+      'snapshot must contain one complete transaction generation, got ' + JSON.stringify(generations)
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM backup_probe WHERE generation = 1').get().count, rowCount);
+  } finally {
+    if (snapshot) snapshot.close();
+    if (child && child.exitCode === null) {
+      child.kill();
+      await once(child, 'exit');
+    }
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('backup removes a partial temporary snapshot when VACUUM INTO fails', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-failure-'));
   const database = join(directory, 'live.sqlite');
