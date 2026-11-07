@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 2 - local API and CLI implemented; verification in progress.
+**Status:** Phase 3 - local API, CLI, and runnable Reference Worker implemented; verification in progress.
 
 ## Ownership and scope
 
@@ -95,3 +95,7 @@ Use npm run cli -- participant list --status active to list participants, and np
 - RAYA_CC_DATABASE selects the live database path for both commands.
 
 See docs/OPERATIONS.md for the safe restore procedure.
+
+## Reference Worker
+
+A runnable Participant worker example is available in [examples/reference-worker](./examples/reference-worker/README.md). It demonstrates claim/start/heartbeat/progress/cancellation/completion using only a Participant token and lease tokens. Its allowlist contains only `demo.echo` and `demo.delay`; arbitrary shell or code execution is not supported.
