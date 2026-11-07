@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: 8ab14a5579890b2a72a26812baf3746b2e1c0de6
+Reviewed commit: a72518058433e2639acec795fe2dcbdb5e4f5d26
 
 ## Scope
 
@@ -28,10 +28,13 @@ No remote ingress, tunnel, reverse proxy, or port-forwarding behavior is in scop
 
 ## Confirmed observations
 
+SEC-001 was remediated in commit `ba933f23d2a21824b50eeb64c863aa070cb32ea3` and the historical-retention clarification was recorded in `a72518058433e2639acec795fe2dcbdb5e4f5d26`. GitHub Actions push and pull-request workflows for the reviewed head both passed on Node 24 / Windows and Node 26 / Windows. This is implementation and CI evidence, not independent verification.
+
+
 ### SEC-001 — Untrusted worker-supplied content is copied into audit event data
 
 Severity: **Medium**  
-Status: **Open — remediation design required**
+Status: **Remediated for new events; CI verified on 2026-11-07**
 
 Evidence (pre-remediation):
 - src/control-center.js previously copied progress message, failure reason, and full completion result into appendEvent.
@@ -71,7 +74,7 @@ Task payloads, progress data, and successful results remain persisted in the Tas
 
 ## Open review work
 
-- [ ] Decide and remediate SEC-001.
+- [x] Remediate SEC-001 for new events; retain the documented historical-data residual risk.
 - [ ] Review database backup/restore for path traversal, overwrite, symlink, and rollback hazards.
 - [ ] Review startup/shutdown and WAL recovery under forced process termination.
 - [ ] Review URL/Host parsing edge cases and HTTP parser behavior with adversarial raw requests.
