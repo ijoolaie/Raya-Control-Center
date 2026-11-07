@@ -1,4 +1,4 @@
-const observed = value => value === true;
+const observed = value => value === true ? true : value === false ? false : null;
 
 export function classifyRestoreRecoveryState({ journalStatus, journalValid, locks = {}, artifacts = {} }) {
   const live = observed(artifacts.destination?.exists);
@@ -9,10 +9,16 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   const maintenanceLock = observed(locks.maintenance?.exists);
   const observations = { live, rollback, temporary, source, runtimeLock, maintenanceLock };
 
-  if (journalStatus === 'absent') return {
-    state: 'no-pending-restore', severity: 'info', automaticAction: 'none', observations,
-    guidance: 'No pending Restore journal was found. This is not a database integrity check.'
-  };
+  if (journalStatus === 'absent') {
+    if (runtimeLock || maintenanceLock) return {
+      state: 'no-pending-restore-lock-present', severity: 'warning', automaticAction: 'none', observations,
+      guidance: 'No Restore journal was found, but a runtime or maintenance lock remains. Do not infer that its owner is stale; verify all database users are stopped before operator action.'
+    };
+    return {
+      state: 'no-pending-restore', severity: 'info', automaticAction: 'none', observations,
+      guidance: 'No pending Restore journal or lock was found. This is not a database integrity check.'
+    };
+  }
   if (journalStatus !== 'valid' || journalValid !== true) return {
     state: 'manual-review-invalid-journal', severity: 'critical', automaticAction: 'none', observations,
     guidance: 'Preserve the journal and every artifact. Do not retry Restore or infer a recovery copy.'

@@ -30,7 +30,7 @@ export function inspectDatabaseRestore(databasePath) {
     journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, warnings: [] }
   };
   if (!report.journal.exists) {
-    report.recovery = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: report.locks });
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: report.locks, artifacts: { destination: report.database } });
     return report;
   }
   if (report.journal.exists !== true || report.journal.kind !== 'file') {

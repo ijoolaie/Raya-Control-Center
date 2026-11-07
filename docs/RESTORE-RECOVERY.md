@@ -15,7 +15,7 @@ $env:RAYA_CC_DATABASE = (Join-Path (Get-Location) '.data\control-center.sqlite')
 npm run db:restore:inspect
 ```
 
-The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, and a conservative recovery.state classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
+The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, and a conservative recovery.state classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. When no valid journal exists, artifact paths that are not independently inspected are reported as null (unknown), not as absent. A remaining runtime or maintenance lock is classified separately as no-pending-restore-lock-present. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
 
 
 Set the exact paths; do not use a wildcard as a deletion target:
@@ -104,7 +104,8 @@ The recovery.state field is deliberately conservative:
 
 | State | Meaning of observed paths | Required posture |
 | --- | --- | --- |
-| no-pending-restore | No journal at the expected path | Normal operation may continue; this is not an integrity check |
+| no-pending-restore | No journal or lock at the expected paths | Normal operation may continue; this is not an integrity check |
+| no-pending-restore-lock-present | No journal, but a runtime or maintenance lock remains | Verify all database users are stopped; do not infer stale ownership |
 | manual-review-invalid-journal | Journal malformed, invalid, or unreadable | Preserve all artifacts; no retry |
 | blocked-lock-present | A valid journal and at least one lock path exists | Verify all database users are stopped; do not infer stale ownership |
 | live-missing-rollback-present | Live path absent, rollback path present | Validate a separate copy; operator must choose explicitly |
@@ -126,8 +127,10 @@ The automated child-process crash suite currently terminates a Restore worker at
 | After staged-copy validation, before moving the original | Live database, valid journal, and staged temporary; no rollback | The pre-move boundary remains distinguishable from the later move/install windows by observed paths only |
 | Immediately after moving the original | Valid journal, staged temporary, and rollback; live path absent | The original database remains available at the recorded rollback path |
 | Immediately after installing the new database | Valid journal, live installed database, and rollback | Both database copies remain available and inspection does not choose between them |
+| After temporary-file cleanup, before journal cleanup | Valid journal, live installed database, and rollback; no temporary | The new live database and original rollback remain; the journal still records the unfinished operation |
+| Immediately after journal cleanup, before lock release | No journal; live installed database and rollback; both locks remain | Inspection reports the residual lock instead of treating the operation as an entirely clear state |
 
-The first three boundaries are exercised by the `restore crash simulation classifies journal publication and staging boundaries` test. The move/install boundaries are exercised by the adjacent crash-gap and post-install tests. These are child-process forced exits at instrumented filesystem-operation boundaries; they are not power-loss tests, kernel-crash tests, storage-controller tests, or proof of directory-entry durability. The lock files left by forced exits are expected, and the state model conservatively reports `blocked-lock-present` until an operator verifies ownership and stopped database users. The tests do not enable automatic recovery.
+The first three boundaries are exercised by the `restore crash simulation classifies journal publication and staging boundaries` test. The move/install boundaries are exercised by the adjacent crash-gap and post-install tests. These are child-process forced exits at instrumented filesystem-operation boundaries; they are not power-loss tests, kernel-crash tests, storage-controller tests, or proof of directory-entry durability. The lock files left by forced exits are expected, and the state model conservatively reports `blocked-lock-present` until an operator verifies ownership and stopped database users. The final temporary-file and journal-cleanup windows are exercised by the restore cleanup crash-boundary test. The tests do not enable automatic recovery.
 
 ## Safety properties and limitations
 

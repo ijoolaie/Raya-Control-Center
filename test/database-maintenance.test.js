@@ -20,6 +20,7 @@ test('Restore recovery state model is conservative across observed artifact comb
   const base = { journalStatus: 'valid', journalValid: true, locks: {}, artifacts: { source: artifact(true) } };
   const cases = [
     [{ ...base, journalStatus: 'absent' }, 'no-pending-restore'],
+    [{ ...base, journalStatus: 'absent', locks: { runtime: artifact(true) } }, 'no-pending-restore-lock-present'],
     [{ ...base, journalStatus: 'malformed' }, 'manual-review-invalid-journal'],
     [{ ...base, locks: { runtime: artifact(true) } }, 'blocked-lock-present'],
     [{ ...base, artifacts: { ...base.artifacts, destination: artifact(false), rollback: artifact(true), temporary: artifact(true) } }, 'live-missing-rollback-present'],
@@ -396,6 +397,61 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('restore cleanup crash boundaries retain artifacts and classify the post-journal lock', () => {
+  const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+  const scenarios = [
+    { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'blocked-lock-present' },
+    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-pending-restore-lock-present' }
+  ];
+  for (const scenario of scenarios) {
+    const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-cleanup-crash-'));
+    const database = join(directory, 'live.sqlite');
+    const backup = join(directory, 'backup.sqlite');
+    let db;
+    try {
+      db = openDatabase(database);
+      const center = new ControlCenter(db);
+      center.createTask({ type: 'restore.cleanup.original.one' });
+      createDatabaseBackup(database, backup);
+      center.createTask({ type: 'restore.cleanup.original.two' });
+      db.close();
+      db = null;
+      const result = spawnSync(process.execPath, [fileURLToPath(worker), scenario.mode, backup, database], { encoding: 'utf8' });
+      assert.equal(result.status, scenario.status, scenario.mode + ': ' + result.stderr);
+      const journalPath = database + '.restore-journal.json';
+      assert.equal(existsSync(journalPath), scenario.journal);
+      assert.equal(existsSync(database), true, scenario.mode + ' leaves the newly installed database at the live path; stderr=' + result.stderr + '; stdout=' + result.stdout);
+      const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
+      assert.ok(rollbackName, 'the original database remains at the rollback path');
+      const rollback = join(directory, rollbackName);
+      assert.equal(existsSync(database + '.runtime.lock'), true);
+      assert.equal(existsSync(database + '.maintenance.lock'), true);
+      if (scenario.journal) {
+        const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
+        assert.equal(existsSync(journal.temporary), scenario.temporary);
+        assert.equal(existsSync(journal.rollback), true);
+      }
+      const report = inspectDatabaseRestore(database);
+      assert.equal(report.recovery.state, scenario.state);
+      assert.equal(report.recovery.automaticAction, 'none');
+      assert.equal(report.recovery.observations.live, true);
+      assert.equal(report.recovery.observations.rollback, scenario.journal ? true : null);
+      assert.equal(report.recovery.observations.runtimeLock, true);
+      assert.equal(report.recovery.observations.maintenanceLock, true);
+      assert.equal(existsSync(journalPath), scenario.journal, 'inspection must not mutate journal state');
+      db = openDatabase(database);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+      db.close();
+      db = openDatabase(rollback);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
+      db.close();
+      db = null;
+    } finally {
+      if (db) db.close();
+      rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
   }
 });
 test('restore preserves the original rollback file and reports its path if rollback itself fails', () => {

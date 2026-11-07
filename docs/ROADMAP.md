@@ -54,7 +54,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [x] CLI for participant registration/read/revocation, task create/read/cancel, events, health, lease reconciliation, and Operator token rotation.
 - [x] Consistent SQLite backup and validated offline restore with rollback file.
 - [x] Added an atomically published, fsynced Restore intent journal that blocks repeat Restore after a process crash; documented operator-led recovery. Automatic recovery remains deferred pending journal-state interpretation and Windows crash-state verification.
-- [x] Added read-only Restore inspection and a conservative recovery-state model covering journal validity, lock presence, and live/temporary/rollback artifact combinations; no state performs automatic file or lock actions.
+- [x] Added read-only Restore inspection and a conservative recovery-state model covering journal validity, lock presence (including a residual lock after journal cleanup), and live/temporary/rollback artifact combinations; child-process crash simulations cover journal publication, staging, original move, install, temporary cleanup, and journal cleanup. No state performs automatic file or lock actions.
 - [x] Lease-bound task progress reporting, separate from heartbeat, with append-only audit events.
 - [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
 
