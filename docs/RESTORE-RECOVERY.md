@@ -115,6 +115,20 @@ The recovery.state field is deliberately conservative:
 
 Every state returns automaticAction: none. A temporary file can be incomplete, a live file can be newly installed, and a lock can be stale or active; this model does not distinguish those cases. It maps observed presence to a safe operator posture only.
 
+## Crash-state simulation coverage
+
+The automated child-process crash suite currently terminates a Restore worker at these operation boundaries and then inspects the actual on-disk artifacts:
+
+| Injected boundary | Expected files at termination | What the test establishes |
+| --- | --- | --- |
+| Immediately after journal publication | Live database and valid journal; no staged temporary or rollback | The intent record is published before staging begins; inspection reports the pending operation without mutation |
+| Immediately after staged copy | Live database, valid journal, and staged temporary; no rollback | A crash during the staging-to-validation gap leaves the original live path intact and preserves the staged artifact |
+| After staged-copy validation, before moving the original | Live database, valid journal, and staged temporary; no rollback | The pre-move boundary remains distinguishable from the later move/install windows by observed paths only |
+| Immediately after moving the original | Valid journal, staged temporary, and rollback; live path absent | The original database remains available at the recorded rollback path |
+| Immediately after installing the new database | Valid journal, live installed database, and rollback | Both database copies remain available and inspection does not choose between them |
+
+The first three boundaries are exercised by the `restore crash simulation classifies journal publication and staging boundaries` test. The move/install boundaries are exercised by the adjacent crash-gap and post-install tests. These are child-process forced exits at instrumented filesystem-operation boundaries; they are not power-loss tests, kernel-crash tests, storage-controller tests, or proof of directory-entry durability. The lock files left by forced exits are expected, and the state model conservatively reports `blocked-lock-present` until an operator verifies ownership and stopped database users. The tests do not enable automatic recovery.
+
 ## Safety properties and limitations
 
 - The application deliberately refuses to guess whether a lock is stale or which rollback file is authoritative. A pending Restore journal also blocks another Restore.

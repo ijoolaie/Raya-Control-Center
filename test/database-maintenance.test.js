@@ -257,6 +257,48 @@ test('restore rolls back the original database when atomic installation fails', 
   }
 });
 
+test('restore crash simulation classifies journal publication and staging boundaries', () => {
+  const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+  const scenarios = [
+    { mode: 'crash-after-journal', status: 77, temporary: false, live: true },
+    { mode: 'crash-after-stage', status: 76, temporary: true, live: true },
+    { mode: 'crash-before-original-move', status: 75, temporary: true, live: true }
+  ];
+  for (const scenario of scenarios) {
+    const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-boundary-'));
+    const database = join(directory, 'live.sqlite');
+    const backup = join(directory, 'backup.sqlite');
+    let db;
+    try {
+      db = openDatabase(database);
+      new ControlCenter(db).createTask({ type: 'restore.crash.boundary.original' });
+      createDatabaseBackup(database, backup);
+      db.close();
+      db = null;
+
+      const result = spawnSync(process.execPath, [fileURLToPath(worker), scenario.mode, backup, database], { encoding: 'utf8' });
+      assert.equal(result.status, scenario.status, `${scenario.mode}: ${result.stderr}`);
+      const journalPath = database + '.restore-journal.json';
+      assert.equal(existsSync(journalPath), true, `${scenario.mode} leaves the published journal`);
+      const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
+      assert.equal(existsSync(database), scenario.live);
+      assert.equal(existsSync(journal.temporary), scenario.temporary);
+      assert.equal(existsSync(journal.rollback), false);
+
+      const report = inspectDatabaseRestore(database);
+      assert.equal(report.journal.status, 'valid');
+      assert.equal(report.recovery.state, 'blocked-lock-present');
+      assert.equal(report.recovery.automaticAction, 'none');
+      assert.equal(report.recovery.observations.live, scenario.live);
+      assert.equal(report.recovery.observations.temporary, scenario.temporary);
+      assert.equal(report.recovery.observations.rollback, false);
+      assert.equal(existsSync(journalPath), true, 'inspection must not mutate the journal');
+    } finally {
+      if (db) db.close();
+      rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  }
+});
 test('restore can recover the original database after a crash between move and install', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-gap-'));
   const database = join(directory, 'live.sqlite');

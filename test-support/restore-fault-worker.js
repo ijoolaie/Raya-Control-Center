@@ -1,15 +1,29 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { restoreDatabaseBackup } from '../src/database-maintenance.js';
 
 const [mode, backup, destination] = process.argv.slice(2);
 const originalLink = fs.linkSync;
 const originalRename = fs.renameSync;
+const originalCopy = fs.copyFileSync;
 fs.linkSync = (source, target) => {
   if (target === destination) throw new Error('injected-install-failure');
-  return originalLink(source, target);
+  const result = originalLink(source, target);
+  if (mode === 'crash-after-journal' && target === destination + '.restore-journal.json') process.exit(77);
+  return result;
 };
-if (mode === 'crash-after-original-move') {
+if (mode === 'crash-after-stage') {
+  fs.copyFileSync = (source, target, flags) => {
+    const result = originalCopy(source, target, flags);
+    if (target.endsWith('.restore')) process.exit(76);
+    return result;
+  };
+} else if (mode === 'crash-before-original-move') {
+  fs.renameSync = (source, target) => {
+    if (source === destination && target.startsWith(destination + '.pre-restore-')) process.exit(75);
+    return originalRename(source, target);
+  };
+} else if (mode === 'crash-after-original-move') {
   fs.renameSync = (source, target) => {
     originalRename(source, target);
     if (source === destination && target.startsWith(destination + '.pre-restore-')) process.exit(78);
@@ -20,7 +34,9 @@ if (mode === 'crash-after-original-move') {
       originalLink(source, target);
       process.exit(79);
     }
-    return originalLink(source, target);
+    const result = originalLink(source, target);
+    if (mode === 'crash-after-journal' && target === destination + '.restore-journal.json') process.exit(77);
+    return result;
   };
 } else if (mode === 'rollback-failure') {
   let renameCount = 0;
