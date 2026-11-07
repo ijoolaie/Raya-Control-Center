@@ -54,7 +54,7 @@ Verification:
 - Backup validation and restore tests cover schema version 5.
 
 Residual risk:
-Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal; it does not detect secrets or encrypt application data at rest.
+Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal for new events; it does not detect secrets or encrypt application data at rest. Existing event rows are not rewritten or deleted because the journal is append-only. Any sensitive values already recorded before this fix remain in the live database and in backups made before cleanup.
 ## Reviewed controls (implementation inspection only)
 
 | Area | Observation | Review state |
