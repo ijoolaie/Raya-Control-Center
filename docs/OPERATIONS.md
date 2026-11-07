@@ -118,3 +118,19 @@ Restore is deliberately offline:
 The restore validates SQLite integrity, foreign-key consistency, and the schema version before replacing the target. The previous database file is retained beside it with a `.pre-restore-<id>` suffix for rollback. The command refuses to proceed when WAL sidecars exist; it does not try to delete or merge live WAL state. Start the server only after restore has completed successfully.
 
 Backups contain credential verifier hashes, participant metadata, task payloads, and event history. Store them as sensitive application data and restrict access accordingly.
+
+## Read-only dashboard
+
+With the Control Center server running, open:
+
+```text
+http://127.0.0.1:4317/
+```
+
+Paste the saved Operator token into the dashboard's session field and select **Connect**. The dashboard reads the latest 100 Tasks, Participants, and Events using the existing Operator-authenticated read endpoints. Status/type/entity filters are available; use **Refresh** to reload data.
+
+The dashboard is deliberately read-only. It does not create or cancel Tasks, register or revoke Participants, or run lease reconciliation. It does not display Task payloads, Task results, Participant tokens, lease tokens, or credential hashes.
+
+The Operator token is kept only in the page's JavaScript memory. It is not persisted in localStorage, sessionStorage, cookies, or URL parameters. Reloading the page or selecting **Disconnect** clears the session. Use the dashboard only on the local machine; the server continues to bind to loopback only.
+
+Static dashboard assets are served with a restrictive Content Security Policy, no-store caching, no-referrer policy, frame denial, and MIME sniffing protection. Dashboard HTML/assets are not an authentication boundary; all operational data remains protected by the Operator-authenticated API.

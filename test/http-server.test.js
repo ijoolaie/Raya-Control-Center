@@ -238,3 +238,38 @@ test('operator list endpoints filter and paginate participants and tasks', async
     db.close();
   }
 });
+
+test('serves the read-only dashboard and static assets with restrictive security headers', async () => {
+  const db = openDatabase(':memory:');
+  const server = createControlServer({ db, operatorToken: 'dashboard-test-operator-token-'.repeat(2) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  try {
+    const page = await fetch(base + '/');
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
+    assert.equal(page.headers.get('x-frame-options'), 'DENY');
+    assert.match(await page.text(), /Read-only operational overview/);
+
+    const script = await fetch(base + '/dashboard.js');
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type'), /javascript/);
+    const scriptText = await script.text();
+    assert.match(scriptText, /let operatorToken =/);
+    assert.doesNotMatch(scriptText, /localStorage|sessionStorage/);
+
+    const stylesheet = await fetch(base + '/dashboard.css');
+    assert.equal(stylesheet.status, 200);
+    assert.match(stylesheet.headers.get('content-type'), /text\/css/);
+
+    const deniedMethod = await fetch(base + '/', { method: 'POST' });
+    assert.equal(deniedMethod.status, 405);
+    const query = await fetch(base + '/dashboard.js?x=1');
+    assert.equal(query.status, 400);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});

@@ -57,7 +57,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
 
 ## Phase 3 — Integration contracts
-**Status: Runnable reference consumer implemented; verification in progress**
+**Status: Verified**
 - [x] Publish versioned integration contract for Participant, Task, Lease, progress, heartbeat, cancellation, and recovery semantics.
 - [x] Add simulated independent HTTP client contract tests for success, cancellation, and participant revocation.
 - [x] Define future Raya-Agent participant requirements in `CONSUMER-REQUIREMENTS.md`.
@@ -70,9 +70,9 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 This phase does not authorize development in either external repository. Raya-Agent and Raya-MCP remain future consumers/adapters only.
 
 ## Phase 4 — Dashboard and operational hardening
-**Status: Deferred**
-- [ ] Read-oriented dashboard and guarded controls.
-- [ ] Audit/event explorer.
+**Status: In progress**
+- [x] Read-oriented dashboard for task, participant, and health inspection (Operator-authenticated data reads; no mutations exposed).
+- [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [ ] Upgrade and packaging review.
 - [ ] Independent security review before any remote exposure.

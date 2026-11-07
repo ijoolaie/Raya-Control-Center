@@ -1,10 +1,24 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { TextDecoder } from 'node:util';
 import { ControlCenter, ControlCenterError } from './control-center.js';
 
 const BASE = '/control/v1';
 const MAX_BODY_BYTES = 16 * 1024;
+const DASHBOARD_ASSETS = new Map([
+  ['/', ['../dashboard/index.html', 'text/html; charset=utf-8']],
+  ['/dashboard', ['../dashboard/index.html', 'text/html; charset=utf-8']],
+  ['/dashboard.css', ['../dashboard/dashboard.css', 'text/css; charset=utf-8']],
+  ['/dashboard.js', ['../dashboard/dashboard.js', 'text/javascript; charset=utf-8']]
+].map(([path, [file, contentType]]) => [path, { body: readFileSync(new URL(file, import.meta.url)), contentType }]));
+const DASHBOARD_HEADERS = {
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'x-frame-options': 'DENY',
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+};
 const hash = value => createHash('sha256').update(value, 'utf8').digest();
 
 function equalSecret(candidate, expectedHash) {
@@ -63,6 +77,7 @@ function bearer(req) {
 }
 
 function allowedMethods(path) {
+  if (DASHBOARD_ASSETS.has(path)) return ['GET'];
   if (path === BASE + '/health' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
   if (path === BASE + '/participants/register' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
   if (path === BASE + '/tasks') return ['GET', 'POST'];
@@ -141,6 +156,21 @@ export function createControlServer({ db, operatorToken }) {
       }
 
       const url = new URL(req.url || '/', 'http://127.0.0.1');
+      const dashboardAsset = DASHBOARD_ASSETS.get(url.pathname);
+      if (dashboardAsset) {
+        if (req.method !== 'GET') {
+          send(res, 405, { error: { code: 'method_not_allowed', message: 'Method not allowed' } }, { allow: 'GET' });
+          return;
+        }
+        if (url.search) throw new ControlCenterError('validation_error', 'Dashboard assets do not accept query parameters');
+        res.writeHead(200, {
+          'content-type': dashboardAsset.contentType,
+          'content-length': dashboardAsset.body.length,
+          ...DASHBOARD_HEADERS
+        });
+        res.end(dashboardAsset.body);
+        return;
+      }
       validateQuery(req.method || 'GET', url);
       const methods = allowedMethods(url.pathname);
       if (methods && !methods.includes(req.method || 'GET')) {

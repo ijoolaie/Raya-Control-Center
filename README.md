@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 3 - local API, CLI, and runnable Reference Worker implemented; verification in progress.
+**Status:** Phase 4 - local API, CLI, Reference Worker, and read-only dashboard implemented; verification in progress.
 
 ## Ownership and scope
 
@@ -25,6 +25,7 @@ This repository is the sole implementation home for Raya Control Center. It owns
 - Separate operator and participant bearer credentials; lease tokens are supplied separately in `X-Lease-Token`.
 - One-time operator-token bootstrap and explicit token rotation command.
 - Request-size limits, JSON validation, Host-header allowlist, and safe API errors.
+- Local read-only dashboard for task, participant, and audit-event inspection.
 
 ## Runtime requirements
 
@@ -99,3 +100,7 @@ See docs/OPERATIONS.md for the safe restore procedure.
 ## Reference Worker
 
 A runnable Participant worker example is available in [examples/reference-worker](./examples/reference-worker/README.md). It demonstrates claim/start/heartbeat/progress/cancellation/completion using only a Participant token and lease tokens. Its allowlist contains only `demo.echo` and `demo.delay`; arbitrary shell or code execution is not supported.
+
+## Dashboard
+
+Start the server with `npm start`, then open [http://127.0.0.1:4317/](http://127.0.0.1:4317/). Enter the saved Operator token to inspect tasks, participants, and recent audit events. The dashboard is read-only; it does not create, cancel, or revoke anything. The token is held only in page memory and is not written to local or session storage. See `docs/OPERATIONS.md` for details.
