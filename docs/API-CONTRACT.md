@@ -1,0 +1,139 @@
+# API Contract v1
+
+This contract describes the implemented local API. Base path: `/control/v1`.
+Default bind: `127.0.0.1` only. Default port: `4317`.
+
+For the complete consumer lifecycle, recovery rules, and independent client verification, see [INTEGRATION-CONTRACT.md](./INTEGRATION-CONTRACT.md).
+
+## Authentication
+
+- Operator endpoints require `Authorization: Bearer <operator-token>`.
+- Participant endpoints require `Authorization: Bearer <participant-token>`.
+- Worker lifecycle endpoints additionally require `X-Lease-Token: <lease-token>`.
+- The participant token and lease token are distinct credentials.
+- Tokens must never appear in URLs, request bodies, logs, event data, or error messages. The explicit one-time registration/rotation responses are the only API responses that return raw credentials.
+- Operator token is generated on first start and displayed once. Later starts require `RAYA_CC_OPERATOR_TOKEN`.
+- Normal rotation uses the authenticated local API with `npm run cli -- operator rotate`; the replacement token is displayed once and the previous token is invalidated immediately. If that response is lost, stop the server and use the offline recovery procedure in `OPERATIONS.md`.
+
+## Endpoints
+
+| Method | Path | Authentication | Purpose |
+|---|---|---|---|
+| GET | `/health` | None | Process/API health |
+| POST | `/operator/rotate-token` | Current Operator | Rotate the Operator token immediately; returns replacement token once |
+| POST | `/participants/register` | Operator | Register participant; returns token once |
+| GET | `/participants` | Operator | List participants with bounded filters and pagination |
+| GET | `/participants/{id}` | Operator | Read participant metadata |
+| POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks; safe to repeat |
+| POST | `/tasks` | Operator | Create task |
+| GET | `/tasks` | Operator | List tasks with bounded filters and pagination |
+| GET | `/tasks/{id}` | Operator | Read task |
+| POST | `/tasks/claim` | Participant + `tasks:claim` scope | Claim next eligible task |
+| POST | `/tasks/{id}/start` | Participant + lease header | Start claimed task |
+| POST | `/tasks/{id}/heartbeat` | Participant + lease header | Renew lease |
+| POST | `/tasks/{id}/progress` | Participant + lease header | Report task progress |
+| POST | `/tasks/{id}/complete` | Participant + lease header | Complete task |
+| POST | `/tasks/{id}/fail` | Participant + lease header | Fail task |
+| POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
+| GET | `/tasks/{id}/lease-status` | Participant + lease header | Read own active task status and cancellation signal |
+| POST | `/tasks/{id}/cancel-request` | Operator | Request cooperative cancellation |
+| GET | `/events` | Operator | Read bounded event history |
+| POST | `/maintenance/reconcile-expired-leases` | Operator | Reconcile expired leases |
+
+## Request bodies
+
+All non-empty request bodies must be valid UTF-8 JSON objects and are limited to 16 KiB. Invalid UTF-8 byte sequences are rejected with 400 validation_error; they are never decoded with replacement characters.
+
+- Register: `{ "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"] }`
+- Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
+- Task creation with an idempotency key returns `201` for the first creation and `200` with `idempotentReplay: true` for an identical replay. Reusing the key with a different type, payload, or priority returns `409 conflict`.
+- Claim: `{ "leaseDurationMs": 30000 }`
+- Heartbeat: `{ "leaseDurationMs": 30000 }`
+- Progress: `{ "percent": 50, "message": "Halfway", "details": {} }` (percent may be null; message max 240 chars; details max 2 KiB).
+- Complete: `{ "result": { "ok": true } }`
+- Fail: `{ "reason": "bounded diagnostic" }`
+
+Worker routes use the authenticated participant identity and `X-Lease-Token`; clients must not send participant IDs in request bodies. A successful empty claim returns `{ "claim": null }`.
+
+## Success response shapes
+
+All successful responses use `application/json; charset=utf-8`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. Response bodies are JSON objects with these endpoint-specific top-level fields:
+
+| Endpoint | Success body fields |
+|---|---|
+| `GET /health` | `status`, `api` |
+| `POST /operator/rotate-token` | `rotated`, `token` (the raw replacement Operator token is returned once only) |
+| `POST /participants/register` | `participant`, `token` (the raw participant token is returned once only) |
+| `GET /participants` | `participants`, `page` (`limit`, `offset`, `count`) |
+| `GET /participants/{id}` and `POST /participants/{id}/revoke` | `participant` |
+| `POST /maintenance/reconcile-expired-leases` | `blockedTaskIds` |
+| `GET /tasks` | `tasks`, `page` (`limit`, `offset`, `count`) |
+| `POST /tasks` | `task`, `idempotentReplay` |
+| `POST /tasks/claim` | `claim` (`null` when no task is available; otherwise `task` and `lease`) |
+| `GET /tasks/{id}` and task lifecycle mutations other than heartbeat | `task` |
+| `POST /tasks/{id}/heartbeat` | `taskId`, `expiresAt` |
+| `GET /tasks/{id}/lease-status` | `status` (`taskId`, `status`, `cancellationRequested`, `updatedAt`, `leaseExpiresAt`) |
+| `GET /events` | `events` |
+
+`POST /tasks` returns `201` for a new Task and `200` for an idempotent replay. Participant registration returns `201`. Other successful endpoints return `200`. The heartbeat response is intentionally a lease-renewal receipt rather than a Task representation; progress and other lifecycle mutations return the updated Task under `task`.
+## Query parameters
+
+Query parameters are route-specific and strict:
+
+- `GET /participants`: `status`, `kind`, `limit`, `offset`.
+- `GET /tasks`: `status`, `type`, `assignedParticipantId`, `limit`, `offset`.
+- `GET /events`: `entityType`, `entityId`, `limit`.
+- Other implemented routes do not accept query parameters.
+- Unknown or repeated parameter names, empty values, and non-decimal `limit`/`offset` values return `400 validation_error`.
+- Malformed percent-encoding in a recognized path parameter returns `400 validation_error`; validly encoded but unknown resource IDs return `404 not_found`.
+- `limit` and `offset` must use non-negative decimal integer notation; endpoint-specific range limits still apply.
+
+## Common rules
+
+- UTC timestamps.
+- Stable machine-readable error codes in the envelope `{ error: { code, message } }` for failures.
+- A known route used with an unsupported HTTP method returns `405 method_not_allowed` and an `Allow` header listing the supported methods; an unknown route returns `404 not_found`.
+- No CORS and no wildcard network binding.
+- HTTP parser framing errors (including conflicting Content-Length and Transfer-Encoding) are rejected by Node HTTP before route handling.
+- Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`; other hosts receive `421 misdirected_request` without echoing the supplied host.
+- Task state changes and their audit events commit atomically.
+- Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
+- Cancellation request is not cancellation acknowledgement.
+- Repeating participant revocation returns the current revoked Participant without another state change or audit event; an unknown participant ID remains `404 not_found`.
+- A Participant may poll `GET /tasks/{id}/lease-status` with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
+- API errors never expose stack traces or database details.
+- Request bodies and authorization headers are not logged.
+- Clients should use HTTP status and `error.code`, not parse human-readable error messages.
+
+## Error codes
+
+| HTTP status | Error code | Meaning |
+|---:|---|---|
+| 400 | `validation_error` | Invalid path, query, or request body |
+| 401 | `authentication_required` | Missing or invalid credentials |
+| 403 | `insufficient_scope` | Participant lacks required scope |
+| 404 | `not_found` | Unknown route or resource |
+| 405 | `method_not_allowed` | Known route with unsupported method; includes `Allow` |
+| 409 | `conflict`, `invalid_transition`, `lease_mismatch` | State or lease conflict |
+| 413 | `payload_too_large` | Request body exceeds 16 KiB |
+| 421 | `misdirected_request` | Host is not loopback |
+| 431 | HTTP parser | Request header block exceeds 8 KiB; parser-level response before route handling |
+| 500 | `internal_error` | Unexpected internal failure; generic message only |
+
+Error codes used: `authentication_required`, `insufficient_scope`, `not_found`, `method_not_allowed`, `invalid_transition`, `lease_mismatch`, `conflict`, `validation_error`, `payload_too_large`, `misdirected_request`, `internal_error`.
+
+Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in task payloads or event data.
+
+## HTTP connection and resource limits
+
+- The HTTP parser accepts request headers up to 8 KiB; larger header blocks are rejected with HTTP 431 before route handling.
+- Header receipt is bounded by headersTimeout (10 seconds), checked at a 1-second interval.
+- Complete request receipt is bounded by requestTimeout (30 seconds), independently of application body parsing.
+- Keep-alive connections use a 5-second timeout and are limited to 100 requests per socket.
+- Request bodies remain limited to 16 KiB and must be fully received before JSON parsing or state mutation.
+- If a client aborts a request or disconnects before a response completes, the handler does not attempt to write an error response to the closed connection. A disconnected client must treat the operation outcome as unknown and use the documented idempotency/reconciliation mechanisms before retrying non-idempotent work.
+- Node HTTP parser owns malformed framing and header-timeout responses; these failures occur before application route handling and may use Node parser-level response bodies rather than the API error envelope.
+## Process shutdown
+
+- SIGINT and SIGTERM stop new connections, close idle keep-alive connections, and allow active requests up to 10 seconds to finish.
+- Remaining HTTP connections are force-closed after the grace period; SQLite is closed only after the HTTP server finishes closing.
