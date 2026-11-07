@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -246,6 +247,44 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
   } finally {
     release?.();
     if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('backup destination lock serializes backups across processes', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cross-process-'));
+  const firstDatabase = join(directory, 'first.sqlite');
+  const destination = join(directory, 'shared-backup.sqlite');
+  const marker = join(directory, '.shared-backup.sqlite.00000000-0000-4000-8000-000000000000.tmp');
+  let first;
+  let child;
+  try {
+    first = openDatabase(firstDatabase);
+    new ControlCenter(first).createTask({ type: 'backup.destination.cross-process' });
+    first.close();
+    first = null;
+
+    const worker = new URL('../test-support/backup-lock-holder.js', import.meta.url);
+    child = spawn(process.execPath, [fileURLToPath(worker), destination, marker], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { output += chunk; });
+    const [ready] = await once(child.stdout, 'data');
+    assert.match(String(ready), /ready/);
+    assert.equal(existsSync(marker), true);
+
+    assert.throws(() => createDatabaseBackup(firstDatabase, destination), /maintenance lock is already held/);
+    assert.equal(existsSync(marker), true, 'a competing backup must not clean another process active temp file');
+    assert.equal(existsSync(destination), false);
+
+    child.stdin.end('release');
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0, output);
+    child = null;
+    assert.equal(existsSync(destination + '.maintenance.lock'), false);
+  } finally {
+    if (child && child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited.catch(() => {}); }
+    if (first) first.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
