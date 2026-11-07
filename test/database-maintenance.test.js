@@ -54,3 +54,29 @@ test('restore refuses active WAL sidecars and rejects corrupt snapshots', () => 
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+
+test('restore rejects directory paths before moving the live database', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-directory-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  let checkDb;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.directory.guard' });
+    createDatabaseBackup(database, backup);
+    db.close();
+    db = null;
+    assert.throws(() => restoreDatabaseBackup(directory, join(directory, 'other.sqlite')), /regular file/);
+    assert.throws(() => restoreDatabaseBackup(backup, directory), /regular file/);
+    checkDb = openDatabase(database);
+    assert.equal(checkDb.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+    checkDb.close();
+    checkDb = null;
+  } finally {
+    if (checkDb) checkDb.close();
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
