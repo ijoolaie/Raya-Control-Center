@@ -156,7 +156,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [x] Test backup/restore path validation, overwrite resistance, symlink/junction rejection, and rollback success/failure paths (local Windows fault-injection tests; CI pending).
 - [x] Verify WAL rollback after forced child-process termination and database reopen (local Windows test).
 - [x] Verify graceful runtime shutdown drains HTTP and closes SQLite; startup recovery and forced WAL termination are covered (Node 24/26 Windows CI).
-- [ ] Add further startup/shutdown fault-injection cases for listener errors and interrupted shutdown.
+- [x] Add startup listener-failure fault injection; verify SQLite can be reopened and the runtime lock is released after `EADDRINUSE` (test/server-runtime.test.js). Interrupted-shutdown fault injection remains open.
 - [x] Reject malformed Host authorities that could use URL userinfo to disguise a remote host (SEC-002; CI verified).
 - [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).

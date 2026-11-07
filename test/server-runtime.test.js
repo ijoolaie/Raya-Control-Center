@@ -82,3 +82,29 @@ test('server runtime drains HTTP and closes SQLite on graceful shutdown', async 
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test('startup listener failure closes SQLite and releases the runtime lock', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-listener-failure-'));
+  const occupiedDatabase = join(directory, 'occupied.sqlite');
+  const failedDatabase = join(directory, 'failed.sqlite');
+  const operatorToken = 'listener-failure-test-operator-token-'.repeat(2);
+  let occupiedRuntime;
+  try {
+    occupiedRuntime = await startControlCenter({ databasePath: occupiedDatabase, port: 0, operatorToken });
+    const occupiedPort = occupiedRuntime.server.address().port;
+
+    await assert.rejects(
+      startControlCenter({ databasePath: failedDatabase, port: occupiedPort, operatorToken }),
+      error => error?.code === 'EADDRINUSE'
+    );
+
+    assert.equal(existsSync(failedDatabase + '.runtime.lock'), false, 'failed startup must release its runtime lock');
+    const reopened = openDatabase(failedDatabase);
+    assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 5);
+    reopened.close();
+    assert.equal(occupiedRuntime.server.listening, true, 'the existing listener must remain available');
+  } finally {
+    if (occupiedRuntime?.server.listening) await occupiedRuntime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
