@@ -1,4 +1,4 @@
-﻿# Restore crash recovery runbook
+# Restore crash recovery runbook
 
 ## Scope
 
@@ -15,7 +15,7 @@ $env:RAYA_CC_DATABASE = (Join-Path (Get-Location) '.data\control-center.sqlite')
 npm run db:restore:inspect
 ```
 
-The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, and a conservative recovery.state classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. When no valid journal exists, artifact paths that are not independently inspected are reported as null (unknown), not as absent. A remaining runtime or maintenance lock is classified separately as no-pending-restore-lock-present. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
+The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, any unpublished journal temporary files in `journal.orphanedTemporaryFiles`, and a conservative `recovery.state` classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. When no valid journal exists, artifact paths that are not independently inspected are reported as null (unknown), not as absent. A remaining runtime or maintenance lock is classified separately as no-pending-restore-lock-present. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
 
 
 Set the exact paths; do not use a wildcard as a deletion target:
@@ -98,6 +98,20 @@ Do not restore over it as part of crash cleanup. The presence of a live database
 A `.restore` temporary file is not a substitute for a rollback database. Leave it in place until the live database has been recovered, validated, and backed up. Only then may an operator remove a specifically identified orphaned `.restore` file after confirming no maintenance process is active.
 
 
+## Unpublished Restore journal temporary files
+
+If the published journal is absent, inspection also enumerates exact sibling names matching `<database>.restore-journal.json.<uuid>.tmp` and reports their absolute paths in `journal.orphanedTemporaryFiles`. These files can remain if the Restore process terminated after writing and fsyncing its temporary journal but before publishing the journal name. The temporary file may contain useful intent evidence, but its presence alone does **not** establish whether Restore began, whether any database artifact was changed, or whether the record is complete and authoritative.
+
+The inspector emits a warning to preserve these files for operator review. `readOnly: true` still applies: inspection does not read, rename, publish, or delete these temporary files. `recovery.automaticAction` remains `none`. The recovery state classifier is based on the published journal, locks, and inspected database artifacts; an orphaned journal temporary is an additional warning and does not itself create a pending-journal state. Therefore, even a `no-pending-restore` state must not be interpreted as permission to discard a reported journal temporary.
+
+List the exact reported paths and preserve them with the incident evidence:
+
+```powershell
+$Report = npm run db:restore:inspect --silent | ConvertFrom-Json
+$Report.journal.orphanedTemporaryFiles
+```
+
+Do not rename a temporary file to the published journal name, feed it to Restore, or delete it as routine cleanup. First verify that the server and every database client are stopped. Preserve a copy for manual examination; if its contents or the filesystem state are ambiguous, stop and escalate for an operator decision. Do not remove it merely because the published journal is absent or because the recovery classifier reports `no-pending-restore`.
 ## Restore recovery state model
 
 The recovery.state field is deliberately conservative:
