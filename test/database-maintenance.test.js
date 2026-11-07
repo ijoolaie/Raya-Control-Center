@@ -564,6 +564,26 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
   }
 });
 
+test('lock release preserves a lock file whose recorded owner changed', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-owner-change-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  let release;
+  try {
+    release = acquireDatabaseMaintenanceLock(database);
+    const replacement = { pid: process.pid + 1, startedAt: '2099-01-01T00:00:00.000Z' };
+    writeFileSync(lockPath, JSON.stringify(replacement) + '\n', 'utf8');
+    release();
+    release = null;
+    assert.equal(existsSync(lockPath), true,
+      'release must not remove a lock record that no longer belongs to this acquisition');
+    assert.deepEqual(JSON.parse(readFileSync(lockPath, 'utf8')), replacement);
+  } finally {
+    release?.();
+    if (existsSync(lockPath)) unlinkSync(lockPath);
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('backup destination lock serializes backups across processes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cross-process-'));
   const firstDatabase = join(directory, 'first.sqlite');
