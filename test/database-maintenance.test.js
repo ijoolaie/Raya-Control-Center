@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -289,6 +289,36 @@ test('backup destination lock serializes backups across processes', async () => 
   }
 });
 
+test('backup crash leaves a stale lock and temp that require verified recovery', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-crash-recovery-'));
+  const database = join(directory, 'source.sqlite');
+  const destination = join(directory, 'backup.sqlite');
+  const marker = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000000.tmp');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.crash.recovery' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-crash-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), destination, marker], { encoding: 'utf8' });
+    assert.equal(result.status, 77, result.stderr);
+    assert.equal(existsSync(destination + '.maintenance.lock'), true);
+    assert.equal(existsSync(marker), true);
+    assert.throws(() => createDatabaseBackup(database, destination), /maintenance lock is already held/);
+
+    // The child has exited; only now remove its stale lock and let cleanup remove the orphaned temp.
+    unlinkSync(destination + '.maintenance.lock');
+    const backup = createDatabaseBackup(database, destination);
+    assert.equal(backup.schemaVersion, 5);
+    assert.equal(existsSync(destination), true);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('backup destination lock serializes backups from different source databases', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-destination-lock-'));
   const firstDatabase = join(directory, 'first.sqlite');
