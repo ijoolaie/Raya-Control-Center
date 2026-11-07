@@ -219,6 +219,14 @@ test('restore rejects symlink and junction parent components', () => {
     assert.throws(() => restoreDatabaseBackup(join(linkedDirectory, 'source.sqlite'), join(directory, 'copy.sqlite')), /symbolic link or junction/);
     assert.throws(() => restoreDatabaseBackup(backup, join(linkedDirectory, 'target.sqlite')), /symbolic link or junction/);
     assert.equal(existsSync(join(realDirectory, 'target.sqlite')), false);
+    const nestedRestoreTarget = join(linkedDirectory, 'restore-created-by-mistake', 'target.sqlite');
+    assert.throws(() => restoreDatabaseBackup(backup, nestedRestoreTarget), /symbolic link or junction/);
+    assert.equal(existsSync(join(realDirectory, 'restore-created-by-mistake')), false,
+      'Restore must reject a symlink ancestor before creating nested destination directories');
+    const nestedBackupTarget = join(linkedDirectory, 'backup-created-by-mistake', 'backup.sqlite');
+    assert.throws(() => createDatabaseBackup(join(realDirectory, 'source.sqlite'), nestedBackupTarget), /symbolic link or junction/);
+    assert.equal(existsSync(join(realDirectory, 'backup-created-by-mistake')), false,
+      'Backup must reject a symlink ancestor before creating nested destination directories');
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

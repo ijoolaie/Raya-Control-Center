@@ -97,7 +97,7 @@ function assertNoSymlinkComponents(filename, label) {
     let stat;
     try { stat = lstatSync(current); }
     catch (error) {
-      if (error.code === 'ENOENT') throw new Error(label + ' path component does not exist: ' + current);
+      if (error.code === 'ENOENT') return absolute;
       throw error;
     }
     // On Windows, Node reports directory junctions as symbolic links as well.
@@ -157,6 +157,7 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   if (source.toLowerCase() === destination.toLowerCase())
     throw new Error('Backup destination must differ from the live database');
   if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
+  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.tmp');
@@ -207,6 +208,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const shmPath = destination + '-shm';
   if (pathEntryExists(walPath) || pathEntryExists(shmPath))
     throw new Error('Database WAL sidecars exist; stop the server and ensure all database connections are closed before restore');
+  assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
   const journalPath = destination + '.restore-journal.json';
@@ -270,6 +272,7 @@ export function createDatabaseBackup(databasePath, backupPath) {
     throw new Error('Backup destination must differ from the live database');
   // Serialize by both source database and destination name. The destination lock
   // prevents another source database's cleanup from deleting our active temp file.
+  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   const releaseSourceLock = acquireDatabaseMaintenanceLock(databasePath);
