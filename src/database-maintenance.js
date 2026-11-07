@@ -151,11 +151,22 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
 }
 
 export function createDatabaseBackup(databasePath, backupPath) {
-  const releaseMaintenanceLock = acquireDatabaseMaintenanceLock(databasePath);
+  const source = resolve(databasePath);
+  const destination = resolve(backupPath);
+  if (source.toLowerCase() === destination.toLowerCase())
+    throw new Error('Backup destination must differ from the live database');
+  // Serialize by both source database and destination name. The destination lock
+  // prevents another source database's cleanup from deleting our active temp file.
+  mkdirSync(dirname(destination), { recursive: true });
+  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
+  const releaseSourceLock = acquireDatabaseMaintenanceLock(databasePath);
+  let releaseDestinationLock;
   try {
+    releaseDestinationLock = acquireDatabaseMaintenanceLock(destination);
     return createDatabaseBackupUnlocked(databasePath, backupPath);
   } finally {
-    releaseMaintenanceLock();
+    try { releaseDestinationLock?.(); }
+    finally { releaseSourceLock(); }
   }
 }
 

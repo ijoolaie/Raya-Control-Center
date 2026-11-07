@@ -250,6 +250,42 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
   }
 });
 
+test('backup destination lock serializes backups from different source databases', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-destination-lock-'));
+  const firstDatabase = join(directory, 'first.sqlite');
+  const secondDatabase = join(directory, 'second.sqlite');
+  const destination = join(directory, 'shared-backup.sqlite');
+  let first;
+  let second;
+  let release;
+  try {
+    first = openDatabase(firstDatabase);
+    new ControlCenter(first).createTask({ type: 'backup.destination.first' });
+    first.close();
+    first = null;
+    second = openDatabase(secondDatabase);
+    new ControlCenter(second).createTask({ type: 'backup.destination.second' });
+    second.close();
+    second = null;
+
+    // Model another process that owns this exact destination while producing a temp snapshot.
+    release = acquireDatabaseMaintenanceLock(destination);
+    assert.throws(
+      () => createDatabaseBackup(firstDatabase, destination),
+      /maintenance lock is already held/
+    );
+    assert.equal(existsSync(destination), false);
+    assert.equal(
+      readdirSync(directory).some(name => name.startsWith('.shared-backup.sqlite.') && name.endsWith('.tmp')),
+      false
+    );
+  } finally {
+    release?.();
+    first?.close();
+    second?.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('backup removes a partial temporary snapshot when VACUUM INTO fails', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-failure-'));
   const database = join(directory, 'live.sqlite');
