@@ -186,10 +186,21 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
     // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
     linkSync(temporary, destination);
-    try { rmSync(temporary, { force: true }); } catch { /* The installed backup is valid; a stale temp link is harmless. */ }
-    return { path: destination, ...metadata };
+    const cleanupWarnings = [];
+    try { rmSync(temporary, { force: true }); }
+    catch (cleanupError) {
+      cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
+    }
+    return { path: destination, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporary, { force: true }); } catch {}
+    try { rmSync(temporary, { force: true }); }
+    catch (cleanupError) {
+      error.cleanupWarnings = [{
+        artifact: 'temporary',
+        path: temporary,
+        error: cleanupError.code || cleanupError.name
+      }];
+    }
     throw error;
   }
 }

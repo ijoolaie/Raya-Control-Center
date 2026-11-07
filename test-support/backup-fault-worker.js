@@ -6,9 +6,10 @@ import { createDatabaseBackup } from '../src/database-maintenance.js';
 const [database, destination, mode, marker] = process.argv.slice(2);
 const originalExec = DatabaseSync.prototype.exec;
 const originalLink = fs.linkSync;
+const originalRm = fs.rmSync;
 DatabaseSync.prototype.exec = function (sql) {
   if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) fs.writeFileSync(marker, 'vacuum-starting');
-  if (!['destination-race', 'concurrent-write'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
+  if (!['destination-race', 'concurrent-write', 'cleanup-failure'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
     if (!match) throw new Error('unexpected-vacuum-sql');
     const partialPath = match[1].replaceAll("''", "'");
@@ -23,10 +24,18 @@ if (mode === 'destination-race') {
     return originalLink(source, target);
   };
 }
+if (mode === 'cleanup-failure' || mode === 'vacuum-cleanup-failure') {
+  fs.rmSync = (target, options) => {
+    if (typeof target === 'string' && target.endsWith('.tmp')) {
+      throw Object.assign(new Error('injected-backup-temp-cleanup-failure'), { code: 'EBUSY' });
+    }
+    return originalRm(target, options);
+  };
+}
 syncBuiltinESMExports();
 try {
-  createDatabaseBackup(database, destination);
-  process.stdout.write(JSON.stringify({ ok: true }));
+  const result = createDatabaseBackup(database, destination);
+  process.stdout.write(JSON.stringify({ ok: true, result }));
 } catch (error) {
-  process.stdout.write(JSON.stringify({ ok: false, message: error.message }));
+  process.stdout.write(JSON.stringify({ ok: false, message: error.message, cleanupWarnings: error.cleanupWarnings ?? [] }));
 }

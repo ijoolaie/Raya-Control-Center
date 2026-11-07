@@ -8,5 +8,8 @@ try {
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   console.error(error.message);
+  if (error.cleanupWarnings?.length) {
+    console.error(JSON.stringify({ cleanupWarnings: error.cleanupWarnings }, null, 2));
+  }
   process.exitCode = 1;
 }

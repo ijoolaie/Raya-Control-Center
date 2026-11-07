@@ -879,7 +879,9 @@ test('backup remains a transactionally consistent snapshot during a concurrent W
 
     const [code] = await once(child, 'exit');
     assert.equal(code, 0, stderr);
-    assert.deepEqual(JSON.parse(stdout), { ok: true });
+    const backupOutcome = JSON.parse(stdout);
+    assert.equal(backupOutcome.ok, true);
+    assert.deepEqual(backupOutcome.result.cleanupWarnings, []);
 
     snapshot = new DatabaseSync(backup);
     const integrity = snapshot.prepare('PRAGMA integrity_check').all();
@@ -903,6 +905,73 @@ test('backup remains a transactionally consistent snapshot during a concurrent W
   }
 });
 
+test('backup reports a retained temporary hard link when cleanup fails after publication', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cleanup-warning-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  let retained;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.cleanup.warning' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup, 'cleanup-failure'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.result.cleanupWarnings.length, 1);
+    const warning = outcome.result.cleanupWarnings[0];
+    assert.equal(warning.artifact, 'temporary');
+    assert.equal(warning.error, 'EBUSY');
+    assert.ok(warning.path.includes('.backup.sqlite.'));
+    assert.ok(warning.path.endsWith('.tmp'));
+    assert.equal(existsSync(backup), true, 'the published backup remains valid');
+    assert.equal(existsSync(warning.path), true, 'the failed cleanup leaves a visible hard link');
+    retained = new DatabaseSync(warning.path);
+    assert.equal(retained.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  } finally {
+    if (retained) retained.close();
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('backup attaches a cleanup warning when VACUUM fails and its partial temp cannot be removed', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-failure-cleanup-warning-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.failure.cleanup.warning' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup, 'vacuum-cleanup-failure'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.message, 'injected-vacuum-failure');
+    assert.equal(outcome.cleanupWarnings.length, 1);
+    const warning = outcome.cleanupWarnings[0];
+    assert.equal(warning.artifact, 'temporary');
+    assert.equal(warning.error, 'EBUSY');
+    assert.ok(warning.path.includes('.backup.sqlite.'));
+    assert.ok(warning.path.endsWith('.tmp'));
+    assert.equal(existsSync(backup), false);
+    assert.equal(existsSync(warning.path), true);
+    assert.equal(readFileSync(warning.path, 'utf8'), 'partial snapshot');
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('backup removes a partial temporary snapshot when VACUUM INTO fails', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-failure-'));
   const database = join(directory, 'live.sqlite');
