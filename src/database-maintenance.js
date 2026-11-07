@@ -254,9 +254,16 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     }
     // linkSync is atomic and fails if another process created the destination; renameSync could overwrite it on POSIX.
     linkSync(temporary, destination);
-    try { rmSync(temporary, { force: true }); } catch { /* The installed database is valid; a stale temp link is harmless. */ }
-    try { unlinkSync(journalPath); } catch { /* Keep the recovery record if cleanup is interrupted. */ }
-    return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata };
+    const cleanupWarnings = [];
+    try { rmSync(temporary, { force: true }); }
+    catch (cleanupError) {
+      cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
+    }
+    try { unlinkSync(journalPath); }
+    catch (cleanupError) {
+      cleanupWarnings.push({ artifact: 'journal', path: journalPath, error: cleanupError.code || cleanupError.name });
+    }
+    return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata, cleanupWarnings };
   } catch (error) {
     try { rmSync(temporary, { force: true }); } catch {}
     if (movedOriginal) {

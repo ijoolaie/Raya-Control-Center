@@ -112,6 +112,13 @@ $Report.journal.orphanedTemporaryFiles
 ```
 
 Do not rename a temporary file to the published journal name, feed it to Restore, or delete it as routine cleanup. First verify that the server and every database client are stopped. Preserve a copy for manual examination; if its contents or the filesystem state are ambiguous, stop and escalate for an operator decision. Do not remove it merely because the published journal is absent or because the recovery classifier reports `no-pending-restore`.
+
+## Restore cleanup warnings
+
+A successful restoreDatabaseBackup() result includes cleanupWarnings (an empty array when cleanup succeeds). If removal of the staged .restore link or the published .restore-journal.json fails after the new database has been installed, the Restore operation still reports the validated installation result and includes the affected artifact path and filesystem error code/name in cleanupWarnings. This distinction is deliberate: a post-install cleanup failure does not undo a valid installation and must not trigger rollback of the newly installed database.
+
+Treat every reported cleanup warning as outstanding maintenance, not as permission to delete the artifact. In particular, a retained journal blocks another Restore until an operator inspects the live database, rollback copy, staged file, and journal, verifies that all database clients are stopped, and resolves the evidence deliberately. A retained staged hard link is also preserved; do not remove it until the installed database has been verified and a separate backup exists. Cleanup warnings report filesystem failure details without including file contents.
+
 ## Restore recovery state model
 
 The recovery.state field is deliberately conservative:

@@ -527,6 +527,52 @@ test('restore preserves the original rollback file and reports its path if rollb
   }
 });
 
+test('restore reports successful installation when journal cleanup fails', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-journal-cleanup-failure-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.journal.cleanup.original' });
+    createDatabaseBackup(database, backup);
+    new ControlCenter(db).createTask({ type: 'restore.journal.cleanup.current' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'journal-cleanup-failure', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.result.schemaVersion, 5);
+    assert.equal(outcome.result.cleanupWarnings.length, 2);
+    assert.deepEqual(outcome.result.cleanupWarnings.map(({ artifact, error }) => ({ artifact, error })), [
+      { artifact: 'temporary', error: 'EBUSY' },
+      { artifact: 'journal', error: 'EIO' }
+    ]);
+    assert.ok(outcome.result.cleanupWarnings[0].path.includes('.live.sqlite.'));
+    assert.ok(outcome.result.cleanupWarnings[0].path.endsWith('.restore'));
+    assert.equal(outcome.result.cleanupWarnings[1].path, database + '.restore-journal.json');
+    assert.equal(existsSync(database), true, 'the installed database remains live');
+    assert.equal(existsSync(database + '.restore-journal.json'), true, 'the failed cleanup preserves the journal');
+    assert.equal(existsSync(outcome.result.cleanupWarnings[0].path), true, 'the failed temporary cleanup preserves its staged hard link');
+    assert.equal(existsSync(outcome.result.rollbackPath), true, 'the original database remains available as rollback');
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.journal.artifacts.destination.exists, true);
+    assert.equal(report.journal.artifacts.rollback.exists, true);
+    assert.equal(report.journal.artifacts.temporary.exists, true);
+    assert.equal(report.recovery.automaticAction, 'none');
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+    db.close();
+    db = null;
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('backup is allowed during runtime; restore is locked out until graceful shutdown', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-runtime-maintenance-'));
   const database = join(directory, 'live.sqlite');
