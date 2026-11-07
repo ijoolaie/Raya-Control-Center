@@ -112,13 +112,13 @@ Environment variables remain under the control of the local user/process. This v
 
 ## Backup and restore hardening in progress
 
-The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. Regression tests reject directory inputs and destinations, reject symbolic-link/junction parent components, and verify the live database remains intact. Local validation for the current working tree: `npm test` 60/60 and `npm run check` passed on Node.js 22.23.2. The backup/restore code in commit `b8fb7f1` passed Node 24 and Node 26 Windows CI.
+The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. Regression tests reject directory inputs and destinations, reject symbolic-link/junction parent components, and verify the live database remains intact. Local validation for the current working tree: `npm test` 61/61 and `npm run check` passed on Node.js 22.23.2. The backup/restore code in commit `b8fb7f1` passed Node 24 and Node 26 Windows CI.
 
 Backup/restore fault injection now covers both installation failure with successful rollback and rollback failure. The first case verifies the original live database is restored with all committed records intact. The second verifies the original database remains preserved at the reported rollback path when the rollback rename itself fails. Windows directory junctions and symbolic-link parent components are also covered by regression tests. Same-directory installation no longer overwrites a destination that appears concurrently. Concurrent ancestor replacement, non-NTFS hard-link behavior, and permission/ACL behavior still require review and targeted tests. Do not treat these changes as protection against a hostile process running with the same Windows user privileges.
 
 ## WAL recovery and process termination
 
-The WAL recovery regression now launches a child process, opens an immediate write transaction, confirms the uncommitted update is active, and forcibly terminates that process. Reopening the database recovers the prior committed task state (`queued`), and a truncate checkpoint succeeds. The test passes locally on Windows; CI for the updated forced-termination test is pending. Graceful server shutdown is not established by this test: on Windows, `child.kill('SIGTERM')` terminates the child process and does not prove the application shutdown handler ran.
+The WAL recovery regression launches a child process, opens an immediate write transaction, confirms the uncommitted update is active, and forcibly terminates that process. Reopening the database recovers the prior committed task state (`queued`), and a truncate checkpoint succeeds. The test passed in CI on Node 24 and Node 26 / Windows. Graceful shutdown is tested separately through the same runtime shutdown function used by the SIGINT/SIGTERM handlers: it stops accepting HTTP requests, closes idle connections, completes the close callback, closes SQLite, and permits a successful database reopen. The integration test runs on Windows; delivery of operating-system console signals themselves is not asserted by the test.
 
 ## Reviewed controls (implementation inspection only)
 
@@ -132,14 +132,15 @@ The WAL recovery regression now launches a child process, opens an immediate wri
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
 | Dashboard | Operator token is held in page memory; static assets use restrictive headers; UI is read-only | Inspected; browser/runtime testing pending |
 | Backup/restore | Dedicated backup and offline restore implementation exists | Not yet fully reviewed |
-| Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination test passed in CI on Node 24/26 Windows; graceful server shutdown still requires a platform-appropriate test |
+| Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination and graceful runtime shutdown tests passed in CI on Node 24/26 Windows |
 
 ## Open review work
 
 - [x] Remediate SEC-001 for new events; retain the documented historical-data residual risk.
 - [x] Test backup/restore path validation, overwrite resistance, symlink/junction rejection, and rollback success/failure paths (local Windows fault-injection tests; CI pending).
 - [x] Verify WAL rollback after forced child-process termination and database reopen (local Windows test).
-- [ ] Verify graceful server shutdown and startup recovery under additional fault-injection scenarios.
+- [x] Verify graceful runtime shutdown drains HTTP and closes SQLite; startup recovery and forced WAL termination are covered (Node 24/26 Windows CI).
+- [ ] Add further startup/shutdown fault-injection cases for listener errors and interrupted shutdown.
 - [x] Reject malformed Host authorities that could use URL userinfo to disguise a remote host (SEC-002; CI verified).
 - [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).

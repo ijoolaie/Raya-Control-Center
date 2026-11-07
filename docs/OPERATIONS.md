@@ -25,6 +25,10 @@ npm start
 
 If the database already has an operator-token hash and the environment variable is absent or incorrect, startup fails closed.
 
+## Graceful shutdown
+
+On Ctrl+C or a normal SIGTERM delivery, the server stops accepting new HTTP connections, closes idle connections, allows active requests up to 10 seconds to drain, then closes SQLite. If active connections remain after the drain timeout, they are closed before SQLite is closed. Do not forcibly terminate the process during normal operation; forced termination is reserved for recovery scenarios and SQLite WAL recovery is tested separately.
+
 ## Startup recovery and lease expiry
 
 Before the HTTP listener begins accepting requests, startup reconciliation checks active leases against their expiry timestamps. Tasks whose leases have expired while claimed, running, or awaiting cancellation are moved to `blocked`, their leases are marked expired, and their assignment is cleared.
