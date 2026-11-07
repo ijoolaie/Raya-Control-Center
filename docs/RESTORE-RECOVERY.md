@@ -119,6 +119,7 @@ A successful restoreDatabaseBackup() result includes cleanupWarnings (an empty a
 
 Treat every reported cleanup warning as outstanding maintenance, not as permission to delete the artifact. In particular, a retained journal blocks another Restore until an operator inspects the live database, rollback copy, staged file, and journal, verifies that all database clients are stopped, and resolves the evidence deliberately. A retained staged hard link is also preserved; do not remove it until the installed database has been verified and a separate backup exists. Cleanup warnings report filesystem failure details without including file contents.
 
+The destination-publication race tests also create a competing file after preflight validation but immediately before the atomic hard-link operation. Backup must fail without replacing that file and must release both maintenance locks. Restore must leave the competing destination untouched and preserve the original database at its rollback path together with the published journal; it does not overwrite the competing file or infer that the rollback is no longer needed.
 ## Restore recovery state model
 
 The recovery.state field is deliberately conservative:

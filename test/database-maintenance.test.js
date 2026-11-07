@@ -527,6 +527,42 @@ test('restore preserves the original rollback file and reports its path if rollb
   }
 });
 
+test('restore preserves the original and journal when a destination appears during installation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-destination-race-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.destination.race.original' });
+    createDatabaseBackup(database, backup);
+    new ControlCenter(db).createTask({ type: 'restore.destination.race.current' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'destination-race', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.message, /destination appeared concurrently/);
+    assert.ok(outcome.message.includes('.pre-restore-'));
+    assert.equal(existsSync(database), true);
+    assert.equal(readFileSync(database, 'utf8'), 'concurrent destination', 'Restore must not overwrite a raced-in destination');
+    const rollbackPath = outcome.message.match(/original database remains at (.+)$/)?.[1];
+    assert.ok(rollbackPath);
+    assert.equal(existsSync(rollbackPath), true, 'the pre-restore database remains preserved');
+    assert.equal(existsSync(database + '.restore-journal.json'), true, 'the pending operation evidence remains published');
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.journal.artifacts.rollback.exists, true);
+    assert.equal(report.recovery.automaticAction, 'none');
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore reports successful installation when journal cleanup fails', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-journal-cleanup-failure-'));
   const database = join(directory, 'live.sqlite');
@@ -761,6 +797,33 @@ test('backup destination lock serializes backups from different source databases
     release?.();
     first?.close();
     second?.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('backup does not overwrite a destination created after preflight validation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-destination-race-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.destination.race' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup, 'destination-race'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.equal(existsSync(backup), true);
+    assert.equal(readFileSync(backup, 'utf8'), 'concurrent destination', 'atomic hard-link publication must not replace the raced-in file');
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+  } finally {
+    if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
