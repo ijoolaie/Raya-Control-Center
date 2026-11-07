@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -149,6 +149,88 @@ test('restore rolls back the original database when atomic installation fails', 
   }
 });
 
+test('restore can recover the original database after a crash between move and install', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-gap-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    const center = new ControlCenter(db);
+    center.createTask({ type: 'restore.crash.original.one' });
+    createDatabaseBackup(database, backup);
+    center.createTask({ type: 'restore.crash.original.two' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-after-original-move', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 78, result.stderr);
+    assert.equal(existsSync(database), false, 'the crash window leaves the live path absent');
+    const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
+    assert.ok(rollbackName, 'the original database must remain recoverable');
+    const rollback = join(directory, rollbackName);
+    db = openDatabase(rollback);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
+    db.close();
+    db = null;
+
+    // The child is confirmed exited; remove only its exact stale lock files before recovery.
+    unlinkSync(database + '.maintenance.lock');
+    unlinkSync(database + '.runtime.lock');
+    renameSync(rollback, database);
+    for (const name of readdirSync(directory)) {
+      if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
+    }
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
+    db.close();
+    db = null;
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('restore keeps both installed snapshot and rollback copy if the process crashes after install', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-installed-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    const center = new ControlCenter(db);
+    center.createTask({ type: 'restore.crash.installed.one' });
+    createDatabaseBackup(database, backup);
+    center.createTask({ type: 'restore.crash.installed.two' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-after-install', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 79, result.stderr);
+    assert.equal(existsSync(database), true);
+    const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
+    assert.ok(rollbackName, 'the pre-restore database must remain available');
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+    db.close();
+    db = openDatabase(join(directory, rollbackName));
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
+    db.close();
+    db = null;
+
+    unlinkSync(database + '.maintenance.lock');
+    unlinkSync(database + '.runtime.lock');
+    for (const name of readdirSync(directory)) {
+      if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
+    }
+    assert.equal(existsSync(database), true, 'the successfully installed database remains in place');
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('restore preserves the original rollback file and reports its path if rollback itself fails', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-rollback-failure-'));
   const database = join(directory, 'live.sqlite');
