@@ -73,6 +73,20 @@ if (mode === 'crash-after-stage') {
   };
 }
 
+if (mode === 'sync-failure') {
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const tracked = new Set();
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string' && target.endsWith('.restore')) tracked.add(descriptor);
+    return descriptor;
+  };
+  fs.fsyncSync = descriptor => {
+    if (tracked.has(descriptor)) throw Object.assign(new Error('injected-restore-fsync-failure'), { code: 'EIO' });
+    return originalFsync(descriptor);
+  };
+}
 syncBuiltinESMExports();
 try {
   const result = restoreDatabaseBackup(backup, destination);

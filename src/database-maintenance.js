@@ -159,6 +159,12 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
     if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(candidate);
   }
 }
+function syncFileContents(filename) {
+  const descriptor = openSync(filename, 'r+');
+  try { fsyncSync(descriptor); }
+  finally { closeSync(descriptor); }
+}
+
 function sqlString(value) {
   return "'" + value.replaceAll("'", "''") + "'";
 }
@@ -177,12 +183,17 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   try {
     const db = new DatabaseSync(source);
     try {
+      // Make VACUUM INTO's output durability requirement explicit.
+      db.exec('PRAGMA synchronous = FULL');
+      if (db.prepare('PRAGMA synchronous').get().synchronous !== 2) throw new Error('SQLite FULL synchronous mode could not be enabled for backup');
       // VACUUM INTO creates a consistent snapshot that includes committed WAL content.
       db.exec('VACUUM INTO ' + sqlString(temporary));
     } finally {
       db.close();
     }
     const metadata = validateSnapshot(temporary);
+    // Flush the completed snapshot file before publishing its directory entry.
+    syncFileContents(temporary);
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
     // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
     linkSync(temporary, destination);
@@ -258,6 +269,8 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
     // Validate the exact bytes that will be installed, not only the earlier source path.
     const metadata = validateSnapshot(temporary);
+    // copyFileSync does not provide a durability guarantee; flush staged bytes before moving the live database.
+    syncFileContents(temporary);
     if (pathEntryExists(destination)) {
       if (!lstatSync(destination).isFile()) throw new Error('Restore destination must be a regular file');
       renameSync(destination, rollback);

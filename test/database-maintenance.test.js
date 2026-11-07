@@ -999,3 +999,67 @@ test('backup removes a partial temporary snapshot when VACUUM INTO fails', () =>
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('backup refuses publication when the completed snapshot cannot be fsynced', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-fsync-failure-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.fsync.failure' });
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup, 'sync-failure'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.message, /injected-backup-fsync-failure/);
+    assert.equal(existsSync(backup), false, 'an unflushed snapshot must not be published');
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('restore keeps the original live database when the staged copy cannot be fsynced', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-fsync-failure-'));
+  const database = join(directory, 'live.sqlite');
+  const source = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.original' });
+    db.close();
+    db = null;
+
+    db = openDatabase(source);
+    new ControlCenter(db).createTask({ type: 'restore.replacement' });
+    db.close();
+    db = null;
+    createDatabaseBackup(source, backup);
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'sync-failure', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.message, /injected-restore-fsync-failure/);
+    assert.equal(existsSync(database), true);
+    assert.equal(existsSync(database + '.restore-journal.json'), false);
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.live.sqlite.') && name.endsWith('.restore')), []);
+    assert.equal(existsSync(database + '.runtime.lock'), false);
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT type FROM tasks').get().type, 'restore.original');
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

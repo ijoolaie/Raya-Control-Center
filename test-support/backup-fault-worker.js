@@ -9,7 +9,7 @@ const originalLink = fs.linkSync;
 const originalRm = fs.rmSync;
 DatabaseSync.prototype.exec = function (sql) {
   if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) fs.writeFileSync(marker, 'vacuum-starting');
-  if (!['destination-race', 'concurrent-write', 'cleanup-failure'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
+  if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
     if (!match) throw new Error('unexpected-vacuum-sql');
     const partialPath = match[1].replaceAll("''", "'");
@@ -30,6 +30,20 @@ if (mode === 'cleanup-failure' || mode === 'vacuum-cleanup-failure') {
       throw Object.assign(new Error('injected-backup-temp-cleanup-failure'), { code: 'EBUSY' });
     }
     return originalRm(target, options);
+  };
+}
+if (mode === 'sync-failure') {
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const tracked = new Set();
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string' && target.endsWith('.tmp')) tracked.add(descriptor);
+    return descriptor;
+  };
+  fs.fsyncSync = descriptor => {
+    if (tracked.has(descriptor)) throw Object.assign(new Error('injected-backup-fsync-failure'), { code: 'EIO' });
+    return originalFsync(descriptor);
   };
 }
 syncBuiltinESMExports();
