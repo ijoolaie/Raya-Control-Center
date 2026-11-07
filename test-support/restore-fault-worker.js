@@ -1,20 +1,26 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { restoreDatabaseBackup } from '../src/database-maintenance.js';
 
 const [mode, backup, destination] = process.argv.slice(2);
 const originalLink = fs.linkSync;
 const originalRename = fs.renameSync;
-fs.linkSync = () => { throw new Error('injected-install-failure'); };
+fs.linkSync = (source, target) => {
+  if (target === destination) throw new Error('injected-install-failure');
+  return originalLink(source, target);
+};
 if (mode === 'crash-after-original-move') {
   fs.renameSync = (source, target) => {
     originalRename(source, target);
-    process.exit(78);
+    if (source === destination && target.startsWith(destination + '.pre-restore-')) process.exit(78);
   };
 } else if (mode === 'crash-after-install') {
   fs.linkSync = (source, target) => {
-    originalLink(source, target);
-    process.exit(79);
+    if (target === destination) {
+      originalLink(source, target);
+      process.exit(79);
+    }
+    return originalLink(source, target);
   };
 } else if (mode === 'rollback-failure') {
   let renameCount = 0;

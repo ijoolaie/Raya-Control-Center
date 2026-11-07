@@ -53,7 +53,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [x] Startup and periodic expired-lease reconciliation; operator-triggered reconciliation endpoint.
 - [x] CLI for participant registration/read/revocation, task create/read/cancel, events, health, lease reconciliation, and Operator token rotation.
 - [x] Consistent SQLite backup and validated offline restore with rollback file.
-- [x] Documented conservative manual recovery for interrupted Restore operations; automatic recovery remains deferred pending a durable journal and crash-state protocol.
+- [x] Added an atomically published, fsynced Restore intent journal that blocks repeat Restore after a process crash; documented operator-led recovery. Automatic recovery remains deferred pending journal-state interpretation and Windows crash-state verification.
 - [x] Lease-bound task progress reporting, separate from heartbeat, with append-only audit events.
 - [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
 

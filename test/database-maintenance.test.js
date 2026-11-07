@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,7 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     const restoreResult = restoreDatabaseBackup(backup, restored);
     assert.equal(existsSync(staleRestoreTemp), false);
     assert.equal(restoreResult.schemaVersion, 5);
+    assert.equal(existsSync(restored + '.restore-journal.json'), false, 'successful Restore removes its completed journal');
     const restoredDb = openDatabase(restored);
     assert.deepEqual(new ControlCenter(restoredDb).getTask(task.id).payload, { committed: true });
     restoredDb.close();
@@ -167,6 +168,13 @@ test('restore can recover the original database after a crash between move and i
     const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-after-original-move', backup, database], { encoding: 'utf8' });
     assert.equal(result.status, 78, result.stderr);
     assert.equal(existsSync(database), false, 'the crash window leaves the live path absent');
+    const journalPath = database + '.restore-journal.json';
+    assert.equal(existsSync(journalPath), true, 'the crash must leave a recovery journal');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
+    assert.equal(journal.version, 1);
+    assert.equal(journal.destination, database);
+    assert.match(journal.rollback, /\.pre-restore-[0-9a-f-]{36}$/i);
+    assert.equal(existsSync(journal.temporary), true, 'the journal identifies the staged snapshot');
     const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
     assert.ok(rollbackName, 'the original database must remain recoverable');
     const rollback = join(directory, rollbackName);
@@ -178,6 +186,7 @@ test('restore can recover the original database after a crash between move and i
     // The child is confirmed exited; remove only its exact stale lock files before recovery.
     unlinkSync(database + '.maintenance.lock');
     unlinkSync(database + '.runtime.lock');
+    assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
     renameSync(rollback, database);
     for (const name of readdirSync(directory)) {
       if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
@@ -186,6 +195,7 @@ test('restore can recover the original database after a crash between move and i
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
     db.close();
     db = null;
+    unlinkSync(journalPath); // Simulate the operator closing the reviewed recovery record.
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -210,6 +220,10 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-after-install', backup, database], { encoding: 'utf8' });
     assert.equal(result.status, 79, result.stderr);
     assert.equal(existsSync(database), true);
+    const journalPath = database + '.restore-journal.json';
+    assert.equal(existsSync(journalPath), true, 'the post-install crash must leave a recovery journal');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
+    assert.equal(journal.destination, database);
     const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
     assert.ok(rollbackName, 'the pre-restore database must remain available');
     db = openDatabase(database);
@@ -222,10 +236,12 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
 
     unlinkSync(database + '.maintenance.lock');
     unlinkSync(database + '.runtime.lock');
+    assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
     for (const name of readdirSync(directory)) {
       if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
     }
     assert.equal(existsSync(database), true, 'the successfully installed database remains in place');
+    unlinkSync(journalPath); // Test cleanup after explicitly inspecting both database copies.
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

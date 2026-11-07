@@ -1,6 +1,6 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { constants, copyFileSync, linkSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -103,6 +103,23 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     throw error;
   }
 }
+function createRestoreJournal(journalPath, record) {
+  const temporary = journalPath + '.' + randomUUID() + '.tmp';
+  let descriptor;
+  try {
+    descriptor = openSync(temporary, 'wx', 0o600);
+    writeFileSync(descriptor, JSON.stringify(record, null, 2) + '\n', 'utf8');
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    // Publish the complete, flushed journal atomically without replacing an earlier recovery record.
+    linkSync(temporary, journalPath);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    try { unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
 function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const source = assertRegularFile(backupPath, 'Backup source');
   const destination = resolve(databasePath);
@@ -120,8 +137,22 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
   const rollback = destination + '.pre-restore-' + randomUUID();
+  const journalPath = destination + '.restore-journal.json';
+  if (pathEntryExists(journalPath)) throw new Error('An interrupted Restore journal already exists; inspect and resolve it before starting another Restore: ' + journalPath);
   let movedOriginal = false;
+  let journalCreated = false;
   try {
+    createRestoreJournal(journalPath, {
+      version: 1,
+      operation: 'restore',
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      source,
+      destination,
+      temporary,
+      rollback
+    });
+    journalCreated = true;
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
     // Validate the exact bytes that will be installed, not only the earlier source path.
     const metadata = validateSnapshot(temporary);
@@ -133,9 +164,10 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     // linkSync is atomic and fails if another process created the destination; renameSync could overwrite it on POSIX.
     linkSync(temporary, destination);
     try { rmSync(temporary, { force: true }); } catch { /* The installed database is valid; a stale temp link is harmless. */ }
+    try { unlinkSync(journalPath); } catch { /* Keep the recovery record if cleanup is interrupted. */ }
     return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata };
   } catch (error) {
-    rmSync(temporary, { force: true });
+    try { rmSync(temporary, { force: true }); } catch {}
     if (movedOriginal) {
       if (!pathEntryExists(destination)) {
         try { renameSync(rollback, destination); }
@@ -145,6 +177,10 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
       } else {
         throw new Error('Restore failed because the destination appeared concurrently; the original database remains at ' + rollback, { cause: error });
       }
+    }
+    if (journalCreated && (!movedOriginal || pathEntryExists(destination))) {
+      // No rollback decision remains outstanding; otherwise preserve the journal with the rollback file.
+      try { unlinkSync(journalPath); } catch {}
     }
     throw error;
   }
