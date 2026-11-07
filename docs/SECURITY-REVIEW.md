@@ -130,7 +130,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 | Credential separation | Operator and Participant credentials use distinct routes and checks; lease token is separately required for worker mutations | Inspected; independent adversarial testing pending |
 | Token storage | Operator and Participant token hashes are stored; lease hashes are stored | Inspected; filesystem/database protection is an operational responsibility |
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
-| Dashboard | Operator token is held in page memory; static assets use restrictive headers; UI is read-only | Inspected; browser/runtime testing pending |
+| Dashboard | Operator token is held in page memory; dynamic values use `textContent`; no HTML injection sinks, console logging, or payload/result rendering | Static asset and source regression checks pass; interactive browser testing remains pending |
 | Backup/restore | Dedicated backup and offline restore implementation exists | Not yet fully reviewed |
 | Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination and graceful runtime shutdown tests passed in CI on Node 24/26 Windows |
 
@@ -145,7 +145,8 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).
 - [ ] Review token rotation, backup exposure, local filesystem permissions, and database file permissions.
-- [ ] Add or identify independent tests for credential leakage through errors, events, CLI output, and dashboard rendering.
+- [x] Add regression coverage for credential redaction in HTTP errors, audit events, CLI failures, and dashboard output/source sinks.
+- [ ] Obtain independent adversarial review of credential handling and interactive browser behavior.
 - [ ] Obtain an independent security review from a reviewer who did not implement the controls.
 
 ## Gate

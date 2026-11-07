@@ -288,6 +288,10 @@ test('serves the read-only dashboard and static assets with restrictive security
     const scriptText = await script.text();
     assert.match(scriptText, /let operatorToken =/);
     assert.doesNotMatch(scriptText, /localStorage|sessionStorage/);
+    assert.match(scriptText, /textContent/);
+    assert.doesNotMatch(scriptText, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
+    assert.doesNotMatch(scriptText, /console\.(?:log|error|warn)/);
+    assert.doesNotMatch(scriptText, /task\.(?:payload|result)/);
 
     const stylesheet = await fetch(base + '/dashboard.css');
     assert.equal(stylesheet.status, 200);
