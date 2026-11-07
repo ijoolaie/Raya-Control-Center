@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase } from '../src/db.js';
@@ -76,6 +76,30 @@ test('restore rejects directory paths before moving the live database', () => {
     checkDb = null;
   } finally {
     if (checkDb) checkDb.close();
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+
+test('restore rejects symlink and junction parent components', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-link-'));
+  const realDirectory = join(directory, 'real');
+  const linkedDirectory = join(directory, 'linked');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    mkdirSync(realDirectory);
+    db = openDatabase(join(realDirectory, 'source.sqlite'));
+    new ControlCenter(db).createTask({ type: 'restore.link.guard' });
+    createDatabaseBackup(join(realDirectory, 'source.sqlite'), backup);
+    db.close();
+    db = null;
+    symlinkSync(realDirectory, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => restoreDatabaseBackup(join(linkedDirectory, 'source.sqlite'), join(directory, 'copy.sqlite')), /symbolic link or junction/);
+    assert.throws(() => restoreDatabaseBackup(backup, join(linkedDirectory, 'target.sqlite')), /symbolic link or junction/);
+    assert.equal(existsSync(join(realDirectory, 'target.sqlite')), false);
+  } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

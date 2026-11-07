@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { constants, copyFileSync, lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { constants, copyFileSync, linkSync, lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 function pathEntryExists(filename) {
@@ -8,8 +8,28 @@ function pathEntryExists(filename) {
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
 
+
+function assertNoSymlinkComponents(filename, label) {
+  const absolute = resolve(filename);
+  const parsed = parse(absolute);
+  const components = absolute.slice(parsed.root.length).split(sep).filter(Boolean);
+  let current = parsed.root;
+  for (const component of components) {
+    current = current ? current + (current.endsWith(sep) ? '' : sep) + component : component;
+    let stat;
+    try { stat = lstatSync(current); }
+    catch (error) {
+      if (error.code === 'ENOENT') throw new Error(label + ' path component does not exist: ' + current);
+      throw error;
+    }
+    // On Windows, Node reports directory junctions as symbolic links as well.
+    if (stat.isSymbolicLink()) throw new Error(label + ' path must not traverse a symbolic link or junction: ' + current);
+  }
+  return absolute;
+}
+
 function assertRegularFile(filename, label) {
-  const path = resolve(filename);
+  const path = assertNoSymlinkComponents(filename, label);
   let stat;
   try { stat = lstatSync(path); }
   catch (error) {
@@ -48,6 +68,7 @@ export function createDatabaseBackup(databasePath, backupPath) {
     throw new Error('Backup destination must differ from the live database');
   if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
   mkdirSync(dirname(destination), { recursive: true });
+  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
   const db = new DatabaseSync(source);
   try {
@@ -59,7 +80,9 @@ export function createDatabaseBackup(databasePath, backupPath) {
   try {
     const metadata = validateSnapshot(temporary);
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
-    renameSync(temporary, destination);
+    // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
+    linkSync(temporary, destination);
+    try { rmSync(temporary, { force: true }); } catch { /* The installed backup is valid; a stale temp link is harmless. */ }
     return { path: destination, ...metadata };
   } catch (error) {
     rmSync(temporary, { force: true });
@@ -78,6 +101,7 @@ export function restoreDatabaseBackup(backupPath, databasePath) {
   if (pathEntryExists(walPath) || pathEntryExists(shmPath))
     throw new Error('Database WAL sidecars exist; stop the server and ensure all database connections are closed before restore');
   mkdirSync(dirname(destination), { recursive: true });
+  assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
   if (pathEntryExists(destination) && !lstatSync(destination).isFile())
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
@@ -92,11 +116,22 @@ export function restoreDatabaseBackup(backupPath, databasePath) {
       renameSync(destination, rollback);
       movedOriginal = true;
     }
-    renameSync(temporary, destination);
+    // linkSync is atomic and fails if another process created the destination; renameSync could overwrite it on POSIX.
+    linkSync(temporary, destination);
+    try { rmSync(temporary, { force: true }); } catch { /* The installed database is valid; a stale temp link is harmless. */ }
     return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata };
   } catch (error) {
     rmSync(temporary, { force: true });
-    if (movedOriginal && !pathEntryExists(destination)) renameSync(rollback, destination);
+    if (movedOriginal) {
+      if (!pathEntryExists(destination)) {
+        try { renameSync(rollback, destination); }
+        catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], 'Restore failed and automatic rollback could not complete; the original database remains at ' + rollback);
+        }
+      } else {
+        throw new Error('Restore failed because the destination appeared concurrently; the original database remains at ' + rollback, { cause: error });
+      }
+    }
     throw error;
   }
 }
