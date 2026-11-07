@@ -132,13 +132,13 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     throw new Error('Database WAL sidecars exist; stop the server and ensure all database connections are closed before restore');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
+  const journalPath = destination + '.restore-journal.json';
+  if (pathEntryExists(journalPath)) throw new Error('An interrupted Restore journal already exists; inspect and resolve it before starting another Restore: ' + journalPath);
   cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.restore');
   if (pathEntryExists(destination) && !lstatSync(destination).isFile())
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
   const rollback = destination + '.pre-restore-' + randomUUID();
-  const journalPath = destination + '.restore-journal.json';
-  if (pathEntryExists(journalPath)) throw new Error('An interrupted Restore journal already exists; inspect and resolve it before starting another Restore: ' + journalPath);
   let movedOriginal = false;
   let journalCreated = false;
   try {

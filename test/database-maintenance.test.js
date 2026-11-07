@@ -187,6 +187,7 @@ test('restore can recover the original database after a crash between move and i
     unlinkSync(database + '.maintenance.lock');
     unlinkSync(database + '.runtime.lock');
     assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
+    assert.equal(existsSync(journal.temporary), true, 'a blocked retry must preserve the staged snapshot');
     renameSync(rollback, database);
     for (const name of readdirSync(directory)) {
       if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
@@ -237,6 +238,7 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     unlinkSync(database + '.maintenance.lock');
     unlinkSync(database + '.runtime.lock');
     assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
+    assert.equal(existsSync(journal.temporary), true, 'a blocked retry must preserve the staged snapshot');
     for (const name of readdirSync(directory)) {
       if (name.startsWith('.live.sqlite.') && name.endsWith('.restore')) unlinkSync(join(directory, name));
     }
