@@ -383,6 +383,24 @@ test('HTTP rejects non-loopback Host headers with a safe 421 response', async ()
     assert.equal(raw.includes('attacker.example', raw.indexOf('\r\n\r\n')), false);
   });
 });
+test('HTTP accepts only the documented loopback Host names with optional valid ports', async () => {
+  await createHarness(async ({ server }) => {
+    const accepted = ['127.0.0.1', 'localhost', 'LOCALHOST', '[::1]', '127.0.0.1:' + server.address().port, 'localhost:' + server.address().port, '[::1]:' + server.address().port];
+    for (const host of accepted) {
+      const raw = await new Promise((resolve, reject) => {
+        const socket = createConnection(server.address().port, '127.0.0.1');
+        let response = '';
+        socket.setEncoding('utf8');
+        socket.on('connect', () => socket.write('GET /control/v1/health HTTP/1.1\r\nHost: ' + host + '\r\nConnection: close\r\n\r\n'));
+        socket.on('data', chunk => { response += chunk; });
+        socket.on('end', () => resolve(response));
+        socket.on('error', reject);
+      });
+      assert.match(raw, /^HTTP\/1\.1 200/, 'loopback Host must be accepted: ' + host);
+      assert.match(raw, /\"status\":\"ok\"/);
+    }
+  });
+});
 test('HTTP rejects non-authority Host values including userinfo that disguises a remote host', async () => {
   await createHarness(async ({ server }) => {
     for (const host of ['attacker.example@localhost', 'localhost/path', 'localhost?x=1', 'localhost#fragment']) {
