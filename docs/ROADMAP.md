@@ -84,3 +84,14 @@ Requires an explicit product decision, threat-model review, authenticated transp
 ## Progress reporting rule
 Distinguish **Documented**, **Implemented**, **Tested**, and **Operational**.
 Never report completion based only on file creation.
+### Security review preparation
+- [x] Create an evidence-based internal review register in docs/SECURITY-REVIEW.md; identify confirmed redaction-policy mismatch SEC-001.
+- [ ] Decide and remediate SEC-001; task-result retention contract is unresolved.
+- [ ] Complete independent security review by a reviewer who did not implement the controls.
+- [ ] Keep the API loopback-only until the independent review gate is complete.
+
+### Security review preparation
+- [x] Create an evidence-based internal review register in docs/SECURITY-REVIEW.md; identify confirmed redaction-policy mismatch SEC-001.
+- [ ] Decide and remediate SEC-001; task-result retention contract is unresolved.
+- [ ] Complete independent security review by a reviewer who did not implement the controls.
+- [ ] Keep the API loopback-only until the independent review gate is complete.
