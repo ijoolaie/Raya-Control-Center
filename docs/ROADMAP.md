@@ -89,6 +89,6 @@ Never report completion based only on file creation.
 - [x] Remediate SEC-001: keep task results on Task records and restrict audit events to bounded metadata; regression tests added.
 - [x] Make Operator token rotation immediate in the running server; reject offline rotation that could desynchronize server and database credentials.
 - [x] Redact echoed Operator credentials from CLI API error output.
-- [ ] Document and test recovery when a token-rotation response is lost after the credential is committed.
+- [x] Implement and test offline Operator token recovery under an exclusive per-database runtime lock.
 - [ ] Complete independent security review by a reviewer who did not implement the controls.
 - [ ] Keep the API loopback-only until the independent review gate is complete.

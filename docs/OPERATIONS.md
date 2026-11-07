@@ -35,21 +35,6 @@ Before the HTTP listener begins accepting requests, startup reconciliation check
 
 The server also repeats lease reconciliation every 15 seconds while running. This is a safety boundary, not an automatic retry mechanism: the Control Center cannot know whether an external side effect completed before a worker crashed or lost connectivity. Inspect the task and any external side effects before creating replacement work. Never automatically replay uncertain non-idempotent work.
 
-## Rotate the operator token
-
-1. Stop the running server.
-2. Run:
-
-   ```powershell
-   node src/rotate-operator-token.js
-   ```
-
-3. Save the new token from stdout in a password manager.
-4. Set `RAYA_CC_OPERATOR_TOKEN` to the new token in PowerShell.
-5. Restart with `npm start`.
-
-The rotation command changes the database hash immediately. The old server process retains its in-memory token until stopped, so stop it before rotating.
-
 ## Configuration
 
 - `RAYA_CC_PORT`: TCP port, default `4317`.
@@ -68,7 +53,21 @@ npm run cli -- operator rotate
 
 The command returns the replacement token once. Save it securely before closing the terminal. The old token is invalidated immediately for subsequent requests; update the environment used to start the Control Center and all Operator CLI sessions to the new value before restarting or issuing more commands. Do not paste the token into tickets, chat, source files, or shell history. The token is returned in CLI standard output, so avoid transcript capture and redirected logs.
 
-Direct offline rotation through `src/rotate-operator-token.js` is disabled because it could update the database hash without updating the in-memory HTTP server credential.
+If the CLI loses the rotation response, or the saved token is otherwise unavailable, stop the server and recover a replacement locally:
+
+~~~powershell
+npm run operator:recover
+~~~
+
+For a custom database, pass its exact path:
+
+~~~powershell
+npm run operator:recover -- "D:/Data/raya-control-center.sqlite"
+~~~
+
+Recovery uses the same exclusive runtime lock as server startup. It refuses to run while a server using that database is active, rotates the stored credential hash, and prints the new token once. Set RAYA_CC_OPERATOR_TOKEN to the recovered value before restarting. It does not modify task, participant, or event data.
+
+The lock file is next to the database with suffix .runtime.lock. A forced process termination can leave a stale lock behind. Never delete it merely to bypass an error: inspect its PID, verify that the process is no longer running and that no other Control Center instance uses the database, then remove only that exact lock file and retry recovery. Do not remove the lock while the server is running.
 
 ## Windows data-directory permissions
 

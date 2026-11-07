@@ -2,6 +2,7 @@ import { openDatabase } from './db.js';
 import { ControlCenter } from './control-center.js';
 import { bootstrapOperatorToken } from './operator-auth.js';
 import { createControlServer } from './http-server.js';
+import { acquireDatabaseRuntimeLock } from './database-runtime-lock.js';
 
 export async function startControlCenter({
   databasePath = process.env.RAYA_CC_DATABASE || '.data/control-center.sqlite',
@@ -14,10 +15,12 @@ export async function startControlCenter({
   }
   if (host !== '127.0.0.1') throw new Error('Raya Control Center must bind to 127.0.0.1');
 
-  const db = openDatabase(databasePath);
+  const releaseRuntimeLock = acquireDatabaseRuntimeLock(databasePath);
+  let db;
   let maintenance;
   let server;
   try {
+    db = openDatabase(databasePath);
     const center = new ControlCenter(db);
     const recoveredTasks = center.reconcileExpiredLeases();
     if (recoveredTasks.length) {
@@ -46,6 +49,8 @@ export async function startControlCenter({
           clearTimeout(forceClose);
           try { db.close(); }
           catch (closeError) { reject(closeError); return; }
+          try { releaseRuntimeLock(); }
+          catch (lockError) { reject(lockError); return; }
           if (error) reject(error);
           else resolve();
         });
@@ -62,7 +67,7 @@ export async function startControlCenter({
   } catch (error) {
     clearInterval(maintenance);
     if (server?.listening) await new Promise(resolve => server.close(resolve));
-    db.close();
+    try { db?.close(); } finally { releaseRuntimeLock(); }
     throw error;
   }
 }

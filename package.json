@@ -10,11 +10,12 @@
   "scripts": {
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "check": "node --check src/db.js && node --check src/control-center.js && node --check src/operator-auth.js && node --check src/http-server.js && node --check src/server.js && node --check src/server-runtime.js && node --check src/rotate-operator-token.js && node --check src/cli.js && node --check src/database-maintenance.js && node --check src/db-backup.js && node --check src/db-restore.js && node --check examples/reference-worker/worker.mjs && node --check dashboard/dashboard.js",
+    "check": "node --check src/db.js && node --check src/control-center.js && node --check src/operator-auth.js && node --check src/http-server.js && node --check src/server.js && node --check src/server-runtime.js && node --check src/database-runtime-lock.js && node --check src/rotate-operator-token.js && node --check src/cli.js && node --check src/database-maintenance.js && node --check src/db-backup.js && node --check src/db-restore.js && node --check examples/reference-worker/worker.mjs && node --check dashboard/dashboard.js",
     "start": "node src/server.js",
     "cli": "node src/cli.js",
     "db:backup": "node src/db-backup.js",
-    "db:restore": "node src/db-restore.js"
+    "db:restore": "node src/db-restore.js",
+    "operator:recover": "node src/rotate-operator-token.js"
   },
   "files": [
     "src/",
