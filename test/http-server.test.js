@@ -185,6 +185,36 @@ test('CLI can register participants and create/read tasks through the local API'
   }
 });
 
+test('CLI rejects remote and malformed API overrides before sending operator credentials', async () => {
+  const token = 'cli-secret-never-forward-this-token';
+  const invalidUrls = [
+    'https://attacker.example/control/v1',
+    'http://attacker.example/control/v1',
+    'http://attacker.example@localhost/control/v1',
+    'http://127.0.0.1.evil/control/v1',
+    'http://127.0.0.1/other',
+    'http://127.0.0.1/control/v1?redirect=1'
+  ];
+  for (const url of invalidUrls) {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['src/cli.js', 'task', 'list'], {
+        cwd: process.cwd(),
+        env: { ...process.env, RAYA_CC_URL: url, RAYA_CC_OPERATOR_TOKEN: token },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', code => resolve({ code, stdout, stderr }));
+    });
+    assert.notEqual(result.code, 0, url);
+    assert.match(result.stderr, /RAYA_CC_URL must/);
+    assert.equal(result.stderr.includes(token), false);
+  }
+});
+
 test('HTTP API rejects request bodies larger than 16 KiB', async () => {
   const db = openDatabase(':memory:');
   const operatorToken = 'operator-secret-token-'.repeat(2);
