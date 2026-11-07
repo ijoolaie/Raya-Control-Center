@@ -3,7 +3,7 @@
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
 Review date: 2026-11-07  
-Reviewed commit: working tree after live operator-token rotation changes
+Reviewed implementation commit: d4eb172ad7ea704b2cae16884b88fcf6b309fb35
 
 ## Scope
 

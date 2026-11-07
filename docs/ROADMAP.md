@@ -41,7 +41,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 ## Phase 2 — Local operator interface
 **Status: Implemented and tested**
 - [x] Loopback-only HTTP API with Host-header allowlist and no CORS.
-- [x] One-time operator-token bootstrap and explicit token rotation command.
+- [x] One-time operator-token bootstrap and authenticated, immediate token rotation through the live API.
 - [x] Participant registration, read, list, and revocation endpoints.
 - [x] Task create/read/list/cancel and worker claim/lifecycle endpoints.
 - [x] Separate participant bearer and lease-token authentication.
@@ -51,7 +51,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [x] Safe 413 connection closure and destroyed-response handling.
 - [x] Graceful SIGINT/SIGTERM shutdown: close idle connections, drain active requests for up to 10 seconds, then force-close before closing SQLite.
 - [x] Startup and periodic expired-lease reconciliation; operator-triggered reconciliation endpoint.
-- [x] CLI for participant registration/read/revocation, task create/read/cancel, events, health, and lease reconciliation.
+- [x] CLI for participant registration/read/revocation, task create/read/cancel, events, health, lease reconciliation, and Operator token rotation.
 - [x] Consistent SQLite backup and validated offline restore with rollback file.
 - [x] Lease-bound task progress reporting, separate from heartbeat, with append-only audit events.
 - [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
@@ -87,5 +87,8 @@ Never report completion based only on file creation.
 ### Security review preparation
 - [x] Create an evidence-based internal review register in docs/SECURITY-REVIEW.md; identify confirmed redaction-policy mismatch SEC-001.
 - [x] Remediate SEC-001: keep task results on Task records and restrict audit events to bounded metadata; regression tests added.
+- [x] Make Operator token rotation immediate in the running server; reject offline rotation that could desynchronize server and database credentials.
+- [x] Redact echoed Operator credentials from CLI API error output.
+- [ ] Document and test recovery when a token-rotation response is lost after the credential is committed.
 - [ ] Complete independent security review by a reviewer who did not implement the controls.
 - [ ] Keep the API loopback-only until the independent review gate is complete.

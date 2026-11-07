@@ -11,15 +11,16 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 - Participant endpoints require `Authorization: Bearer <participant-token>`.
 - Worker lifecycle endpoints additionally require `X-Lease-Token: <lease-token>`.
 - The participant token and lease token are distinct credentials.
-- Tokens must never appear in URLs, request bodies, logs, event data, or error messages.
+- Tokens must never appear in URLs, request bodies, logs, event data, or error messages. The explicit one-time registration/rotation responses are the only API responses that return raw credentials.
 - Operator token is generated on first start and displayed once. Later starts require `RAYA_CC_OPERATOR_TOKEN`.
-- Rotate with `node src/rotate-operator-token.js`; the new token is displayed once.
+- Rotate through the authenticated local API with `npm run cli -- operator rotate`; the replacement token is displayed once and the previous token is invalidated immediately. Update the server and CLI environment before restart or further commands.
 
 ## Endpoints
 
 | Method | Path | Authentication | Purpose |
 |---|---|---|---|
 | GET | `/health` | None | Process/API health |
+| POST | `/operator/rotate-token` | Current Operator | Rotate the Operator token immediately; returns replacement token once |
 | POST | `/participants/register` | Operator | Register participant; returns token once |
 | GET | `/participants` | Operator | List participants with bounded filters and pagination |
 | GET | `/participants/{id}` | Operator | Read participant metadata |
@@ -61,6 +62,7 @@ All successful responses use `application/json; charset=utf-8`, `Cache-Control: 
 | Endpoint | Success body fields |
 |---|---|
 | `GET /health` | `status`, `api` |
+| `POST /operator/rotate-token` | `rotated`, `token` (the raw replacement Operator token is returned once only) |
 | `POST /participants/register` | `participant`, `token` (the raw participant token is returned once only) |
 | `GET /participants` | `participants`, `page` (`limit`, `offset`, `count`) |
 | `GET /participants/{id}` and `POST /participants/{id}/revoke` | `participant` |
