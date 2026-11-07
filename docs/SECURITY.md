@@ -13,7 +13,7 @@ The initial deployment assumes a single trusted machine but does not assume ever
 7. **Revocation safety:** revoking a participant revokes its active leases and moves affected nonterminal tasks to blocked; uncertain work is not retried automatically.
 8. **Input and connection limits:** strict JSON object validation, an 8 KiB header limit, 10-second header receipt timeout (1-second check interval), 30-second request receipt timeout, 16 KiB body limit, bounded task payloads, and parameterized SQL.
 9. **Audit:** append-only events for claims, transitions, cancellation, revocation, and reconciliation.
-10. **Redaction:** no full prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents in logs/events.
+10. **Redaction:** audit events contain bounded operational metadata only; progress text/details, failure reasons, and task results are not copied into the event journal. Callers must still avoid sending secrets in task payloads, progress fields, or results because those operational records are persisted in the Tasks table. No full prompts, transcripts, hidden reasoning, secrets, raw tool arguments, or file contents belong in logs/events.
 11. **Safe errors:** do not reveal token verifiers, stack traces, SQL details, or internal filesystem paths to clients.
 12. **Browser isolation:** no CORS is enabled; Host-header validation rejects DNS-rebinding hostnames.
 13. **Graceful shutdown:** stop accepting requests, close idle connections, bound active-request drain to 10 seconds, and close SQLite only after HTTP connections are closed.

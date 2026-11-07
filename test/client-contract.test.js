@@ -102,9 +102,10 @@ test('independent HTTP client completes a task using the documented participant 
 
     const completed = await request('/tasks/' + taskId + '/complete', {
       method: 'POST', token: participantToken, leaseToken,
-      body: JSON.stringify({ result: { output: 'done', count: 1 } })
+      body: JSON.stringify({ result: { output: 'done', count: 1, marker: 'http-result-secret-marker' } })
     });
     assert.equal(completed.status, 200);
+    assert.deepEqual(completed.body.task.result, { output: 'done', count: 1, marker: 'http-result-secret-marker' });
     assert.equal(completed.body.task.status, 'succeeded');
 
     const staleLease = await request('/tasks/' + taskId + '/heartbeat', {
@@ -120,6 +121,9 @@ test('independent HTTP client completes a task using the documented participant 
       assert.ok(eventTypes.includes(expected), 'missing audit event: ' + expected);
     }
     assert.ok(events.body.events.every(event => !JSON.stringify(event).includes(leaseToken)));
+    assert.ok(!JSON.stringify(events.body.events).includes('http-result-secret-marker'));
+    assert.ok(!JSON.stringify(events.body.events).includes('Processing input'));
+    assert.ok(events.body.events.find(event => event.eventType === 'task.succeeded').data.resultStored);
     assert.equal(events.body.events[0].entityId, taskId);
     assert.equal(participantId, claimed.body.claim.task.assignedParticipantId);
   });

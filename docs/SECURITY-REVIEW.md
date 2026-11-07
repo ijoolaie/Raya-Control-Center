@@ -33,30 +33,28 @@ No remote ingress, tunnel, reverse proxy, or port-forwarding behavior is in scop
 Severity: **Medium**  
 Status: **Open — remediation design required**
 
-Evidence:
-- `src/control-center.js`: `updateTaskProgress` appends the worker-provided `message` to `task.progress_updated` event data.
-- `src/control-center.js`: `failTask` passes the worker-provided `reason` into `task.failed` event data.
-- `src/control-center.js`: `completeTask` passes the entire worker-provided `result` object into `task.succeeded` event data.
-- `src/control-center.js`: `listEvents` returns parsed `data_json` to Operator callers.
-- `docs/SECURITY.md` states that secrets, raw tool arguments, and sensitive content must not be written to logs/events.
+Evidence (pre-remediation):
+- src/control-center.js previously copied progress message, failure reason, and full completion result into appendEvent.
+- listEvents returned parsed event data to Operator callers.
+- docs/SECURITY.md prohibited secrets and sensitive content in audit events.
 
 Impact:
-A Participant can submit arbitrary progress messages, failure reasons, and completion results. Those values are persisted in the append-only audit table and returned by the Operator events API. If a consumer accidentally includes credentials, private content, or raw tool output in those fields, the audit trail retains a second copy of that data. This conflicts with the documented redaction policy. Operator authentication limits who can read the events, but does not prevent the data from being persisted or later exported with audit records.
+Before remediation, a Participant could cause arbitrary free-form content to be retained in the immutable event journal, creating an unnecessary second copy of potentially sensitive Task data.
 
-Required decision:
-Define the intended task-result contract before changing persistence:
-1. Keep audit events metadata-only (for example, percent and bounded event codes; no free-form message, reason, or result).
-2. If task results are a required product feature, store them separately under an explicit retention and access policy, rather than embedding them in append-only audit event data.
-3. Document that callers must not send secrets in operational text fields; validation alone cannot reliably identify secrets.
+Remediation:
+- Schema migration 5 adds tasks.result_json. Successful completion results remain available as task.result without being copied into audit events.
+- Progress events now store only the percentage; progress message/details remain on the Task record.
+- Failure events store no free-form reason. The input remains accepted for API compatibility but is not persisted.
+- Security and integration contracts now warn that Task payloads, progress fields, and results are persisted and must not contain secrets.
 
-Acceptance tests:
-- Completion result values do not appear in audit event data.
-- Failure reason and progress message do not appear in audit event data.
-- Event listing continues to expose event metadata and sequence ordering.
-- If a separate result store is introduced, tests verify its access control, size limits, and redaction/retention contract.
+Verification:
+- Unit tests prove completion results remain on the Task and are absent from audit events.
+- Unit tests prove failure reasons and progress message/details are absent from audit events.
+- HTTP contract tests verify result availability to the completing client while audit history contains only a result-present flag.
+- Backup validation and restore tests cover schema version 5.
 
-No code change is made for SEC-001 in this preparation commit because the product contract for task result retention must be settled first.
-
+Residual risk:
+Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal; it does not detect secrets or encrypt application data at rest.
 ## Reviewed controls (implementation inspection only)
 
 | Area | Observation | Review state |

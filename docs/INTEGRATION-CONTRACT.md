@@ -44,7 +44,7 @@ Participant starts (Participant token + lease token)
 
 A task claim is atomic. The claim response contains the Task and the lease ID, token, and expiry. The lease token is required for every worker lifecycle mutation. A Participant can only mutate the Task associated with its own active, unexpired lease.
 
-Concurrent claim requests are serialized by the SQLite transaction boundary: one eligible Task can be granted to at most one Participant. Competing callers receive either their own claim or `{ "claim": null }`; they must not infer ownership from a timeout or from a locally cached queue view. The lease and `task.claimed` audit event are committed together.
+Concurrent claim requests are serialized by the SQLite transaction boundary: one eligible Task can be granted to at most one Participant. Competing callers receive either their own claim or `{ "claim": null }`; they must not infer ownership from a timeout or from a locally cached queue view. The lease and `task.claimed` audit event are committed together. The append-only event journal stores bounded lifecycle metadata only: progress events store the percentage (not message/details), completion events store a result-present flag (not the result body), and failure events store no free-form reason. Completion results remain available on the Task record to authorized Operator clients.
 
 Task creation accepts an optional globally unique `idempotencyKey`. Retrying the same create request with the same key, type, payload, and priority returns the original Task (HTTP 200, `idempotentReplay: true`) without creating another Task or audit event. Reusing that key with different task input returns `409 conflict`. Keep the key stable across retries; do not generate a new key after a timeout. Concurrent identical requests using the same key also create exactly one Task and one `task.queued` event; one response is the initial `201`, and the replay response is `200`.
 
@@ -54,9 +54,9 @@ Task creation accepts an optional globally unique `idempotencyKey`. Retrying the
 2. Call `POST /tasks/claim` with the Participant bearer token. A successful empty queue is represented by `{ "claim": null }`.
 3. Persist the returned lease token only in memory or protected short-lived storage.
 4. Call `POST /tasks/{id}/start` with both credentials.
-5. Optionally call `POST /tasks/{id}/progress`; progress is informational and does not renew the lease.
+5. Optionally call `POST /tasks/{id}/progress`; progress is informational and does not renew the lease. Progress message/details are stored on the Task record for operational inspection; do not include secrets or credentials.
 6. Call `POST /tasks/{id}/heartbeat` before expiry when work is still active.
-7. Finish with `POST /tasks/{id}/complete` or `POST /tasks/{id}/fail`.
+7. Finish with `POST /tasks/{id}/complete` or `POST /tasks/{id}/fail`. A successful completion result is stored in the Task record and returned as `task.result`; failure reason is not retained in the Task or audit event.
 8. Discard the lease token after a terminal response. A released/expired/revoked lease cannot be reused.
 
 For cooperative cancellation, the operator calls `POST /tasks/{id}/cancel-request`. The Participant polls `GET /tasks/{id}/lease-status` with its Participant bearer and active `X-Lease-Token`. The response exposes only task ID, lifecycle status, cancellation flag, update time, and lease expiry (not the task payload). After observing `cancellationRequested=true`, the Participant stops its external work safely, then calls `POST /tasks/{id}/cancel-ack` with the still-active lease. The acknowledgement is not proof that arbitrary external side effects were rolled back.

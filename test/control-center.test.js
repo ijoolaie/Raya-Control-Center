@@ -21,7 +21,7 @@ test('migrates a clean database and preserves task state across database reopen'
   const filename = join(dir, 'state.sqlite');
   try {
     let db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
     const task = new ControlCenter(db).createTask({ type: 'persist.check', payload: { durable: true } });
     db.close();
     db = openDatabase(filename);
@@ -32,11 +32,11 @@ test('migrates a clean database and preserves task state across database reopen'
 });
 
 
-test('schema migration upgrades an existing version 3 database to version 4', () => {
+test('schema migration upgrades an existing version 3 database to version 5', () => {
   const db = openDatabase(':memory:');
-  db.exec('ALTER TABLE tasks DROP COLUMN progress_json; PRAGMA user_version = 3');
+  db.exec('ALTER TABLE tasks DROP COLUMN result_json; ALTER TABLE tasks DROP COLUMN progress_json; PRAGMA user_version = 3');
   migrate(db);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get().count, 1);
   db.close();
 });
@@ -77,7 +77,10 @@ test('claim is exclusive and task lifecycle is lease-bound', () => {
   assert.equal(center.claimTask({ participantId: participant.id, token }), null);
   assert.throws(() => center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: 'bad' }), error => error instanceof ControlCenterError && error.code === 'lease_mismatch');
   center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token });
-  assert.equal(center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, result: { ok: true } }).status, 'succeeded');
+  const completed = center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, result: { ok: true, privateValue: 'result-secret-marker' } });
+  assert.equal(completed.status, 'succeeded');
+  assert.deepEqual(completed.result, { ok: true, privateValue: 'result-secret-marker' });
+  assert.ok(!JSON.stringify(center.listEvents({ entityType: 'task', entityId: task.id })).includes('result-secret-marker'));
   assert.equal(center.listEvents({ entityType: 'task', entityId: task.id }).length, 4);
   db.close();
 });
@@ -224,11 +227,24 @@ test('task progress is lease-bound, independent from heartbeat, and audited', ()
   const updated = center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, percent: 35, message: 'Downloading', details: { completed: 7, total: 20 } });
   assert.equal(updated.progress.percent, 35);
   assert.equal(updated.progress.message, 'Downloading');
-  assert.equal(center.listEvents({ entityType: 'task', entityId: task.id })[0].eventType, 'task.progress_updated');
+  const progressEvent = center.listEvents({ entityType: 'task', entityId: task.id })[0];
+  assert.equal(progressEvent.eventType, 'task.progress_updated');
+  assert.ok(!JSON.stringify(progressEvent).includes('Downloading'));
+  assert.ok(!JSON.stringify(progressEvent).includes('completed'));
   assert.throws(() => center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: 'invalid', percent: 40 }), error => error.code === 'lease_mismatch');
   assert.throws(() => center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, percent: 101 }), error => error.code === 'validation_error');
   db.close();
 });
+test('failure reasons are not persisted in audit events', () => {
+  const { db, center, participant, token } = fixture();
+  const task = center.createTask({ type: 'demo.failure-redaction' });
+  const claim = center.claimTask({ participantId: participant.id, token });
+  center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token });
+  center.failTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token, reason: 'failure-secret-marker' });
+  assert.ok(!JSON.stringify(center.listEvents({ entityType: 'task', entityId: task.id })).includes('failure-secret-marker'));
+  db.close();
+});
+
 test('event history rejects updates and deletes', () => {
   const { db, center } = fixture();
   const event = center.listEvents({ limit: 1 })[0];

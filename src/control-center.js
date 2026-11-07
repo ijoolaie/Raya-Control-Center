@@ -177,7 +177,7 @@ export class ControlCenter {
     return { id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json),
       priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id,
       leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at,
-      startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null };
+      startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null, result: row.result_json ? parse(row.result_json) : null };
   }
 
   listTasks({ status, type, assignedParticipantId, limit = 50, offset = 0 } = {}) {
@@ -192,7 +192,7 @@ export class ControlCenter {
     if (type) { sql += ' AND type = ?'; args.push(type); }
     if (assignedParticipantId) { sql += ' AND assigned_participant_id = ?'; args.push(assignedParticipantId); }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
-    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null }));
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null, result: row.result_json ? parse(row.result_json) : null }));
   }
 
   claimTask({ participantId, token, leaseDurationMs = this.leaseDurationMs }) {
@@ -256,7 +256,7 @@ export class ControlCenter {
       this.db.prepare('UPDATE tasks SET progress_json = ?, updated_at = ? WHERE id = ?')
         .run(json(progress), timestamp, taskId);
       appendEvent(this.db, { actorId: participantId, entityType: 'task', entityId: taskId,
-        eventType: 'task.progress_updated', data: { percent, message } });
+        eventType: 'task.progress_updated', data: { percent } });
       return this.getTask(taskId);
     });
   }
@@ -286,25 +286,25 @@ export class ControlCenter {
     catch { throw new ControlCenterError('validation_error', 'Task result must be JSON serializable'); }
     if (typeof resultText !== 'string' || Buffer.byteLength(resultText) > 16_384)
       throw new ControlCenterError('validation_error', 'Task result exceeds 16 KiB or is not serializable');
-    return this.#finishTask({ taskId, participantId, leaseToken, status: 'succeeded', eventType: 'task.succeeded', data: result });
+    return this.#finishTask({ taskId, participantId, leaseToken, status: 'succeeded', eventType: 'task.succeeded', resultText });
   }
 
   failTask({ taskId, participantId, leaseToken, reason = 'unspecified' }) {
     if (typeof reason !== 'string' || reason.length > 500)
       throw new ControlCenterError('validation_error', 'Failure reason must be a string of at most 500 characters');
-    return this.#finishTask({ taskId, participantId, leaseToken, status: 'failed', eventType: 'task.failed', data: { reason } });
+    return this.#finishTask({ taskId, participantId, leaseToken, status: 'failed', eventType: 'task.failed' });
   }
 
-  #finishTask({ taskId, participantId, leaseToken, status, eventType, data }) {
+  #finishTask({ taskId, participantId, leaseToken, status, eventType, resultText = null }) {
     return this.#withLease({ taskId, participantId, leaseToken }, task => {
       if (!['claimed', 'running', 'cancellation_requested'].includes(task.status))
         throw new ControlCenterError('invalid_transition', 'Task is not in a finishable state');
       const timestamp = now();
-      this.db.prepare('UPDATE tasks SET status = ?, finished_at = ?, updated_at = ? WHERE id = ?')
-        .run(status, timestamp, timestamp, taskId);
+      this.db.prepare('UPDATE tasks SET status = ?, result_json = ?, finished_at = ?, updated_at = ? WHERE id = ?')
+        .run(status, resultText, timestamp, timestamp, taskId);
       this.db.prepare(`UPDATE leases SET status = 'released', released_at = ? WHERE task_id = ? AND status = 'active'`)
         .run(timestamp, taskId);
-      appendEvent(this.db, { actorId: participantId, entityType: 'task', entityId: taskId, eventType, data });
+      appendEvent(this.db, { actorId: participantId, entityType: 'task', entityId: taskId, eventType, data: status === 'succeeded' ? { resultStored: true } : {} });
       return this.getTask(taskId);
     });
   }

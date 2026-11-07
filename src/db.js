@@ -77,6 +77,10 @@ const migrations = [
   {
     version: 4,
     sql: "ALTER TABLE tasks ADD COLUMN progress_json TEXT;"
+  },
+  {
+    version: 5,
+    sql: 'ALTER TABLE tasks ADD COLUMN result_json TEXT;'
   }
 ];
 

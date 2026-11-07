@@ -18,7 +18,7 @@ function validateSnapshot(filename) {
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     if (violations.length) throw new Error('SQLite foreign_key_check found violations');
     const version = db.prepare('PRAGMA user_version').get().user_version;
-    if (!Number.isInteger(version) || version < 1 || version > 4)
+    if (!Number.isInteger(version) || version < 1 || version > 5)
       throw new Error('Unsupported database schema version: ' + version);
     return { schemaVersion: version };
   } finally {

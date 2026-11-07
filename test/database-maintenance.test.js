@@ -18,9 +18,9 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     const center = new ControlCenter(db);
     const task = center.createTask({ type: 'backup.snapshot', payload: { committed: true } });
     const backupResult = createDatabaseBackup(database, backup);
-    assert.equal(backupResult.schemaVersion, 4);
+    assert.equal(backupResult.schemaVersion, 5);
     const restoreResult = restoreDatabaseBackup(backup, restored);
-    assert.equal(restoreResult.schemaVersion, 4);
+    assert.equal(restoreResult.schemaVersion, 5);
     const restoredDb = openDatabase(restored);
     assert.deepEqual(new ControlCenter(restoredDb).getTask(task.id).payload, { committed: true });
     restoredDb.close();
