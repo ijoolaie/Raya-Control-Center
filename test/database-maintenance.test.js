@@ -11,7 +11,40 @@ import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
 import { acquireDatabaseMaintenanceLock } from '../src/database-runtime-lock.js';
+import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
 
+
+
+test('Restore recovery state model is conservative across observed artifact combinations', () => {
+  const artifact = (exists) => ({ exists });
+  const base = { journalStatus: 'valid', journalValid: true, locks: {}, artifacts: { source: artifact(true) } };
+  const cases = [
+    [{ ...base, journalStatus: 'absent' }, 'no-pending-restore'],
+    [{ ...base, journalStatus: 'malformed' }, 'manual-review-invalid-journal'],
+    [{ ...base, locks: { runtime: artifact(true) } }, 'blocked-lock-present'],
+    [{ ...base, artifacts: { ...base.artifacts, destination: artifact(false), rollback: artifact(true), temporary: artifact(true) } }, 'live-missing-rollback-present'],
+    [{ ...base, artifacts: { ...base.artifacts, destination: artifact(true), rollback: artifact(true) } }, 'live-and-rollback-present-ambiguous'],
+    [{ ...base, artifacts: { ...base.artifacts, destination: artifact(false), rollback: artifact(false), temporary: artifact(true) } }, 'live-and-rollback-missing'],
+    [{ ...base, artifacts: { ...base.artifacts, destination: artifact(true), rollback: artifact(false), temporary: artifact(true) } }, 'live-present-temporary-present-no-rollback'],
+    [{ ...base, artifacts: { ...base.artifacts, destination: artifact(true), rollback: artifact(false), temporary: artifact(false) } }, 'live-present-no-rollback']
+  ];
+  for (const [input, expected] of cases) {
+    const result = classifyRestoreRecoveryState(input);
+    assert.equal(result.state, expected);
+    assert.equal(result.automaticAction, 'none');
+    assert.ok(result.guidance.length > 0);
+  }
+});
+
+test('Restore recovery state model never treats a lock as proof of a live or stale owner', () => {
+  const result = classifyRestoreRecoveryState({
+    journalStatus: 'valid', journalValid: true, locks: { maintenance: { exists: true } },
+    artifacts: { destination: { exists: true }, rollback: { exists: false } }
+  });
+  assert.equal(result.state, 'blocked-lock-present');
+  assert.equal(result.observations.maintenanceLock, true);
+  assert.match(result.guidance, /not classified as stale/);
+});
 
 test('restore inspect reports an absent journal without creating or changing files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-absent-'));
@@ -21,6 +54,7 @@ test('restore inspect reports an absent journal without creating or changing fil
     const report = inspectDatabaseRestore(database);
     assert.equal(report.readOnly, true);
     assert.equal(report.journal.status, 'absent');
+    assert.equal(report.recovery.state, 'no-pending-restore');
     assert.equal(report.database.exists, false);
     assert.deepEqual(readdirSync(directory), before);
   } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -44,6 +78,7 @@ test('restore inspect reports valid journal artifacts and is strictly read-only'
     const report = inspectDatabaseRestore(database);
     const after = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
     assert.equal(report.journal.status, 'valid');
+    assert.equal(report.recovery.state, 'blocked-lock-present');
     assert.equal(report.journal.record.pid, 1234);
     assert.equal(report.journal.artifacts.source.exists, true);
     assert.equal(report.journal.artifacts.destination.exists, false);
@@ -62,6 +97,7 @@ test('restore inspect preserves and flags malformed journal JSON', () => {
     writeFileSync(journal, '{not-json');
     const report = inspectDatabaseRestore(database);
     assert.equal(report.journal.status, 'malformed');
+    assert.equal(report.recovery.state, 'manual-review-invalid-journal');
     assert.equal(readFileSync(journal, 'utf8'), '{not-json');
     assert.equal(report.journal.artifacts, null);
   } finally { rmSync(directory, { recursive: true, force: true }); }

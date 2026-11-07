@@ -15,7 +15,7 @@ $env:RAYA_CC_DATABASE = (Join-Path (Get-Location) '.data\control-center.sqlite')
 npm run db:restore:inspect
 ```
 
-The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, and whether each recorded artifact exists. It does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
+The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, and a conservative recovery.state classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
 
 
 Set the exact paths; do not use a wildcard as a deletion target:
@@ -96,6 +96,24 @@ Do not restore over it as part of crash cleanup. The presence of a live database
 ## 6. Orphaned temporary files
 
 A `.restore` temporary file is not a substitute for a rollback database. Leave it in place until the live database has been recovered, validated, and backed up. Only then may an operator remove a specifically identified orphaned `.restore` file after confirming no maintenance process is active.
+
+
+## Restore recovery state model
+
+The recovery.state field is deliberately conservative:
+
+| State | Meaning of observed paths | Required posture |
+| --- | --- | --- |
+| no-pending-restore | No journal at the expected path | Normal operation may continue; this is not an integrity check |
+| manual-review-invalid-journal | Journal malformed, invalid, or unreadable | Preserve all artifacts; no retry |
+| blocked-lock-present | A valid journal and at least one lock path exists | Verify all database users are stopped; do not infer stale ownership |
+| live-missing-rollback-present | Live path absent, rollback path present | Validate a separate copy; operator must choose explicitly |
+| live-and-rollback-present-ambiguous | Both paths present | Preserve and compare copies; do not infer which is authoritative |
+| live-and-rollback-missing | Neither live nor rollback path exists | Stop; investigate all remaining artifacts |
+| live-present-temporary-present-no-rollback | Live and staged temporary paths present, rollback absent | Preserve; do not infer the live file is unchanged |
+| live-present-no-rollback | Live path present, rollback absent, temporary absent | Preserve and verify a copy; no automatic cleanup |
+
+Every state returns automaticAction: none. A temporary file can be incomplete, a live file can be newly installed, and a lock can be stale or active; this model does not distinguish those cases. It maps observed presence to a safe operator posture only.
 
 ## Safety properties and limitations
 

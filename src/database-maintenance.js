@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
 
 function pathEntryExists(filename) {
   try { lstatSync(filename); return true; }
@@ -28,10 +29,14 @@ export function inspectDatabaseRestore(databasePath) {
     locks: { runtime: inspectPath(destination + '.runtime.lock'), maintenance: inspectPath(destination + '.maintenance.lock') },
     journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, warnings: [] }
   };
-  if (!report.journal.exists) return report;
+  if (!report.journal.exists) {
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: report.locks });
+    return report;
+  }
   if (report.journal.exists !== true || report.journal.kind !== 'file') {
     report.journal.status = 'unreadable';
     report.journal.warnings.push('Journal path is not a readable regular file; preserve it for operator review.');
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, locks: report.locks });
     return report;
   }
   let record;
@@ -39,6 +44,7 @@ export function inspectDatabaseRestore(databasePath) {
   catch (error) {
     report.journal.status = 'malformed';
     report.journal.warnings.push('Journal JSON could not be parsed (' + (error.code || error.name) + '); preserve all artifacts.');
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, locks: report.locks });
     return report;
   }
   const required = ['source', 'destination', 'temporary', 'rollback'];
@@ -76,6 +82,7 @@ export function inspectDatabaseRestore(databasePath) {
     temporary: inspectPath(record.temporary), rollback: inspectPath(record.rollback)
   };
   report.journal.warnings.push('Artifact presence does not establish which database is authoritative. Lock presence does not establish whether its owner is stale. No files or locks were changed.');
+  report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, journalValid: report.journal.valid, locks: report.locks, artifacts: report.journal.artifacts || {} });
   return report;
 }
 
