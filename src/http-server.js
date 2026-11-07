@@ -176,6 +176,13 @@ export function createControlServer({ db, operatorToken }) {
       // targets must not supply an alternate authority that bypasses Host checks.
       if (!requestTarget.startsWith('/') || requestTarget.startsWith('//') || requestTarget.includes('\\') || requestTarget.includes('#'))
         throw new ControlCenterError('validation_error', 'Request target must use origin-form');
+      const queryStart = requestTarget.indexOf('?');
+      const encodedPath = queryStart === -1 ? requestTarget : requestTarget.slice(0, queryStart);
+      const encodedQuery = queryStart === -1 ? '' : requestTarget.slice(queryStart + 1);
+      try { decodeURI(encodedPath); }
+      catch { throw new ControlCenterError('validation_error', 'Malformed URL path encoding'); }
+      try { decodeURI(encodedQuery); }
+      catch { throw new ControlCenterError('validation_error', 'Malformed URL request-target encoding'); }
       const url = new URL(requestTarget, 'http://127.0.0.1');
       if (url.origin !== 'http://127.0.0.1')
         throw new ControlCenterError('validation_error', 'Request target must use origin-form');
