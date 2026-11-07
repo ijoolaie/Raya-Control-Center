@@ -492,6 +492,30 @@ test('HTTP rejects malformed UTF-8 JSON bodies instead of replacing invalid byte
   });
 });
 
+test('HTTP rejects malformed percent escapes in decoded resource identifiers', async () => {
+  await createHarness(async ({ server, operatorToken }) => {
+    const raw = await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => socket.write(
+        'GET /control/v1/tasks/%ZZ HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\n' +
+        'Authorization: Bearer ' + operatorToken + '\r\n' +
+        'Connection: close\r\n\r\n'
+      ));
+      socket.on('data', chunk => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+    assert.match(raw, /^HTTP\/1\.1 400/);
+    const body = JSON.parse(raw.slice(raw.indexOf('\r\n\r\n') + 4));
+    assert.deepEqual(body.error, {
+      code: 'validation_error',
+      message: 'Malformed URL path encoding'
+    });
+  });
+});
 test('Node HTTP parser rejects conflicting Content-Length and Transfer-Encoding framing', async () => {
   await createHarness(async ({ server }) => {
     const raw = await new Promise((resolve, reject) => {
