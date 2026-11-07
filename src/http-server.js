@@ -150,6 +150,12 @@ export function createControlServer({ db, operatorToken }) {
   }, async (req, res) => {
     try {
       let hostName;
+      const hostHeaderCount = req.rawHeaders.reduce((count, value, index) =>
+        count + (index % 2 === 0 && value.toLowerCase() === 'host' ? 1 : 0), 0);
+      if (hostHeaderCount !== 1) {
+        send(res, 400, { error: { code: 'validation_error', message: 'Exactly one Host header is required' } });
+        return;
+      }
       try {
         const hostHeader = String(req.headers.host || '');
         // Host is an authority, not a URL: reject userinfo, path, query, fragment,

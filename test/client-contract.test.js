@@ -401,6 +401,43 @@ test('HTTP accepts only the documented loopback Host names with optional valid p
     }
   });
 });
+test('HTTP rejects malformed loopback Host port authorities', async () => {
+  await createHarness(async ({ server }) => {
+    for (const host of ['localhost:abc', 'localhost:99999', '127.0.0.1:-1', '[::1]:abc', 'localhost:80/path']) {
+      const raw = await new Promise((resolve, reject) => {
+        const socket = createConnection(server.address().port, '127.0.0.1');
+        let response = '';
+        socket.setEncoding('utf8');
+        socket.on('connect', () => socket.write('GET /control/v1/health HTTP/1.1\r\nHost: ' + host + '\r\nConnection: close\r\n\r\n'));
+        socket.on('data', chunk => { response += chunk; });
+        socket.on('end', () => resolve(response));
+        socket.on('error', reject);
+      });
+      assert.match(raw, /^HTTP\/1\.1 421/, 'malformed Host authority must be rejected: ' + host);
+    }
+  });
+});
+
+test('Node HTTP parser rejects duplicate Host headers before application routing', async () => {
+  await createHarness(async ({ server }) => {
+    const raw = await new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => socket.write(
+        'GET /control/v1/health HTTP/1.1\r\n' +
+        'Host: 127.0.0.1\r\n' +
+        'Host: attacker.example\r\n' +
+        'Connection: close\r\n\r\n'
+      ));
+      socket.on('data', chunk => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+    assert.match(raw, /^HTTP\/1\.1 400/);
+    assert.equal(raw.includes('"status":"ok"'), false);
+  });
+});
 test('HTTP rejects non-authority Host values including userinfo that disguises a remote host', async () => {
   await createHarness(async ({ server }) => {
     for (const host of ['attacker.example@localhost', 'localhost/path', 'localhost?x=1', 'localhost#fragment']) {
