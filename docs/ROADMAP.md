@@ -8,7 +8,7 @@ A phase is complete only when repeatable tests or operational evidence satisfy i
 - [x] Independent repository and ownership boundary.
 - [x] Architecture, data model, security principles, API contract, and ADR documented.
 - [x] GitHub Actions CI workflow added.
-- [ ] Development instructions and operator runbook.
+- [x] Development instructions and operator runbook (`docs/DEVELOPMENT.md`, `docs/OPERATIONS.md`).
 - [ ] Review and merge the foundation PR.
 
 ## Phase 1 — Durable coordination core
