@@ -134,7 +134,7 @@ npm run db:backup -- D:/Backups/raya-control-center.sqlite
 
 The default destination is a timestamped file under `.backups`. Existing destination files are never overwritten. Set `RAYA_CC_DATABASE` if the live database is not at the default path.
 
-Restore is deliberately offline:
+Restore is deliberately offline. It acquires the same per-database runtime lock used by server startup, so an active Control Center is rejected before the database can be replaced. It also acquires the maintenance lock to exclude a simultaneous backup:
 
 1. Stop the Control Center process and ensure no other process has the database open.
 2. Confirm the target database has no `-wal` or `-shm` sidecars.
@@ -144,7 +144,7 @@ Restore is deliberately offline:
    npm run db:restore -- D:/Backups/raya-control-center.sqlite
    ```
 
-The restore validates SQLite integrity, foreign-key consistency, and the schema version before replacing the target. The previous database file is retained beside it with a `.pre-restore-<id>` suffix for rollback. The command refuses to proceed when WAL sidecars exist; it does not try to delete or merge live WAL state. Start the server only after restore has completed successfully.
+The restore validates SQLite integrity, foreign-key consistency, and the schema version before replacing the target. The previous database file is retained beside it with a `.pre-restore-<id>` suffix for rollback. The command refuses to proceed when the runtime lock or maintenance lock is held, or when WAL sidecars exist; it does not try to delete or merge live WAL state. Lock files are coordination metadata and are never included in the SQLite backup snapshot. Start the server only after restore has completed successfully.
 
 Backups contain credential verifier hashes, participant metadata, task payloads, and event history. Store them as sensitive application data and restrict access accordingly.
 

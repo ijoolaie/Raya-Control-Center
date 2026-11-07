@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, restoreDatabaseBackup } from '../src/database-maintenance.js';
+import { startControlCenter } from '../src/server-runtime.js';
+import { acquireDatabaseMaintenanceLock } from '../src/database-runtime-lock.js';
 
 test('SQLite backup captures committed WAL data and restores a validated database', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-'));
@@ -170,6 +172,73 @@ test('restore preserves the original rollback file and reports its path if rollb
     db.close();
     db = null;
   } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('backup is allowed during runtime; restore is locked out until graceful shutdown', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-runtime-maintenance-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'active-backup.sqlite');
+  const operatorToken = 'runtime-maintenance-operator-token-123456789';
+  let runtime;
+  let writer;
+  let checkDb;
+  try {
+    runtime = await startControlCenter({ databasePath: database, port: 0, operatorToken });
+    assert.equal(existsSync(database + '.runtime.lock'), true);
+
+    writer = openDatabase(database);
+    const task = new ControlCenter(writer).createTask({ type: 'maintenance.active.snapshot', payload: { from: 'runtime' } });
+    writer.close();
+    writer = null;
+
+    const result = createDatabaseBackup(database, backup);
+    assert.equal(result.schemaVersion, 5);
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.throws(() => restoreDatabaseBackup(backup, database), /Database is already locked by process/);
+    assert.equal(existsSync(database + '.runtime.lock'), true);
+
+    await runtime.shutdown();
+    runtime = null;
+    assert.equal(existsSync(database + '.runtime.lock'), false);
+
+    const restored = restoreDatabaseBackup(backup, database);
+    assert.equal(restored.schemaVersion, 5);
+    checkDb = openDatabase(database);
+    assert.deepEqual(new ControlCenter(checkDb).getTask(task.id).payload, { from: 'runtime' });
+    checkDb.close();
+    checkDb = null;
+    assert.equal(existsSync(database + '.runtime.lock'), false);
+    assert.equal(existsSync(database + '.maintenance.lock'), false);
+  } finally {
+    if (writer) writer.close();
+    if (checkDb) checkDb.close();
+    if (runtime?.server.listening) await runtime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('maintenance lock excludes concurrent backup and restore operations', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-maintenance-lock-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  let release;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'maintenance.lock.guard' });
+    db.close();
+    db = null;
+    createDatabaseBackup(database, backup);
+
+    release = acquireDatabaseMaintenanceLock(database);
+    assert.throws(() => createDatabaseBackup(database, join(directory, 'second-backup.sqlite')), /maintenance lock is already held/);
+    assert.throws(() => restoreDatabaseBackup(backup, database), /maintenance lock is already held/);
+    assert.equal(existsSync(database + '.runtime.lock'), false);
+  } finally {
+    release?.();
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

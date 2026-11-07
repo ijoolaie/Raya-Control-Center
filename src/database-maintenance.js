@@ -1,3 +1,4 @@
+import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
 import { constants, copyFileSync, linkSync, lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
@@ -61,7 +62,7 @@ function sqlString(value) {
   return "'" + value.replaceAll("'", "''") + "'";
 }
 
-export function createDatabaseBackup(databasePath, backupPath) {
+function createDatabaseBackupUnlocked(databasePath, backupPath) {
   const source = assertRegularFile(databasePath, 'Database source');
   const destination = resolve(backupPath);
   if (source.toLowerCase() === destination.toLowerCase())
@@ -90,7 +91,7 @@ export function createDatabaseBackup(databasePath, backupPath) {
   }
 }
 
-export function restoreDatabaseBackup(backupPath, databasePath) {
+function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const source = assertRegularFile(backupPath, 'Backup source');
   const destination = resolve(databasePath);
   if (source.toLowerCase() === destination.toLowerCase())
@@ -133,5 +134,26 @@ export function restoreDatabaseBackup(backupPath, databasePath) {
       }
     }
     throw error;
+  }
+}
+
+export function createDatabaseBackup(databasePath, backupPath) {
+  const releaseMaintenanceLock = acquireDatabaseMaintenanceLock(databasePath);
+  try {
+    return createDatabaseBackupUnlocked(databasePath, backupPath);
+  } finally {
+    releaseMaintenanceLock();
+  }
+}
+
+export function restoreDatabaseBackup(backupPath, databasePath) {
+  const releaseRuntimeLock = acquireDatabaseRuntimeLock(databasePath);
+  let releaseMaintenanceLock;
+  try {
+    releaseMaintenanceLock = acquireDatabaseMaintenanceLock(databasePath);
+    return restoreDatabaseBackupUnlocked(backupPath, databasePath);
+  } finally {
+    try { releaseMaintenanceLock?.(); }
+    finally { releaseRuntimeLock(); }
   }
 }

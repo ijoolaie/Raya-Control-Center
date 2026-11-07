@@ -13,8 +13,9 @@ export function databaseRuntimeLockPath(databasePath) {
   return database + '.runtime.lock';
 }
 
-export function acquireDatabaseRuntimeLock(databasePath) {
-  const lockPath = databaseRuntimeLockPath(databasePath);
+function acquireDatabaseFileLock(databasePath, suffix, label) {
+  const basePath = databaseRuntimeLockPath(databasePath);
+  const lockPath = basePath ? basePath.slice(0, -'.runtime.lock'.length) + suffix : null;
   if (!lockPath) return () => {};
   let descriptor;
   const owner = { pid: process.pid, startedAt: new Date().toISOString() };
@@ -28,10 +29,10 @@ export function acquireDatabaseRuntimeLock(databasePath) {
       try { unlinkSync(lockPath); } catch {}
     }
     if (error.code === 'EEXIST') {
-      let detail = 'An existing runtime lock prevents access.';
+      let detail = 'An existing ' + label + ' lock prevents access.';
       try {
         const current = JSON.parse(readFileSync(lockPath, 'utf8'));
-        detail = 'Database is already locked by process ' + String(current.pid) + ' (started ' + String(current.startedAt) + ').';
+        detail = (label === 'runtime' ? 'Database is already locked by process ' : label + ' lock is already held by process ') + String(current.pid) + ' (started ' + String(current.startedAt) + ').';
       } catch {}
       throw new Error(detail + ' If this is a stale lock, verify the process is stopped before removing ' + lockPath + '.');
     }
@@ -50,3 +51,6 @@ export function acquireDatabaseRuntimeLock(databasePath) {
     }
   };
 }
+
+export function acquireDatabaseRuntimeLock(databasePath) { return acquireDatabaseFileLock(databasePath, '.runtime.lock', 'runtime'); }
+export function acquireDatabaseMaintenanceLock(databasePath) { return acquireDatabaseFileLock(databasePath, '.maintenance.lock', 'maintenance'); }
