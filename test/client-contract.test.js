@@ -383,6 +383,23 @@ test('HTTP rejects non-loopback Host headers with a safe 421 response', async ()
     assert.equal(raw.includes('attacker.example', raw.indexOf('\r\n\r\n')), false);
   });
 });
+test('HTTP rejects non-authority Host values including userinfo that disguises a remote host', async () => {
+  await createHarness(async ({ server }) => {
+    for (const host of ['attacker.example@localhost', 'localhost/path', 'localhost?x=1', 'localhost#fragment']) {
+      const raw = await new Promise((resolve, reject) => {
+        const socket = createConnection(server.address().port, '127.0.0.1');
+        let response = '';
+        socket.setEncoding('utf8');
+        socket.on('connect', () => socket.write('GET /control/v1/health HTTP/1.1\r\nHost: ' + host + '\r\nConnection: close\r\n\r\n'));
+        socket.on('data', chunk => { response += chunk; });
+        socket.on('end', () => resolve(response));
+        socket.on('error', reject);
+      });
+      assert.match(raw, /^HTTP\/1\.1 421/, 'Host must be rejected: ' + host);
+    }
+  });
+});
+
 test('HTTP routes distinguish unsupported methods from unknown paths', async () => {
   await createHarness(async ({ request, operator }) => {
     const cases = [

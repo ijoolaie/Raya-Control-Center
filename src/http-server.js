@@ -148,8 +148,16 @@ export function createControlServer({ db, operatorToken }) {
   }, async (req, res) => {
     try {
       let hostName;
-      try { hostName = new URL('http://' + String(req.headers.host || '')).hostname.toLowerCase(); }
-      catch { hostName = ''; }
+      try {
+        const hostHeader = String(req.headers.host || '');
+        // Host is an authority, not a URL: reject userinfo, path, query, fragment,
+        // escapes, backslashes, and whitespace before using URL for hostname parsing.
+        if (!hostHeader || /[\s/@\\?#%]/.test(hostHeader)) throw new Error('Invalid Host authority');
+        const parsedHost = new URL('http://' + hostHeader);
+        if (parsedHost.username || parsedHost.password || parsedHost.pathname !== '/' || parsedHost.search || parsedHost.hash)
+          throw new Error('Invalid Host authority');
+        hostName = parsedHost.hostname.toLowerCase();
+      } catch { hostName = ''; }
       if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostName)) {
         send(res, 421, { error: { code: 'misdirected_request', message: 'Only loopback Host headers are accepted' } });
         return;

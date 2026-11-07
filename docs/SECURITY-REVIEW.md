@@ -33,7 +33,7 @@ SEC-001 was remediated in commit `ba933f23d2a21824b50eeb64c863aa070cb32ea3` and 
 
 ### SEC-001 — Untrusted worker-supplied content is copied into audit event data
 
-Severity: **Medium**  
+Severity: **Medium**
 Status: **Remediated for new events; CI verified on 2026-11-07**
 
 Evidence (pre-remediation):
@@ -58,9 +58,33 @@ Verification:
 
 Residual risk:
 Task payloads, progress data, and successful results remain persisted in the Tasks table and are available to authorized clients. This remediation removes duplicate retention in the immutable event journal for new events; it does not detect secrets or encrypt application data at rest. Existing event rows are not rewritten or deleted because the journal is append-only. Any sensitive values already recorded before this fix remain in the live database and in backups made before cleanup.
+### SEC-002 — URL userinfo could disguise a non-loopback Host authority
+
+Severity: **Medium**
+Status: **Remediated in working tree; CI pending**
+
+Evidence (pre-remediation):
+- `src/http-server.js` parsed the raw Host header by prepending `http://` and checking only the resulting URL hostname.
+- A Host value such as `attacker.example@localhost` is parsed with hostname `localhost` and username `attacker.example`; the old check therefore accepted a malformed authority containing userinfo.
+
+Impact:
+The Host allowlist did not strictly validate HTTP authority syntax. A non-canonical Host value could pass the loopback check even though it contained a remote-looking userinfo component.
+
+Remediation:
+- Reject authority values containing whitespace, userinfo delimiters, path separators, query/fragment delimiters, or percent escapes before URL parsing.
+- Require the parsed authority to have no username/password, path, query, or fragment, then apply the existing exact loopback hostname allowlist.
+
+Verification:
+- Raw HTTP regression tests verify `attacker.example@localhost`, path-bearing, query-bearing, and fragment-bearing Host values receive HTTP 421.
+- The existing non-loopback Host test continues to verify safe error output.
+- Targeted HTTP tests: 17/17 passed locally; full suite and CI are pending for this change.
+
+Residual risk:
+This closes the observed userinfo parsing gap. Broader adversarial HTTP request-target and Host-parser coverage remains open; this is not an independent review.
+
 ## Backup and restore hardening in progress
 
-The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. Regression tests reject directory inputs and destinations, reject symbolic-link/junction parent components, and verify the live database remains intact. Local validation for the current working tree: `npm test` 55/55 and `npm run check` passed on Node.js 22.23.2. The backup/restore code in commit `b8fb7f1` passed Node 24 and Node 26 Windows CI.
+The implementation now uses `lstat` for endpoint checks so the final source/destination path component must be a regular file; directories and final-component symbolic links are rejected. WAL/SHM sidecar presence is checked without following a final-component symlink. Restore validates the staged copy after copying it, rejects symbolic-link/junction components in source and destination paths, and installs the file through a same-directory hard link that cannot overwrite a destination created concurrently. The original database is moved to a unique rollback path first; rollback failures are surfaced with the preserved backup path. Regression tests reject directory inputs and destinations, reject symbolic-link/junction parent components, and verify the live database remains intact. Local validation for the current working tree: `npm test` 56/56 and `npm run check` passed on Node.js 22.23.2. The backup/restore code in commit `b8fb7f1` passed Node 24 and Node 26 Windows CI.
 
 This does not yet complete the backup/restore review. Windows directory junctions and symbolic-link parent components are covered by regression tests. Same-directory installation no longer overwrites a destination that appears concurrently. Concurrent ancestor replacement, rollback fault injection, non-NTFS hard-link behavior, and permission/ACL behavior still require review and targeted tests. Do not treat these changes as protection against a hostile process running with the same Windows user privileges.
 
@@ -88,7 +112,8 @@ The WAL recovery regression now launches a child process, opens an immediate wri
 - [ ] Review database backup/restore for path traversal, overwrite, symlink, and rollback hazards.
 - [x] Verify WAL rollback after forced child-process termination and database reopen (local Windows test).
 - [ ] Verify graceful server shutdown and startup recovery under additional fault-injection scenarios.
-- [ ] Review URL/Host parsing edge cases and HTTP parser behavior with adversarial raw requests.
+- [x] Reject malformed Host authorities that could use URL userinfo to disguise a remote host (SEC-002; CI pending).
+- [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
 - [ ] Review token rotation, backup exposure, local filesystem permissions, and database file permissions.
 - [ ] Add or identify independent tests for credential leakage through errors, events, CLI output, and dashboard rendering.
 - [ ] Obtain an independent security review from a reviewer who did not implement the controls.
