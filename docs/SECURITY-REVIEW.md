@@ -340,7 +340,7 @@ Residual risk:
 ### SEC-010 - Reference Worker inherited the Operator environment credential
 
 Severity: **Low**
-Status: **Remediated in the reference worker; local Windows regression suite passed**
+Status: **Remediated in the reference worker; local Windows regression suite and supported-runtime CI passed**
 
 Evidence (pre-remediation):
 - The documented PowerShell workflow set RAYA_CC_OPERATOR_TOKEN to register a Participant and then launched the reference Worker from the same shell.
@@ -355,7 +355,7 @@ Remediation:
 - Add a focused regression for the environment-sanitization helper.
 
 Verification:
-- Windows local npm test: 110 passed, 3 skipped, 0 failed (113 total); npm run check and git diff --check passed. The focused environment helper regression passed.
+- Windows local npm test: 110 passed, 3 skipped, 0 failed (113 total); npm run check and git diff --check passed. The focused environment helper regression passed. CI run 42482491748 passed all four Node 24/26 × Linux/Windows jobs.
 
 Residual risk:
 - Startup sanitization occurs after Node process initialization. It does not defend against injected preload hooks, a compromised launcher, or a malicious same-user process that can inspect process memory/environment at launch. Production process supervisors should construct an explicit allowlisted child environment and must not pass Operator credentials to Worker processes. Independent security review remains pending.
