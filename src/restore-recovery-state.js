@@ -7,12 +7,17 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   const source = observed(artifacts.source?.exists);
   const runtimeLock = observed(locks.runtime?.active) ?? observed(locks.runtime?.exists);
   const maintenanceLock = observed(locks.maintenance?.active) ?? observed(locks.maintenance?.exists);
+  const lockStateUnknown = [locks.runtime, locks.maintenance].some(lock => lock && (lock.error != null || (lock.active == null && lock.exists == null)));
   const observations = { live, rollback, temporary, source, runtimeLock, maintenanceLock };
 
   if (journalStatus === 'absent') {
     if (runtimeLock || maintenanceLock) return {
       state: 'no-pending-restore-lock-present', severity: 'warning', automaticAction: 'none', observations,
       guidance: 'No Restore journal was found, but a runtime or maintenance lock remains. Do not infer that its owner is stale; verify all database users are stopped before operator action.'
+    };
+    if (lockStateUnknown) return {
+      state: 'no-pending-restore-lock-state-unknown', severity: 'warning', automaticAction: 'none', observations,
+      guidance: 'No Restore journal was found, but at least one lock state could not be inspected. Do not infer that no lock exists; verify database users and filesystem state before operator action.'
     };
     return {
       state: 'no-pending-restore', severity: 'info', automaticAction: 'none', observations,
@@ -29,6 +34,9 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   if (runtimeLock || maintenanceLock) {
     state = 'blocked-lock-present';
     guidance = 'A lock path exists. Its owner is not classified as stale; verify all database users are stopped before any operator action.';
+  } else if (lockStateUnknown) {
+    state = 'manual-review-lock-state-unknown';
+    guidance = 'At least one runtime or maintenance lock could not be inspected. Preserve all artifacts and verify filesystem and database users before any operator action.';
   } else if (!live && rollback) {
     state = 'live-missing-rollback-present';
     guidance = 'A rollback candidate exists while the live path is absent. Preserve all files; validate a separate copy and require explicit operator selection.';

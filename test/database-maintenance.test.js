@@ -38,6 +38,20 @@ test('Restore recovery state model is conservative across observed artifact comb
   }
 });
 
+test('Restore recovery state model fails closed when lock inspection is unknown', () => {
+  const unknown = { exists: null, active: null, error: 'unsafe-database-path' };
+  const absentJournal = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: { runtime: unknown } });
+  assert.equal(absentJournal.state, 'no-pending-restore-lock-state-unknown');
+  assert.equal(absentJournal.automaticAction, 'none');
+
+  const validJournal = classifyRestoreRecoveryState({
+    journalStatus: 'valid', journalValid: true, locks: { maintenance: unknown },
+    artifacts: { destination: { exists: true }, rollback: { exists: false } }
+  });
+  assert.equal(validJournal.state, 'manual-review-lock-state-unknown');
+  assert.equal(validJournal.severity, 'critical');
+  assert.equal(validJournal.automaticAction, 'none');
+});
 test('Restore recovery state model never treats a lock as proof of a live or stale owner', () => {
   const result = classifyRestoreRecoveryState({
     journalStatus: 'valid', journalValid: true, locks: { maintenance: { exists: true } },
@@ -788,6 +802,9 @@ test('runtime lock inspection fails closed for symlinked database parent paths',
     assert.equal(report.maintenance.active, null);
     assert.equal(report.maintenance.error, 'unsafe-database-path');
     assert.equal(report.runtime.exists, null);
+    const restoreReport = inspectDatabaseRestore(join(linkedDirectory, 'live.sqlite'));
+    assert.equal(restoreReport.recovery.state, 'no-pending-restore-lock-state-unknown');
+    assert.equal(restoreReport.recovery.automaticAction, 'none');
     assert.equal(existsSync(database + '.maintenance.lock'), true);
   } finally {
     release?.();
