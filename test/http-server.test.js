@@ -58,8 +58,20 @@ test('operator token rotation is immediate and invalidates the previous token', 
 
     assert.equal((await call(originalToken, '/tasks')).status, 401);
     assert.equal((await call(result.token, '/tasks')).status, 200);
-    assert.equal((await call(result.token, '/operator/rotate-token', { method: 'POST' })).status, 200);
-    assert.equal((await call(result.token, '/tasks')).status, 401);
+
+    const concurrentRotations = await Promise.all([
+      call(result.token, '/operator/rotate-token', { method: 'POST' }),
+      call(result.token, '/operator/rotate-token', { method: 'POST' })
+    ]);
+    assert.deepEqual(concurrentRotations.map(response => response.status).sort(), [200, 401],
+      'only one concurrent rotation using the same current token may succeed');
+    const winningResponse = concurrentRotations.find(response => response.status === 200);
+    const winningResult = await winningResponse.json();
+    assert.equal(winningResult.rotated, true);
+    assert.equal((await call(result.token, '/tasks')).status, 401,
+      'the token used by the competing requests is invalidated');
+    assert.equal((await call(winningResult.token, '/tasks')).status, 200,
+      'the single winning replacement token remains valid');
     db.close();
   } finally {
     server.closeAllConnections();
