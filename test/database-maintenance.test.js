@@ -1066,10 +1066,11 @@ test('restore keeps the original live database when the staged copy cannot be fs
 
 test('restore handles directory fsync failures at journal, rollback, install, and journal-cleanup boundaries', { skip: process.platform === 'win32' }, () => {
   const scenarios = [
-    { failureAt: 1, ok: false, task: 'restore.original', journal: true, rollback: false, warning: null },
-    { failureAt: 3, ok: false, task: 'restore.original', journal: false, rollback: false, warning: null },
-    { failureAt: 4, ok: false, task: 'restore.replacement', journal: true, rollback: true, warning: null },
-    { failureAt: 6, ok: true, task: 'restore.replacement', journal: false, rollback: true, warning: 'journal' }
+    // The first two directory syncs publish the runtime and maintenance locks.
+    { failureAt: 3, ok: false, task: 'restore.original', journal: true, rollback: false, warning: null },
+    { failureAt: 5, ok: false, task: 'restore.original', journal: false, rollback: false, warning: null },
+    { failureAt: 6, ok: false, task: 'restore.replacement', journal: true, rollback: true, warning: null },
+    { failureAt: 8, ok: true, task: 'restore.replacement', journal: false, rollback: true, warning: 'journal' }
   ];
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   for (const scenario of scenarios) {
