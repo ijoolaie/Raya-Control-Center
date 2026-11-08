@@ -285,3 +285,29 @@ Verification:
 
 Residual risk:
 - This does not restrict pre-existing parent-directory permissions or Windows ACLs. A privileged local user can still access or replace files. Independent security review remains pending.
+### SEC-008 - Database open followed symbolic-link and junction paths
+
+Severity: **Low**
+Status: **Remediated with pre-open path checks; local Windows regression suite passed; supported-runtime CI pending**
+
+Evidence (pre-remediation):
+- `openDatabase` resolved the configured path, created its parent directory, and passed the path directly to `DatabaseSync`.
+- Unlike runtime-lock acquisition and backup/restore path validation, the normal database-open path did not reject symbolic-link or junction ancestors, nor a final-component database symlink.
+- SQLite could therefore follow a configured or substituted link and open/create a database outside the apparent configured directory. On POSIX, the subsequent permission hardening could also chmod the link target.
+
+Impact:
+- A misconfigured database path or link placed in a writable path could redirect database access and permission changes to another filesystem target. This is not evidence of a remote attack; path ownership and local filesystem access remain in the trust boundary.
+
+Remediation:
+- Before creating parent directories, inspect every existing path component with `lstat` and reject symbolic links/junctions, non-directory ancestors, and a final component that exists but is not a regular file.
+- Repeat the validation after recursive parent creation and immediately before `DatabaseSync`.
+- Add a Windows directory-junction regression and a POSIX final-component symlink regression; assert that rejected paths do not create the target database.
+- Document the residual validation-to-open race and trusted-parent-directory requirement.
+
+Verification:
+- Windows local `npm test`: 109 passed, 3 skipped, 0 failed (112 total).
+- `npm run check` and `git diff --check` passed.
+- Supported-runtime CI verification is pending.
+
+Residual risk:
+- These are pre-open checks, not an atomic no-follow open. Portable Node `DatabaseSync(path)` cannot bind SQLite to a previously verified file descriptor; a hostile actor able to replace path components between the final check and SQLite open may still redirect the open. Keep the database parent and its ancestors writable only by trusted principals. This does not defend against a same-user process or local administrator. Independent security review remains pending.

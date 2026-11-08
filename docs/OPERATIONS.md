@@ -87,7 +87,7 @@ This is an explicit administrative operation; the application does not modify AC
 
 The database is application state and contains participant metadata, task payloads, leases, operator credential hash, and event history. Protect it as private data.
 
-On POSIX systems, the main database, existing WAL/SHM sidecars, newly created backup snapshots, and restored database files are restricted to mode 0600 before publication/installation. On Windows, Node's portable chmod does not establish restrictive NTFS ACLs; use the opt-in ACL helper for both the data directory and any separate backup directory. Existing directories and their parent ACLs remain the operator's responsibility.
+On POSIX systems, the main database, existing WAL/SHM sidecars, newly created backup snapshots, and restored database files are restricted to mode 0600 before publication/installation. On Windows, Node's portable chmod does not establish restrictive NTFS ACLs; use the opt-in ACL helper for both the data directory and any separate backup directory. Existing directories and their parent ACLs remain the operator's responsibility. The application also rejects database paths that currently traverse symbolic links or Windows directory junctions, and rejects an existing database path that is not a regular file. These are pre-open checks; portable Node SQLite APIs cannot eliminate a hostile path-replacement race between validation and SQLite open. Keep the database parent directory writable only by trusted application/operator principals.
 
 For a consistent simple backup, stop the server, copy the database file, then restart. WAL sidecar files may exist while the server is running; do not copy only the main database file during active writes.
 

@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, mkdirSync, statSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { chmodSync, lstatSync, mkdirSync, statSync } from 'node:fs';
+import { dirname, parse, resolve, sep } from 'node:path';
 
 const migrations = [
   {
@@ -84,6 +84,28 @@ const migrations = [
   }
 ];
 
+function assertSafeDatabasePath(path) {
+  const absolute = resolve(path);
+  const parsed = parse(absolute);
+  const components = absolute.slice(parsed.root.length).split(sep).filter(Boolean);
+  let current = parsed.root;
+  for (let index = 0; index < components.length; index++) {
+    current = current ? current + (current.endsWith(sep) ? '' : sep) + components[index] : components[index];
+    let stat;
+    try { stat = lstatSync(current); }
+    catch (error) {
+      if (error.code === 'ENOENT') return absolute;
+      throw error;
+    }
+    if (stat.isSymbolicLink()) throw new Error('Database path must not traverse a symbolic link or junction: ' + current);
+    if (index < components.length - 1 && !stat.isDirectory())
+      throw new Error('Database parent path component must be a directory: ' + current);
+    if (index === components.length - 1 && !stat.isFile())
+      throw new Error('Database path must be a regular file: ' + current);
+  }
+  return absolute;
+}
+
 function restrictPrivateDatabaseFile(path, { optional = false } = {}) {
   if (process.platform === 'win32') return;
   try { chmodSync(path, 0o600); }
@@ -96,7 +118,11 @@ function restrictPrivateDatabaseFile(path, { optional = false } = {}) {
 }
 export function openDatabase(filename = '.data/control-center.sqlite') {
   const path = filename === ':memory:' ? filename : resolve(filename);
-  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  if (path !== ':memory:') {
+    assertSafeDatabasePath(path);
+    mkdirSync(dirname(path), { recursive: true });
+    assertSafeDatabasePath(path);
+  }
   const db = new DatabaseSync(path);
   try {
     // Restrict the main file before enabling WAL so newly created sidecars inherit its private mode.

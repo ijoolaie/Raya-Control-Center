@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -35,6 +35,26 @@ test('POSIX database and WAL files are restricted to owner-only permissions', { 
     assert.equal(statSync(filename).mode & 0o777, 0o600, 'opening an existing database tightens its mode');
   } finally {
     if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('openDatabase rejects symlink and junction database paths before opening the target', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-cc-db-link-'));
+  const realDirectory = join(dir, 'real');
+  const linkedDirectory = join(dir, 'linked');
+  const target = join(realDirectory, 'target.sqlite');
+  try {
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => openDatabase(join(linkedDirectory, 'target.sqlite')), /symbolic link or junction/);
+    assert.equal(existsSync(target), false, 'opening through a linked parent must not create the target database');
+    if (process.platform !== 'win32') {
+      const fileLink = join(dir, 'target-link.sqlite');
+      symlinkSync(target, fileLink, 'file');
+      assert.throws(() => openDatabase(fileLink), /symbolic link or junction/);
+      assert.equal(existsSync(target), false, 'opening a symlinked database must not create or alter its target');
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
