@@ -205,7 +205,7 @@ Residual risk:
 ### SEC-005 - Operator token bootstrap accepted values rejected by the Bearer parser
 
 Severity: **Low**
-Status: **Remediated; local regression tests passed on 2026-11-08; CI pending**
+Status: **Remediated; local regression tests and supported-runtime CI passed**
 
 Evidence (pre-remediation):
 - `bootstrapOperatorToken` accepted any supplied string of at least 32 characters and persisted its SHA-256 hash.
@@ -225,7 +225,7 @@ Remediation:
 Verification:
 - Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
 - `npm run check` and `git diff --check` passed.
-- Supported-runtime CI: pending.
+- Supported-runtime CI run `42478010676` passed on Node 24/26 × Linux/Windows.
 
 Residual risk:
 - The finding concerns custom token format consistency, not token entropy. Operators supplying custom values remain responsible for using high-entropy secrets. Independent review remains pending.
@@ -233,7 +233,7 @@ Residual risk:
 ### SEC-006 - Backup and restored database files inherited permissive POSIX modes
 
 Severity: **Low**
-Status: **Remediated in code; Windows local regression suite passed 2026-11-08; POSIX CI verification pending**
+Status: **Remediated; Windows local regression suite and POSIX CI verification passed**
 
 Evidence (pre-remediation):
 - SQLite `VACUUM INTO` created backup snapshots using filesystem creation permissions influenced by the process umask. Under a common `022` umask, a published backup could be readable by other local users if its parent directory was traversable.
@@ -253,14 +253,14 @@ Remediation:
 Verification:
 - Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total); POSIX-specific assertions are skipped on Windows.
 - `npm run check` and `git diff --check` passed.
-- Node 24/26 Linux CI: pending.
+- Node 24/26 Linux and Windows CI runs `42478478780` and `42478474723` passed.
 
 Residual risk:
 - The destination directory and its parent must still be protected while a snapshot is being generated. This change restricts the completed snapshot before publication, not the permissions of pre-existing directories or temporary-file exposure during generation. Windows ACLs remain operator-managed. Independent security review remains pending.
 ### SEC-007 - SQLite database and WAL sidecars inherited permissive POSIX modes
 
 Severity: **Low**
-Status: **Remediated in code; Windows local regression suite passed 2026-11-08; POSIX CI verification pending**
+Status: **Remediated; Windows local regression suite and POSIX CI verification passed**
 
 Evidence (pre-remediation):
 - `openDatabase` created or opened the SQLite database and enabled WAL without restricting the main database file mode.
@@ -280,8 +280,8 @@ Remediation:
 
 Verification:
 - Windows local `npm test`: 108 passed, 3 skipped, 0 failed (111 total); POSIX mode regression is skipped on Windows.
-- `npm run check` and `git diff --check`: pending.
-- Node 24/26 Linux CI: pending.
+- `npm run check` and `git diff --check` passed.
+- Node 24/26 Linux and Windows CI runs `42478735992` and `42478731032` passed; both Linux jobs explicitly executed the POSIX mode test (111 passed, 0 failed).
 
 Residual risk:
 - This does not restrict pre-existing parent-directory permissions or Windows ACLs. A privileged local user can still access or replace files. Independent security review remains pending.
