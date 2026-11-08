@@ -1,6 +1,6 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
@@ -157,12 +157,28 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
     if (!/^[0-9a-f-]{36}$/i.test(token)) continue;
     const candidate = resolve(directory, entry);
     const stat = lstatSync(candidate);
-    // Never follow or remove links/directories during stale-temp cleanup.
-    if (stat.isFile() && !stat.isSymbolicLink()) { unlinkSync(candidate); changed = true; }
+    if (stat.isFile() && !stat.isSymbolicLink()) {
+      unlinkSync(candidate);
+      changed = true;
+      continue;
+    }
+    // Backup temp directories contain only the known snapshot file. Preserve
+    // unexpected entries, links, and non-directory artifacts for operator review.
+    if (suffix === '.tmp' && stat.isDirectory() && !stat.isSymbolicLink()) {
+      const contents = readdirSync(candidate);
+      if (contents.length > 1 || (contents.length === 1 && contents[0] !== 'snapshot.sqlite')) continue;
+      if (contents.length === 1) {
+        const snapshot = resolve(candidate, 'snapshot.sqlite');
+        const snapshotStat = lstatSync(snapshot);
+        if (!snapshotStat.isFile() || snapshotStat.isSymbolicLink()) continue;
+        unlinkSync(snapshot);
+      }
+      rmdirSync(candidate);
+      changed = true;
+    }
   }
   if (changed) syncDirectory(directory);
 }
-
 function restrictSnapshotPermissions(filename) {
   // POSIX snapshots contain credentials and task data; never publish them with a permissive umask-derived mode.
   // Windows access control is governed by the destination directory ACL and remains an operator responsibility.
@@ -193,8 +209,15 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.tmp');
-  const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
+  const temporaryDirectory = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
+  const temporary = resolve(temporaryDirectory, 'snapshot.sqlite');
   try {
+    mkdirSync(temporaryDirectory, { mode: 0o700 });
+    if (process.platform !== 'win32') {
+      chmodSync(temporaryDirectory, 0o700);
+      if ((statSync(temporaryDirectory).mode & 0o777) !== 0o700)
+        throw new Error('Backup temporary directory permissions could not be restricted to owner-only access');
+    }
     const db = new DatabaseSync(source);
     try {
       // Make VACUUM INTO's output durability requirement explicit.
@@ -210,24 +233,20 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     // Flush the completed snapshot file before publishing its directory entry.
     syncFileContents(temporary);
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
-    // A same-directory hard link installs the validated snapshot atomically without replacing a raced-in destination.
+    // The staging directory is inside the destination directory, keeping publication on the same volume.
     linkSync(temporary, destination);
     try { syncDirectory(dirname(destination)); }
     catch (error) { error.publishedArtifact = destination; throw error; }
     const cleanupWarnings = [];
-    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); }
+    try { rmSync(temporaryDirectory, { recursive: true }); syncDirectory(dirname(destination)); }
     catch (cleanupError) {
       cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
     }
     return { path: destination, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); }
+    try { rmSync(temporaryDirectory, { recursive: true, force: true }); syncDirectory(dirname(destination)); }
     catch (cleanupError) {
-      error.cleanupWarnings = [{
-        artifact: 'temporary',
-        path: temporary,
-        error: cleanupError.code || cleanupError.name
-      }];
+      error.cleanupWarnings = [{ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name }];
     }
     throw error;
   }

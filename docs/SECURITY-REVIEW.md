@@ -176,7 +176,7 @@ Phase 4 security work remains **in progress**. This document is preparation for 
 
 Backup temporary-file handling: failed VACUUM INTO operations remove partial snapshots in an error path. After a maintenance lock is acquired, the next operation removes only regular files matching the exact destination-specific UUID temp pattern; symlinks, directories, and preserved .pre-restore-* rollback files are not removed. A forced crash can leave a stale maintenance lock, which still requires operator verification before removal.
 
-### SEC-004 — URL canonicalization expanded the exact Host allowlist
+### SEC-004 ï¿½ URL canonicalization expanded the exact Host allowlist
 
 Severity: **Low**
 Status: **Remediated; local regression tests passed on 2026-11-08**
@@ -197,7 +197,7 @@ Remediation:
 Verification:
 - Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
 - `npm run check` and `git diff --check` passed.
-- Supported-runtime CI run `42477292999` passed on Node 24/26 × Linux/Windows.
+- Supported-runtime CI run `42477292999` passed on Node 24/26 ï¿½ Linux/Windows.
 
 Residual risk:
 - This is an internal finding and has not been independently reviewed. The API remains loopback-only; no remote ingress is authorized.
@@ -225,7 +225,7 @@ Remediation:
 Verification:
 - Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
 - `npm run check` and `git diff --check` passed.
-- Supported-runtime CI run `42478010676` passed on Node 24/26 × Linux/Windows.
+- Supported-runtime CI run `42478010676` passed on Node 24/26 ï¿½ Linux/Windows.
 
 Residual risk:
 - The finding concerns custom token format consistency, not token entropy. Operators supplying custom values remain responsible for using high-entropy secrets. Independent review remains pending.
@@ -288,7 +288,7 @@ Residual risk:
 ### SEC-008 - Database open followed symbolic-link and junction paths
 
 Severity: **Low**
-Status: **Remediated with pre-open path checks; local Windows regression suite passed; supported-runtime CI pending**
+Status: **Remediated with pre-open path checks; local Windows regression suite and supported-runtime CI passed**
 
 Evidence (pre-remediation):
 - `openDatabase` resolved the configured path, created its parent directory, and passed the path directly to `DatabaseSync`.
@@ -307,7 +307,33 @@ Remediation:
 Verification:
 - Windows local `npm test`: 109 passed, 3 skipped, 0 failed (112 total).
 - `npm run check` and `git diff --check` passed.
-- Supported-runtime CI verification is pending.
+- Node 24/26 Linux and Windows CI matrix passed in workflow run `42479638677`.
 
 Residual risk:
 - These are pre-open checks, not an atomic no-follow open. Portable Node `DatabaseSync(path)` cannot bind SQLite to a previously verified file descriptor; a hostile actor able to replace path components between the final check and SQLite open may still redirect the open. Keep the database parent and its ancestors writable only by trusted principals. This does not defend against a same-user process or local administrator. Independent security review remains pending.
+### SEC-009 - Backup snapshot exposed during generation
+
+Severity: **Low**
+Status: **Remediated on POSIX; local Windows regression suite passed; supported-runtime CI pending**
+
+Evidence (pre-remediation):
+- `createDatabaseBackupUnlocked` directed SQLite `VACUUM INTO` to a temporary file created directly in the destination directory.
+- The file received mode `0600` only after VACUUM completed and validation began. Under a permissive POSIX umask and traversable destination directory, other local accounts could read the snapshot while it was being generated.
+
+Impact:
+- Sensitive database contents could be exposed to other local accounts during the backup generation window. No remote exposure is established.
+
+Remediation:
+- Generate the snapshot inside a destination-local UUID-named staging directory. On POSIX, create and verify that directory at mode `0700` before invoking SQLite; the snapshot file remains mode `0600` before publication.
+- Keep staging on the destination filesystem so the existing hard-link publication remains atomic and cannot overwrite a raced-in destination.
+- Extend stale-temp cleanup to remove only exact UUID staging directories that are empty or contain exactly one regular `snapshot.sqlite` file. Preserve symlinks and unexpected contents.
+- Preserve cleanup warnings and crash recovery; add a crash test that leaves a staging directory and confirms a later locked backup safely cleans it.
+- Add a concurrent-WAL test assertion that checks the staging directory is already mode `0700` while VACUUM is still running.
+
+Verification:
+- Windows local `npm test`: 109 passed, 3 skipped, 0 failed (112 total); `npm run check` and `git diff --check` passed.
+- POSIX mode assertion is exercised by Linux CI, not by the Windows local run.
+- Supported-runtime CI verification is pending.
+
+Residual risk:
+- On Windows, the staging directory inherits the destination parent NTFS ACL; portable Node APIs used here do not set a restrictive Windows DACL. Operators must restrict the backup directory with the documented ACL helper. A same-user process or local administrator remains outside this protection boundary. Independent security review remains pending.

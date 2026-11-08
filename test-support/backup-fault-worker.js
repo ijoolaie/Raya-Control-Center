@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { syncBuiltinESMExports } from 'node:module';
+import { dirname } from 'node:path';
 import { createDatabaseBackup } from '../src/database-maintenance.js';
 
 const [database, destination, mode, marker] = process.argv.slice(2);
@@ -8,7 +9,12 @@ const originalExec = DatabaseSync.prototype.exec;
 const originalLink = fs.linkSync;
 const originalRm = fs.rmSync;
 DatabaseSync.prototype.exec = function (sql) {
-  if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) fs.writeFileSync(marker, 'vacuum-starting');
+  if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) {
+    const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
+    if (!match) throw new Error('unexpected-vacuum-sql');
+    const snapshot = match[1].replaceAll("''", "'");
+    fs.writeFileSync(marker, String(fs.statSync(dirname(snapshot)).mode & 0o777));
+  }
   if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
     if (!match) throw new Error('unexpected-vacuum-sql');
@@ -26,7 +32,7 @@ if (mode === 'destination-race') {
 }
 if (mode === 'cleanup-failure' || mode === 'vacuum-cleanup-failure') {
   fs.rmSync = (target, options) => {
-    if (typeof target === 'string' && target.endsWith('.tmp')) {
+    if (typeof target === 'string' && (target.endsWith('.tmp') || target.endsWith('snapshot.sqlite'))) {
       throw Object.assign(new Error('injected-backup-temp-cleanup-failure'), { code: 'EBUSY' });
     }
     return originalRm(target, options);
@@ -38,7 +44,7 @@ if (mode === 'sync-failure') {
   const tracked = new Set();
   fs.openSync = (target, flags, permissions) => {
     const descriptor = originalOpen(target, flags, permissions);
-    if (typeof target === 'string' && target.endsWith('.tmp')) tracked.add(descriptor);
+    if (typeof target === 'string' && target.endsWith('snapshot.sqlite')) tracked.add(descriptor);
     return descriptor;
   };
   fs.fsyncSync = descriptor => {

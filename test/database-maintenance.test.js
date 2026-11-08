@@ -141,15 +141,20 @@ test('SQLite backup captures committed WAL data and restores a validated databas
   const backup = join(directory, 'backup.sqlite');
   const restored = join(directory, 'restored.sqlite');
   const staleBackupTemp = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000000.tmp');
+  const unexpectedBackupTemp = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000001.tmp');
   const staleRestoreTemp = join(directory, '.restored.sqlite.00000000-0000-4000-8000-000000000000.restore');
   let db;
   try {
     db = openDatabase(database);
     const center = new ControlCenter(db);
     const task = center.createTask({ type: 'backup.snapshot', payload: { committed: true } });
-    writeFileSync(staleBackupTemp, 'stale partial backup');
+    mkdirSync(staleBackupTemp);
+    writeFileSync(join(staleBackupTemp, 'snapshot.sqlite'), 'stale partial backup');
+    mkdirSync(unexpectedBackupTemp);
+    writeFileSync(join(unexpectedBackupTemp, 'unexpected.bin'), 'preserve for operator review');
     const backupResult = createDatabaseBackup(database, backup);
-    assert.equal(existsSync(staleBackupTemp), false);
+    assert.equal(existsSync(staleBackupTemp), false, 'a stale staging directory with only the known snapshot is cleaned');
+    assert.equal(existsSync(join(unexpectedBackupTemp, 'unexpected.bin')), true, 'unexpected staging contents are preserved');
     assert.equal(backupResult.schemaVersion, 5);
     if (process.platform !== 'win32') assert.equal(statSync(backup).mode & 0o777, 0o600, 'published backup must be owner-readable/writable only');
     if (process.platform !== 'win32') chmodSync(backup, 0o644); // Simulate an externally supplied backup with permissive mode.
@@ -1053,6 +1058,7 @@ test('backup remains a transactionally consistent snapshot during a concurrent W
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.equal(existsSync(marker), true, 'backup worker did not reach VACUUM INTO: ' + stderr);
+    if (process.platform !== 'win32') assert.equal(Number(readFileSync(marker, 'utf8')), 0o700, 'the temporary directory must be private while VACUUM INTO is running');
     assert.equal(child.exitCode, null, 'VACUUM should still be active when the competing write begins');
 
     db.exec('BEGIN IMMEDIATE');
@@ -1114,7 +1120,7 @@ test('backup reports a retained temporary hard link when cleanup fails after pub
     assert.equal(warning.artifact, 'temporary');
     assert.equal(warning.error, 'EBUSY');
     assert.ok(warning.path.includes('.backup.sqlite.'));
-    assert.ok(warning.path.endsWith('.tmp'));
+    assert.ok(warning.path.endsWith('snapshot.sqlite'));
     assert.equal(existsSync(backup), true, 'the published backup remains valid');
     assert.equal(existsSync(warning.path), true, 'the failed cleanup leaves a visible hard link');
     retained = new DatabaseSync(warning.path);
@@ -1148,7 +1154,7 @@ test('backup attaches a cleanup warning when VACUUM fails and its partial temp c
     assert.equal(warning.artifact, 'temporary');
     assert.equal(warning.error, 'EBUSY');
     assert.ok(warning.path.includes('.backup.sqlite.'));
-    assert.ok(warning.path.endsWith('.tmp'));
+    assert.ok(warning.path.endsWith('snapshot.sqlite'));
     assert.equal(existsSync(backup), false);
     assert.equal(existsSync(warning.path), true);
     assert.equal(readFileSync(warning.path, 'utf8'), 'partial snapshot');
@@ -1204,6 +1210,7 @@ test('backup refuses publication when the completed snapshot cannot be fsynced',
     assert.equal(outcome.ok, false);
     assert.match(outcome.message, /injected-backup-fsync-failure/);
     assert.equal(existsSync(backup), false, 'an unflushed snapshot must not be published');
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
     assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
     assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
     assert.equal(inspectDatabaseFileLock(backup + '.maintenance.lock').active, false);
