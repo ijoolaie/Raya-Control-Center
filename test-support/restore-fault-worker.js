@@ -10,7 +10,7 @@ const originalRm = fs.rmSync;
 const originalUnlink = fs.unlinkSync;
 
 fs.linkSync = (source, target) => {
-  if (target === destination && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup', 'journal-cleanup-failure', 'destination-race'].includes(mode)) throw new Error('injected-install-failure');
+  if (target === destination && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup', 'journal-cleanup-failure', 'destination-race'].includes(mode) && !mode.startsWith('directory-sync-failure-')) throw new Error('injected-install-failure');
   if (mode === 'crash-before-journal-publish' && target === destination + '.restore-journal.json') process.exit(82);
   if (mode === 'destination-race' && target === destination) fs.writeFileSync(destination, 'concurrent destination');
   const result = originalLink(source, target);
