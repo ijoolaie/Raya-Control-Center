@@ -216,8 +216,8 @@ Impact:
 - A custom operator token could leave an initialized instance inaccessible through normal authenticated API operations. Offline token recovery remained available, but required stopping the server and performing a separate recovery operation.
 
 Remediation:
-- Enforce the exact URL-safe Bearer alphabet and minimum 32-character length before persisting a supplied token.
-- Apply the same validation when constructing the HTTP server.
+- Enforce a full-string match against the URL-safe Bearer alphabet, with a 32 to 1024 character bound, before persisting a supplied token.
+- Apply the same validation when constructing the HTTP server and parsing incoming Bearer credentials.
 - Keep generated and rotated credentials as cryptographically random base64url tokens.
 - Add regression tests proving invalid custom tokens are rejected before the initial credential hash is stored and that the server rejects invalid token inputs.
 - Document the accepted custom-token format.

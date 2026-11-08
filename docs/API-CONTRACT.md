@@ -12,7 +12,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 - Worker lifecycle endpoints additionally require `X-Lease-Token: <lease-token>`.
 - The participant token and lease token are distinct credentials.
 - Tokens must never appear in URLs, request bodies, logs, event data, or error messages. The explicit one-time registration/rotation responses are the only API responses that return raw credentials.
-- Operator token is generated on first start and displayed once. Later starts require `RAYA_CC_OPERATOR_TOKEN`. Custom values must contain at least 32 URL-safe characters: ASCII letters, digits, underscore, or hyphen. This matches the Bearer-token parser and prevents an initialized credential that the HTTP layer cannot accept.
+- Operator token is generated on first start and displayed once. Later starts require `RAYA_CC_OPERATOR_TOKEN`. Custom values must contain 32 to 1024 URL-safe characters: ASCII letters, digits, underscore, or hyphen. This matches the Bearer-token parser and prevents an initialized credential that the HTTP layer cannot accept.
 - Normal rotation uses the authenticated local API with `npm run cli -- operator rotate`; the replacement token is displayed once and the previous token is invalidated immediately. If that response is lost, stop the server and use the offline recovery procedure in `OPERATIONS.md`.
 
 ## Endpoints
