@@ -406,3 +406,29 @@ Verification:
 
 Residual risk:
 - The server still must briefly hold the generated token to display it once at first initialization, and the HTTP layer retains only its hash for request authentication. Same-process memory inspection and privileged local access remain outside this control. Independent security review remains pending.
+### SEC-013 - Operator authorization decision survived token rotation during body receipt
+
+Severity: **Low**
+Status: **Remediated; focused regression passed, full local and supported-runtime CI verification pending**
+
+Evidence:
+- The HTTP handler originally compared the supplied Operator token with the current hash once, before route processing.
+- `POST /tasks` and `POST /participants/register` then awaited the request body after that authorization check.
+- A client could begin one of these requests with the current token, pause body transmission, have the Operator token rotated by another request, and then finish the body. The first request still used its stale authorization decision and completed successfully after rotation.
+- A regression test reproduced this: the old-token Task creation returned HTTP 201 after a successful rotation, and the Task was persisted.
+
+Impact:
+- A request already in progress could perform an Operator action after the credential used to authorize it had been revoked by rotation. This required possession of the old valid token before rotation; no unauthenticated or remote-access bypass was established.
+
+Remediation:
+- Move Operator authorization for body-bearing Task creation and Participant registration until after the complete JSON body has been read.
+- Make the Operator authorization helper compare against the current in-memory token hash at the point of authorization instead of capturing a Boolean decision at request arrival.
+- Add a regression that pauses a Task-creation body, rotates the token, completes the body, and asserts HTTP 401 with no Task persisted.
+
+Verification:
+- Before the fix, the focused regression failed as expected: old-token request returned HTTP 201 after rotation.
+- After the fix, `node --test test/http-server.test.js` passed all 10 tests, including the new in-flight rotation regression.
+- Full local suite, static checks, diff checks, and supported-runtime CI remain to be run for this change.
+
+Residual risk:
+- A synchronous operation that has already passed authorization and begun execution cannot be interrupted mid-operation by a later rotation; JavaScript event-loop execution serializes that operation with the rotation handler. Requests still awaiting their body are now checked after receipt. Independent security review remains pending.

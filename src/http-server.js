@@ -218,9 +218,12 @@ export function createControlServer({ db, operatorToken }) {
       }
 
       const token = bearer(req);
-      const operator = equalSecret(token, operatorHash);
+      // Re-check against the current hash at the authorization point. A request
+      // may await its body after routing; a token rotated during that wait must
+      // not retain the stale authorization decision made at request arrival.
       const requireOperator = () => {
-        if (!operator) throw new ControlCenterError('authentication_required', 'Operator authentication required');
+        if (!equalSecret(token, operatorHash))
+          throw new ControlCenterError('authentication_required', 'Operator authentication required');
       };
       const requireParticipant = () => {
         const participant = center.authenticateParticipant(token);
@@ -237,8 +240,8 @@ export function createControlServer({ db, operatorToken }) {
       }
 
       if (req.method === 'POST' && url.pathname === BASE + '/participants/register') {
-        requireOperator();
         const body = await readJson(req);
+        requireOperator();
         const result = center.registerParticipant({
           displayName: body.displayName, kind: body.kind, scopes: body.scopes
         });
@@ -287,8 +290,8 @@ export function createControlServer({ db, operatorToken }) {
       }
 
       if (req.method === 'POST' && url.pathname === BASE + '/tasks') {
-        requireOperator();
         const body = await readJson(req);
+        requireOperator();
         const task = center.createTask({
           type: body.type, payload: body.payload, priority: body.priority,
           idempotencyKey: body.idempotencyKey

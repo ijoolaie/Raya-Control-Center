@@ -51,7 +51,7 @@ Rotate the Operator credential through the running local API while the current t
 npm run cli -- operator rotate
 ```
 
-The command returns the replacement token once. Save it securely before closing the terminal. The old token is invalidated immediately for subsequent requests; update the environment used to start the Control Center and all Operator CLI sessions to the new value before restarting or issuing more commands. Do not paste the token into tickets, chat, source files, or shell history. The token is returned in CLI standard output, so avoid transcript capture and redirected logs.
+The command returns the replacement token once. Save it securely before closing the terminal. The old token is invalidated immediately for subsequent requests. Requests to create Tasks or register Participants are authorized after their complete request body has arrived, so a body still in transit during rotation is checked against the new token and rejected if it uses the old one. Update the environment used to start the Control Center and all Operator CLI sessions to the new value before restarting or issuing more commands. Do not paste the token into tickets, chat, source files, or shell history. The token is returned in CLI standard output, so avoid transcript capture and redirected logs.
 
 If the CLI loses the rotation response, or the saved token is otherwise unavailable, stop the server and recover a replacement locally:
 

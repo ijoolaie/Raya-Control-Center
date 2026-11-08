@@ -32,6 +32,48 @@ test('operator token is bootstrapped once, verified on restart, and rotatable', 
   db.close();
 });
 
+test('in-flight Operator request is re-authorized after token rotation', async () => {
+  const db = openDatabase(':memory:');
+  const originalToken = 'operator-inflight-rotation-token-123456';
+  const server = createControlServer({ db, operatorToken: originalToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const body = JSON.stringify({ type: 'rotation.race.task' });
+  let pending;
+  try {
+    pending = new Promise((resolve, reject) => {
+      const request = httpRequest(base + '/tasks', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer ' + originalToken,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body)
+        }
+      }, response => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { responseBody += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body: responseBody }));
+      });
+      request.on('error', reject);
+      request.write(body.slice(0, 8));
+      setTimeout(() => request.end(body.slice(8)), 50);
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const rotated = await fetch(base + '/operator/rotate-token', {
+      method: 'POST', headers: { authorization: 'Bearer ' + originalToken }
+    });
+    assert.equal(rotated.status, 200);
+    const result = await pending;
+    assert.equal(result.status, 401, 'a request whose body completes after rotation must not retain stale authorization');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE type = 'rotation.race.task'").get().count, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
 test('operator token rotation is immediate and invalidates the previous token', async () => {
   const db = openDatabase(':memory:');
   const originalToken = 'operator-rotation-original-token-123456';
