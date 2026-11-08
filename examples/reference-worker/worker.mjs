@@ -1,4 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
+import { removeOperatorCredential } from './environment.mjs';
+
+// A worker is a lower-trust process. Drop any Operator credential inherited from its launcher.
+removeOperatorCredential();
 
 const BASE = (process.env.RAYA_CC_URL || 'http://127.0.0.1:4317/control/v1').replace(/\/+$/, '');
 const API_URL = new URL(BASE);

@@ -37,6 +37,8 @@ Unknown task types fail safely. Task payloads are never treated as instructions 
 ```powershell
 $env:RAYA_CC_URL = "http://127.0.0.1:4317/control/v1"
 $env:RAYA_CC_PARTICIPANT_TOKEN = "<participant-token>"
+# Remove the Operator token from this shell before starting the lower-trust Worker.
+Remove-Item Env:RAYA_CC_OPERATOR_TOKEN -ErrorAction SilentlyContinue
 node examples/reference-worker/worker.mjs
 ```
 
@@ -50,7 +52,7 @@ Optional environment variables:
 | `RAYA_CC_LEASE_MS` | `30000` | Lease duration, 3000..3600000 ms |
 | `RAYA_CC_MAX_TASKS` | unlimited | Optional positive integer; useful for one-shot runs |
 
-The worker uses only the Participant token and per-task `X-Lease-Token`. It has no Operator credential and cannot register participants or create tasks.
+The worker uses only the Participant token and per-task X-Lease-Token. At startup it removes an inherited RAYA_CC_OPERATOR_TOKEN from its own environment. Also remove the Operator token from the launching PowerShell environment before starting the Worker; this defense-in-depth step does not protect against privileged launch-time hooks such as injected Node preload modules or a compromised same-user process. The worker cannot register participants or create tasks.
 
 ## Lifecycle and failure policy
 

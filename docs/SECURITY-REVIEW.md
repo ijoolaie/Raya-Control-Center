@@ -314,7 +314,7 @@ Residual risk:
 ### SEC-009 - Backup snapshot exposed during generation
 
 Severity: **Low**
-Status: **Remediated on POSIX; local Windows regression suite passed; supported-runtime CI pending**
+Status: **Remediated on POSIX; local Windows regression suite and supported-runtime CI passed**
 
 Evidence (pre-remediation):
 - `createDatabaseBackupUnlocked` directed SQLite `VACUUM INTO` to a temporary file created directly in the destination directory.
@@ -333,7 +333,29 @@ Remediation:
 Verification:
 - Windows local `npm test`: 109 passed, 3 skipped, 0 failed (112 total); `npm run check` and `git diff --check` passed.
 - POSIX mode assertion is exercised by Linux CI, not by the Windows local run.
-- Supported-runtime CI verification is pending.
+- Supported-runtime CI run 42480610561 passed Node 24/26 on Linux and Windows; Linux exercised the POSIX staging-directory mode assertion.
 
 Residual risk:
 - On Windows, the staging directory inherits the destination parent NTFS ACL; portable Node APIs used here do not set a restrictive Windows DACL. Operators must restrict the backup directory with the documented ACL helper. A same-user process or local administrator remains outside this protection boundary. Independent security review remains pending.
+### SEC-010 - Reference Worker inherited the Operator environment credential
+
+Severity: **Low**
+Status: **Remediated in the reference worker; local Windows regression suite passed**
+
+Evidence (pre-remediation):
+- The documented PowerShell workflow set RAYA_CC_OPERATOR_TOKEN to register a Participant and then launched the reference Worker from the same shell.
+- Node child processes inherit the parent environment unless the launcher supplies an explicit environment map. The Worker did not use the Operator token, but it remained readable through process.env to all code executing in that Worker process.
+
+Impact:
+- A compromised or later-extended Worker code path could read an Operator credential that was not required for its Participant role. This is a local process credential-isolation weakness, not an API authorization bypass.
+
+Remediation:
+- Remove RAYA_CC_OPERATOR_TOKEN immediately during reference Worker startup, before task processing or application logic.
+- Document removing the Operator token from the launching PowerShell environment before starting the Worker.
+- Add a focused regression for the environment-sanitization helper.
+
+Verification:
+- Windows local npm test: 110 passed, 3 skipped, 0 failed (113 total); npm run check and git diff --check passed. The focused environment helper regression passed.
+
+Residual risk:
+- Startup sanitization occurs after Node process initialization. It does not defend against injected preload hooks, a compromised launcher, or a malicious same-user process that can inspect process memory/environment at launch. Production process supervisors should construct an explicit allowlisted child environment and must not pass Operator credentials to Worker processes. Independent security review remains pending.
