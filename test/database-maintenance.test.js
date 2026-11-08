@@ -697,6 +697,49 @@ test('lock release preserves a lock file whose recorded owner changed', () => {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('failed lock fsync preserves the uncertain lock artifact for operator review', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-fsync-failure-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  try {
+    const worker = new URL('../test-support/runtime-lock-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'file-fsync-failure', database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.code, 'EIO');
+    assert.match(outcome.message, /injected-lock-file-fsync-failure/);
+    assert.equal(outcome.lockPath, lockPath);
+    assert.equal(existsSync(lockPath), true, 'uncertain lock publication must be preserved, not silently removed');
+    const owner = JSON.parse(readFileSync(lockPath, 'utf8'));
+    assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
+    assert.equal(typeof owner.startedAt, 'string');
+  } finally {
+    if (existsSync(lockPath)) unlinkSync(lockPath);
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('lock release reports a directory-fsync failure after unlink without recreating the lock', { skip: process.platform === 'win32' }, () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-release-fsync-failure-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  try {
+    const worker = new URL('../test-support/runtime-lock-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'release-directory-fsync-failure', database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.code, 'EIO');
+    assert.match(outcome.message, /injected-lock-release-directory-fsync-failure/);
+    assert.equal(outcome.lockStillExists, false);
+    assert.equal(existsSync(lockPath), false, 'release must not recreate a lock after unlink even when directory fsync fails');
+  } finally {
+    if (existsSync(lockPath)) unlinkSync(lockPath);
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('backup destination lock serializes backups across processes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cross-process-'));
   const firstDatabase = join(directory, 'first.sqlite');

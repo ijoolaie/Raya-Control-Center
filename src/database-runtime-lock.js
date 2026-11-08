@@ -50,8 +50,11 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
     syncDirectory(dirname(lockPath));
   } catch (error) {
     if (descriptor !== undefined) {
-      closeSync(descriptor);
-      try { unlinkSync(lockPath); syncDirectory(dirname(lockPath)); } catch {}
+      try { closeSync(descriptor); } catch {}
+      // Once the lock path has been created, a failed write/fsync/directory flush
+      // leaves its publication state uncertain. Preserve it for operator review;
+      // deleting by pathname here could remove a replacement lock owned by another process.
+      error.lockPath = lockPath;
     }
     if (error.code === 'EEXIST') {
       let detail = 'An existing ' + label + ' lock prevents access.';

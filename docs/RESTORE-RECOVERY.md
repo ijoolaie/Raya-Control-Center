@@ -4,6 +4,8 @@
 
 Use this procedure only when a Restore process terminated unexpectedly and the normal live database path is missing or a `.pre-restore-<uuid>` file remains. The application does **not** automatically recover these files. Each Restore now publishes an atomic intent record (its file contents are fsynced before publication) at `<database>.restore-journal.json` before moving or installing database files. A crash leaves this journal in place and blocks another Restore until an operator reviews it. This is intentional: a lock file alone cannot prove that its owner is dead, and selecting one of several rollback files automatically could overwrite valid data.
 
+Lock acquisition also follows a preserve-on-uncertainty rule. If writing or flushing a newly created lock fails, the acquisition closes its descriptor but deliberately leaves the lock path in place and attaches that exact path as `error.lockPath`. The file may be incomplete or may have been published without a confirmed directory flush; it must be inspected and treated as a possible active lock, not automatically deleted or retried around. Verify that every database user is stopped and compare the recorded PID/start time before an operator removes that exact file. This avoids a cleanup race in which a failed acquirer could unlink a replacement lock created by another owner.
+
 This procedure is for an operator who has verified that the Control Center server and every other process using this database are stopped. Do not use it while the server is running.
 
 ## 1. Identify the database and inspect artifacts
