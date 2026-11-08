@@ -697,6 +697,25 @@ test('lock release preserves a lock file whose recorded owner changed', () => {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('lock release preserves a replacement path published after owner read', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-release-race-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  try {
+    const worker = new URL('../test-support/runtime-lock-release-race-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.replaced, true);
+    assert.equal(outcome.exists, true);
+    assert.deepEqual(outcome.remaining, { pid: result.pid + 1, startedAt: '2099-01-01T00:00:00.000Z' });
+    assert.equal(existsSync(lockPath), true, 'release must not unlink a replacement lock inode');
+  } finally {
+    if (existsSync(lockPath)) unlinkSync(lockPath);
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('failed lock fsync preserves the uncertain lock artifact for operator review', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-fsync-failure-'));
   const database = join(directory, 'live.sqlite');

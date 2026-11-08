@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { syncDirectory } from './file-system-durability.js';
 
@@ -42,9 +42,11 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
   const lockPath = basePath ? basePath.slice(0, -'.runtime.lock'.length) + suffix : null;
   if (!lockPath) return () => {};
   let descriptor;
+  let lockIdentity;
   const owner = { pid: process.pid, startedAt: new Date().toISOString() };
   try {
     descriptor = openSync(lockPath, 'wx', 0o600);
+    lockIdentity = fstatSync(descriptor);
     writeFileSync(descriptor, JSON.stringify(owner) + '\n', 'utf8');
     fsyncSync(descriptor);
     syncDirectory(dirname(lockPath));
@@ -74,6 +76,8 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
     try {
       const current = JSON.parse(readFileSync(lockPath, 'utf8'));
       if (current.pid === owner.pid && current.startedAt === owner.startedAt) {
+        const currentIdentity = lstatSync(lockPath);
+        if (!currentIdentity.isFile() || currentIdentity.dev !== lockIdentity.dev || currentIdentity.ino !== lockIdentity.ino) return;
         unlinkSync(lockPath);
         syncDirectory(dirname(lockPath));
       }
