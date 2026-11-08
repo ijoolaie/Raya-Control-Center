@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -714,6 +714,41 @@ test('SQLite runtime lock is exclusive across processes and releases automatical
   }
 });
 
+test('simultaneous process contenders produce exactly one SQLite lock owner', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-contention-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  const children = [];
+  try {
+    const worker = fileURLToPath(new URL('../test-support/runtime-lock-crash-worker.js', import.meta.url));
+    for (let index = 0; index < 8; index++) {
+      children.push(spawn(process.execPath, [worker, 'contend', database], { stdio: ['ignore', 'pipe', 'pipe'] }));
+    }
+    const outcomes = await Promise.all(children.map(child => new Promise((resolve, reject) => {
+      let output = '';
+      child.stdout.on('data', chunk => {
+        output += chunk.toString();
+        if (output.includes('\n')) resolve(output.trim());
+      });
+      child.stderr.on('data', chunk => { output += chunk.toString(); });
+      child.once('error', reject);
+      child.once('exit', code => {
+        if (!output.includes('\n')) {
+          if (code === 0 && output.trim() === 'BLOCKED') resolve('BLOCKED');
+          else reject(new Error('contender exited before reporting an outcome: ' + code + ' ' + output));
+        }
+      });
+    })));
+    assert.equal(outcomes.filter(value => value === 'LOCKED').length, 1, JSON.stringify(outcomes));
+    assert.equal(outcomes.filter(value => value === 'BLOCKED').length, 7, JSON.stringify(outcomes));
+    assert.equal(inspectDatabaseFileLock(lockPath).active, true);
+  } finally {
+    for (const child of children) if (child.exitCode === null) child.kill('SIGKILL');
+    await Promise.all(children.filter(child => child.exitCode === null).map(child => new Promise(resolve => child.once('exit', resolve))));
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+  assert.equal(inspectDatabaseFileLock(lockPath).exists, false);
+});
 test('restore inspection probes an idle SQLite sidecar without changing its files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-inspect-readonly-'));
   const database = join(directory, 'live.sqlite');
@@ -735,6 +770,39 @@ test('restore inspection probes an idle SQLite sidecar without changing its file
     assert.equal(existsSync(lockPath + '-journal'), false);
   } finally {
     release?.();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('runtime lock rejects a symbolic-link sidecar without following its target', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-symlink-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  const targetPath = join(directory, 'operator-target');
+  try {
+    mkdirSync(targetPath);
+    symlinkSync(targetPath, lockPath, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => acquireDatabaseMaintenanceLock(database), /zero-byte regular non-symbolic-link/);
+    assert.equal(existsSync(targetPath), true);
+    assert.equal(inspectDatabaseFileLock(lockPath).kind, 'symbolic-link');
+    assert.equal(inspectDatabaseFileLock(lockPath).active, null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('runtime lock rejects a hard-linked sidecar without modifying either path', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-hardlink-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  const aliasPath = join(directory, 'attacker-controlled-alias');
+  try {
+    writeFileSync(aliasPath, Buffer.alloc(0));
+    linkSync(aliasPath, lockPath);
+    assert.throws(() => acquireDatabaseMaintenanceLock(database), /exactly one hard link/);
+    assert.equal(existsSync(aliasPath), true);
+    assert.equal(existsSync(lockPath), true);
+    assert.equal(readFileSync(aliasPath).length, 0);
+    assert.equal(inspectDatabaseFileLock(lockPath).active, null);
+  } finally {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

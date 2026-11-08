@@ -57,7 +57,7 @@ function heldError(label, lockPath) {
 function openLockDatabase(lockPath) {
   try {
     const stat = lstatSync(lockPath);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.size !== 0) throw new Error('Lock path must be a zero-byte regular non-symbolic-link file: ' + lockPath);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size !== 0 || stat.nlink !== 1) throw new Error('Lock path must be a zero-byte regular non-symbolic-link file with exactly one hard link: ' + lockPath);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
