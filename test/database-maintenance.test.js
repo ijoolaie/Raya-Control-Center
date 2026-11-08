@@ -1063,3 +1063,51 @@ test('restore keeps the original live database when the staged copy cannot be fs
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test('restore handles directory fsync failures at journal, rollback, install, and journal-cleanup boundaries', { skip: process.platform === 'win32' }, () => {
+  const scenarios = [
+    { failureAt: 1, ok: false, task: 'restore.original', journal: true, rollback: false, warning: null },
+    { failureAt: 3, ok: false, task: 'restore.original', journal: false, rollback: false, warning: null },
+    { failureAt: 4, ok: false, task: 'restore.replacement', journal: true, rollback: true, warning: null },
+    { failureAt: 6, ok: true, task: 'restore.replacement', journal: false, rollback: true, warning: 'journal' }
+  ];
+  const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+  for (const scenario of scenarios) {
+    const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-directory-fsync-'));
+    const database = join(directory, 'live.sqlite');
+    const source = join(directory, 'source.sqlite');
+    const backup = join(directory, 'backup.sqlite');
+    let db;
+    try {
+      db = openDatabase(database);
+      new ControlCenter(db).createTask({ type: 'restore.original' });
+      db.close();
+      db = null;
+      db = openDatabase(source);
+      new ControlCenter(db).createTask({ type: 'restore.replacement' });
+      db.close();
+      db = null;
+      createDatabaseBackup(source, backup);
+
+      const result = spawnSync(process.execPath, [fileURLToPath(worker), 'directory-sync-failure-' + scenario.failureAt, backup, database], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      const outcome = JSON.parse(result.stdout);
+      assert.equal(outcome.ok, scenario.ok, 'failure boundary ' + scenario.failureAt + ': ' + outcome.message);
+      if (!scenario.ok) assert.match(outcome.message, new RegExp('injected-directory-fsync-failure-' + scenario.failureAt));
+      assert.equal(existsSync(database + '.restore-journal.json'), scenario.journal, 'journal state at boundary ' + scenario.failureAt);
+      const rollbackFiles = readdirSync(directory).filter(name => name.startsWith('live.sqlite.pre-restore-'));
+      assert.equal(rollbackFiles.length, scenario.rollback ? 1 : 0, 'rollback evidence at boundary ' + scenario.failureAt);
+      assert.equal(existsSync(database + '.runtime.lock'), false);
+      assert.equal(existsSync(database + '.maintenance.lock'), false);
+
+      db = openDatabase(database);
+      assert.equal(db.prepare('SELECT type FROM tasks').get().type, scenario.task);
+      db.close();
+      db = null;
+      if (scenario.warning) assert.deepEqual(outcome.result.cleanupWarnings.map(item => item.artifact), [scenario.warning]);
+    } finally {
+      if (db) db.close();
+      rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  }
+});

@@ -87,6 +87,29 @@ if (mode === 'sync-failure') {
     return originalFsync(descriptor);
   };
 }
+if (mode.startsWith('directory-sync-failure-')) {
+  const failureAt = Number(mode.slice('directory-sync-failure-'.length));
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const directories = new Set();
+  let directorySyncCount = 0;
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string') {
+      try { if (fs.statSync(target).isDirectory()) directories.add(descriptor); } catch {}
+    }
+    return descriptor;
+  };
+  fs.fsyncSync = descriptor => {
+    if (directories.has(descriptor)) {
+      directorySyncCount += 1;
+      if (directorySyncCount === failureAt) {
+        throw Object.assign(new Error('injected-directory-fsync-failure-' + failureAt), { code: 'EIO' });
+      }
+    }
+    return originalFsync(descriptor);
+  };
+}
 syncBuiltinESMExports();
 try {
   const result = restoreDatabaseBackup(backup, destination);
