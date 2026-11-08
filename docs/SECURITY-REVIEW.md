@@ -147,7 +147,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 | Token storage | Operator and Participant token hashes are stored; lease hashes are stored | Application behavior inspected; Windows data ACL helper available but not applied to the live data directory |
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
 | Dashboard | Operator token is held in page memory; dynamic values use `textContent`; no HTML injection sinks, console logging, or payload/result rendering | Static asset and source regression checks pass; interactive browser testing remains pending |
-| Backup/restore | Dedicated backup and offline restore implementation exists; fault-injection covers installation and rollback failures | Path and rollback tests pass; ACLs on backup destinations remain an operator responsibility |
+| Backup/restore | Dedicated backup and offline restore implementation exists; fault-injection covers installation and rollback failures | POSIX backup/restored database modes are restricted to 0600; Windows ACLs on data and backup directories remain an operator responsibility |
 | Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination and graceful runtime shutdown tests passed in CI on Node 24/26 Windows |
 
 ## Open review work
@@ -229,3 +229,31 @@ Verification:
 
 Residual risk:
 - The finding concerns custom token format consistency, not token entropy. Operators supplying custom values remain responsible for using high-entropy secrets. Independent review remains pending.
+
+### SEC-006 - Backup and restored database files inherited permissive POSIX modes
+
+Severity: **Low**
+Status: **Remediated in code; Windows local regression suite passed 2026-11-08; POSIX CI verification pending**
+
+Evidence (pre-remediation):
+- SQLite `VACUUM INTO` created backup snapshots using filesystem creation permissions influenced by the process umask. Under a common `022` umask, a published backup could be readable by other local users if its parent directory was traversable.
+- Restore copied the backup file to its staging path and installed it without tightening the copied mode, potentially carrying permissive source permissions to the live database.
+- The Windows ACL helper does not apply to POSIX filesystems; Windows directory ACLs remain separately managed by the operator.
+
+Impact:
+- On POSIX hosts with permissive umask and directory permissions, local accounts other than the application owner could read backup contents or a restored database file.
+
+Remediation:
+- Before publishing a backup hard link, set the completed snapshot to mode `0600` and verify the effective mode.
+- Before validating and installing a restored staging copy, set it to mode `0600` and verify the effective mode.
+- Keep Windows ACL handling explicitly separate; do not claim `chmod` establishes NTFS access control.
+- Add POSIX assertions for backup and restored database file modes.
+- Document the distinction between POSIX file modes and Windows directory ACLs.
+
+Verification:
+- Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total); POSIX-specific assertions are skipped on Windows.
+- `npm run check` and `git diff --check` passed.
+- Node 24/26 Linux CI: pending.
+
+Residual risk:
+- The destination directory and its parent must still be protected while a snapshot is being generated. This change restricts the completed snapshot before publication, not the permissions of pre-existing directories or temporary-file exposure during generation. Windows ACLs remain operator-managed. Independent security review remains pending.

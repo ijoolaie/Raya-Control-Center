@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import assert from 'node:assert/strict';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, chmodSync, statSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -151,10 +151,13 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     const backupResult = createDatabaseBackup(database, backup);
     assert.equal(existsSync(staleBackupTemp), false);
     assert.equal(backupResult.schemaVersion, 5);
+    if (process.platform !== 'win32') assert.equal(statSync(backup).mode & 0o777, 0o600, 'published backup must be owner-readable/writable only');
+    if (process.platform !== 'win32') chmodSync(backup, 0o644); // Simulate an externally supplied backup with permissive mode.
     writeFileSync(staleRestoreTemp, 'stale partial restore');
     const restoreResult = restoreDatabaseBackup(backup, restored);
     assert.equal(existsSync(staleRestoreTemp), false);
     assert.equal(restoreResult.schemaVersion, 5);
+    if (process.platform !== 'win32') assert.equal(statSync(restored).mode & 0o777, 0o600, 'restored database must retain private file permissions');
     assert.equal(existsSync(restored + '.restore-journal.json'), false, 'successful Restore removes its completed journal');
     const restoredDb = openDatabase(restored);
     assert.deepEqual(new ControlCenter(restoredDb).getTask(task.id).payload, { committed: true });

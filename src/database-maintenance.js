@@ -1,6 +1,6 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
@@ -163,6 +163,16 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
   if (changed) syncDirectory(directory);
 }
 
+function restrictSnapshotPermissions(filename) {
+  // POSIX snapshots contain credentials and task data; never publish them with a permissive umask-derived mode.
+  // Windows access control is governed by the destination directory ACL and remains an operator responsibility.
+  if (process.platform !== 'win32') {
+    chmodSync(filename, 0o600);
+    const mode = statSync(filename).mode & 0o777;
+    if (mode !== 0o600) throw new Error('Snapshot permissions could not be restricted to owner-only access');
+  }
+}
+
 function syncFileContents(filename) {
   const descriptor = openSync(filename, 'r+');
   try { fsyncSync(descriptor); }
@@ -196,6 +206,7 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
       db.close();
     }
     const metadata = validateSnapshot(temporary);
+    restrictSnapshotPermissions(temporary);
     // Flush the completed snapshot file before publishing its directory entry.
     syncFileContents(temporary);
     if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
@@ -275,6 +286,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     });
     journalCreated = true;
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
+    restrictSnapshotPermissions(temporary);
     // Validate the exact bytes that will be installed, not only the earlier source path.
     const metadata = validateSnapshot(temporary);
     // copyFileSync does not provide a durability guarantee; flush staged bytes before moving the live database.
