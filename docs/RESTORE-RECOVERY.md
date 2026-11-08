@@ -2,9 +2,11 @@
 
 ## Scope
 
-Use this procedure only when a Restore process terminated unexpectedly and the normal live database path is missing or a `.pre-restore-<uuid>` file remains. The application does **not** automatically recover these files. Each Restore now publishes an atomic intent record (its file contents are fsynced before publication) at `<database>.restore-journal.json` before moving or installing database files. A crash leaves this journal in place and blocks another Restore until an operator reviews it. This is intentional: a lock file alone cannot prove that its owner is dead, and selecting one of several rollback files automatically could overwrite valid data.
+Use this procedure only when a Restore process terminated unexpectedly and the normal live database path is missing or a `.pre-restore-<uuid>` file remains. The application does **not** automatically recover these files. Each Restore now publishes an atomic intent record (its file contents are fsynced before publication) at `<database>.restore-journal.json` before moving or installing database files. A crash leaves this journal in place and blocks another Restore until an operator reviews it. This is intentional: the mere existence of a persistent lock sidecar does not prove that a process currently holds its SQLite reservation, and selecting one of several rollback files automatically could overwrite valid data.
 
-Lock acquisition also follows a preserve-on-uncertainty rule. If writing or flushing a newly created lock fails, the acquisition closes its descriptor but deliberately leaves the lock path in place and attaches that exact path as `error.lockPath`. The file may be incomplete or may have been published without a confirmed directory flush; it must be inspected and treated as a possible active lock, not automatically deleted or retried around. Verify that every database user is stopped and compare the recorded PID/start time before an operator removes that exact file. This avoids a cleanup race in which a failed acquirer could unlink a replacement lock created by another owner. On release, the process also compares the lock path's filesystem identity (`device` and `inode`) with the identity captured from the descriptor it created, after validating the owner record. If the path has already been replaced, release preserves it. This narrows replacement races but is not an atomic compare-and-unlink: Node's portable filesystem API does not provide an unlink operation conditional on inode identity, so a hostile replacement in the final `lstat`-to-`unlink` interval is not ruled out. Lock directories must therefore remain writable only by trusted application/operator accounts; this check is defense in depth, not a defense against a concurrent hostile filesystem actor.
+Runtime and maintenance locks now use persistent SQLite sidecar files (`<database>.runtime.lock` and `<database>.maintenance.lock`). The process holds an open `BEGIN IMMEDIATE` transaction for the lifetime of the lock; release rolls back that transaction and closes the connection. The sidecar is intentionally not unlinked. A process crash or forced termination releases the operating-system lock through SQLite, so a leftover sidecar is not a stale lock by itself. The lock transaction makes no data writes and uses `PRAGMA journal_mode=OFF` so forced termination does not leave a hot rollback journal. `db:restore:inspect` probes each existing sidecar and reports `active: true` (held), `active: false` (idle), or `active: null` (unrecognized/unreadable). The probe temporarily attempts the same SQLite reservation and rolls it back; it does not change persistent database contents.
+
+A pre-upgrade JSON lock file at either legacy path is not silently migrated, overwritten, or deleted. It is reported as `unrecognized-lock-artifact` with `active: null`, and new acquisition fails closed. Verify the old PID/start time and confirm every Control Center/database process is stopped; preserve a copy, then move only that exact legacy file to a reviewed archive name before retrying. Never remove a valid SQLite lock sidecar as routine cleanup. The SQLite lock protocol relies on the filesystem honoring SQLite locking semantics; use a supported local filesystem and keep lock directories writable only by trusted application/operator accounts. A hostile actor able to unlink and replace the sidecar path could split processes across different file identities, so path-directory write access remains part of the trust boundary.
 
 This procedure is for an operator who has verified that the Control Center server and every other process using this database are stopped. Do not use it while the server is running.
 
@@ -17,7 +19,7 @@ $env:RAYA_CC_DATABASE = (Join-Path (Get-Location) '.data\control-center.sqlite')
 npm run db:restore:inspect
 ```
 
-The JSON report shows the live database, runtime and maintenance lock presence, journal validity, recorded paths, whether each recorded artifact exists, any unpublished journal temporary files in `journal.orphanedTemporaryFiles`, and a conservative `recovery.state` classification. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, decide whether a lock is stale, validate a database snapshot, or choose an authoritative copy. When no valid journal exists, artifact paths that are not independently inspected are reported as null (unknown), not as absent. A remaining runtime or maintenance lock is classified separately as no-pending-restore-lock-present. `readOnly: true` means the command does not create, remove, rename, or modify files or locks. A malformed, invalid, or mismatched journal must be preserved for manual review.
+The JSON report shows the live database, runtime and maintenance sidecar existence and active status, journal validity, recorded paths, whether each recorded artifact exists, any unpublished journal temporary files in `journal.orphanedTemporaryFiles`, and a conservative `recovery.state` classification. A sidecar with `exists: true` and `active: false` is the normal idle state, not a held lock. The state model distinguishes absent or invalid journals, present locks, missing live or rollback files, and ambiguous live-plus-rollback combinations. It is an observation summary, not a recovery decision: it does not test whether a PID is alive, validate a database snapshot, or choose an authoritative copy. Lock activity is determined by attempting the SQLite reservation, not by PID inspection. When no valid journal exists, artifact paths that are not independently inspected are reported as null (unknown), not as absent. An active or unrecognized runtime/maintenance lock is classified separately as no-pending-restore-lock-present. A persistent SQLite sidecar with `active: false` is idle and does not block recovery classification. `readOnly: true` means the command does not persistently create, remove, rename, or modify files. Lock inspection temporarily attempts and releases a SQLite reservation. A malformed, invalid, or mismatched journal must be preserved for manual review.
 
 
 Set the exact paths; do not use a wildcard as a deletion target:
@@ -33,38 +35,32 @@ Get-ChildItem -LiteralPath $Directory -Force |
 
 Keep every `.pre-restore-*` file. Each may be the only surviving copy of the pre-restore database. Do not delete or rename candidates until one has been selected and verified. Read the exact journal named `<database>.restore-journal.json` as JSON; it records the operation PID/time and exact source, destination, temporary, and rollback paths. Treat those paths as evidence, not as permission to delete files.
 
-## 2. Verify lock owners before removing stale locks
+## 2. Verify the SQLite lock state
 
-Inspect lock contents:
-
-```powershell
-foreach ($Suffix in @('.runtime.lock', '.maintenance.lock')) {
-  $Lock = $Database + $Suffix
-  if (Test-Path -LiteralPath $Lock) {
-    "--- $Lock"
-    Get-Content -LiteralPath $Lock
-  }
-}
-```
-
-For each reported PID, inspect the process and its start time:
+The lock paths are persistent SQLite sidecars. Do not infer an active owner from file existence and do not delete these files during normal recovery. Read the lock status from the inspection report:
 
 ```powershell
-Get-Process -Id <PID> -ErrorAction SilentlyContinue |
-  Select-Object Id, ProcessName, StartTime, Path
+$Report = npm run db:restore:inspect --silent | ConvertFrom-Json
+$Report.locks.runtime | Format-List
+$Report.locks.maintenance | Format-List
 ```
 
-Compare the process start time with `startedAt` in the lock JSON. A missing PID or a mismatched start time is useful evidence but is not, by itself, proof that no other process has the database open. Confirm the server and all database clients are stopped before proceeding. If ownership is ambiguous, stop and preserve all files.
+Interpret `active` conservatively:
 
-Only after that verification, remove the exact stale lock file(s) shown by the inspection. Do not use wildcard deletion:
+- `true`: a process currently holds the SQLite reservation. Stop here; do not run Backup, Restore, token recovery, or remove the sidecar.
+- `false`: no process currently holds the reservation. The persistent sidecar is reusable and should remain in place.
+- `null`: the artifact is not a recognized SQLite lock file or could not be inspected. Preserve it and investigate before proceeding.
+
+A legacy JSON lock from an older version is reported as `unrecognized-lock-artifact`. Inspect its JSON contents and compare `pid`/`startedAt` with the process list. A missing PID alone is not sufficient evidence if other database clients may still be running. After confirming all database users are stopped, preserve a copy and move only that exact legacy file out of the way:
 
 ```powershell
-Remove-Item -LiteralPath ($Database + '.runtime.lock') -ErrorAction Stop
-Remove-Item -LiteralPath ($Database + '.maintenance.lock') -ErrorAction Stop
+$LegacyLock = $Database + '.runtime.lock' # or '.maintenance.lock'
+$Archive = $LegacyLock + '.legacy-reviewed-' + (Get-Date -Format yyyyMMdd-HHmmss)
+Copy-Item -LiteralPath $LegacyLock -Destination ($Archive + '.copy') -ErrorAction Stop
+Move-Item -LiteralPath $LegacyLock -Destination $Archive -ErrorAction Stop
 ```
 
-Run only the command for a lock file that actually exists and has been verified stale.
-
+Use this legacy-file procedure only when `active` is `null` and the artifact has been positively identified as the old JSON format. Do not use it for a valid SQLite sidecar with `active: false` or `active: true`.
 ## 3. Resolve the reviewed Restore journal
 
 After verifying that all database users are stopped, preserve a copy of the journal and inspect its recorded paths. If the journal is missing, malformed, references unexpected paths, or the filesystem state does not match the expected operation, stop and preserve all artifacts. Do not guess.
@@ -77,7 +73,7 @@ $ReviewedJournal = $Journal + '.reviewed-' + (Get-Date -Format yyyyMMdd-HHmmss)
 Move-Item -LiteralPath $Journal -Destination $ReviewedJournal -ErrorAction Stop
 ```
 
-Keep the reviewed journal with the incident artifacts. Do not rename it until the locks are verified stale and the recovery choice is made.
+Keep the reviewed journal with the incident artifacts. Do not rename it until both lock statuses are `active: false`, all database users are confirmed stopped, and the recovery choice is made.
 
 ## 4. Recover when the live database path is absent
 
@@ -133,17 +129,17 @@ The recovery.state field is deliberately conservative:
 
 | State | Meaning of observed paths | Required posture |
 | --- | --- | --- |
-| no-pending-restore | No journal or lock at the expected paths | Normal operation may continue; this is not an integrity check |
-| no-pending-restore-lock-present | No journal, but a runtime or maintenance lock remains | Verify all database users are stopped; do not infer stale ownership |
+| no-pending-restore | No journal and no active or unrecognized lock | Normal operation may continue; persistent idle SQLite sidecars may still exist |
+| no-pending-restore-lock-present | No journal, but a runtime or maintenance lock is active or unrecognized | Verify all database users are stopped; preserve unrecognized artifacts |
 | manual-review-invalid-journal | Journal malformed, invalid, or unreadable | Preserve all artifacts; no retry |
-| blocked-lock-present | A valid journal and at least one lock path exists | Verify all database users are stopped; do not infer stale ownership |
+| blocked-lock-present | A valid journal and at least one lock is active or unrecognized | Verify all database users are stopped; do not infer stale ownership |
 | live-missing-rollback-present | Live path absent, rollback path present | Validate a separate copy; operator must choose explicitly |
 | live-and-rollback-present-ambiguous | Both paths present | Preserve and compare copies; do not infer which is authoritative |
 | live-and-rollback-missing | Neither live nor rollback path exists | Stop; investigate all remaining artifacts |
 | live-present-temporary-present-no-rollback | Live and staged temporary paths present, rollback absent | Preserve; do not infer the live file is unchanged |
 | live-present-no-rollback | Live path present, rollback absent, temporary absent | Preserve and verify a copy; no automatic cleanup |
 
-Every state returns automaticAction: none. A temporary file can be incomplete, a live file can be newly installed, and a lock can be stale or active; this model does not distinguish those cases. It maps observed presence to a safe operator posture only.
+Every state returns automaticAction: none. A temporary file can be incomplete and a live file can be newly installed. Lock state is probed independently: active reservations and unrecognized legacy artifacts block the state, while idle persistent SQLite sidecars do not. It maps observed artifacts to a safe operator posture only.
 
 ## Crash-state simulation coverage
 
@@ -157,20 +153,20 @@ The automated child-process crash suite currently terminates a Restore worker at
 | Immediately after moving the original | Valid journal, staged temporary, and rollback; live path absent | The original database remains available at the recorded rollback path |
 | Immediately after installing the new database | Valid journal, live installed database, and rollback | Both database copies remain available and inspection does not choose between them |
 | After temporary-file cleanup, before journal cleanup | Valid journal, live installed database, and rollback; no temporary | The new live database and original rollback remain; the journal still records the unfinished operation |
-| Immediately after journal cleanup, before lock release | No journal; live installed database and rollback; both locks remain | Inspection reports the residual lock instead of treating the operation as an entirely clear state |
+| Immediately after journal cleanup, before process exit | No journal; live installed database and rollback; persistent SQLite sidecars remain but their reservations are released by process termination | Inspection reports no active lock; the database and rollback artifacts still require the documented operator review |
 
-The first three boundaries are exercised by the `restore crash simulation classifies journal publication and staging boundaries` test. The move/install boundaries are exercised by the adjacent crash-gap and post-install tests. These are child-process forced exits at instrumented filesystem-operation boundaries; they are not power-loss tests, kernel-crash tests, storage-controller tests, or proof of directory-entry durability. The lock files left by forced exits are expected, and the state model conservatively reports `blocked-lock-present` until an operator verifies ownership and stopped database users. The final temporary-file and journal-cleanup windows are exercised by the restore cleanup crash-boundary test. The tests do not enable automatic recovery.
+The first three boundaries are exercised by the `restore crash simulation classifies journal publication and staging boundaries` test. The move/install boundaries are exercised by the adjacent crash-gap and post-install tests. These are child-process forced exits at instrumented filesystem-operation boundaries; they are not power-loss tests, kernel-crash tests, storage-controller tests, or proof of directory-entry durability. The persistent SQLite sidecars remain after forced exits, but their reservations are released by the operating system; the state model does not treat idle sidecar existence as an active lock. The final temporary-file and journal-cleanup windows are exercised by the restore cleanup crash-boundary test. The tests do not enable automatic recovery.
 
 ## Safety properties and limitations
 
-- The application deliberately refuses to guess whether a lock is stale or which rollback file is authoritative. A pending Restore journal also blocks another Restore.
+- The application probes SQLite reservations rather than inferring ownership from persistent sidecar existence; unrecognized legacy lock artifacts are preserved for operator review. It also refuses to guess which rollback file is authoritative. A pending Restore journal also blocks another Restore.
 - Recovery requires a verified stopped server and explicit operator selection of the rollback file.
 - The normal `db:restore` path revalidates the selected snapshot and uses the existing runtime and maintenance locks. The journal is an intent/evidence record for process-crash recovery, not an automatic recovery engine. Backup explicitly sets SQLite PRAGMA synchronous = FULL, validates the generated snapshot, and fsyncs the snapshot file before publishing its hard link. Restore validates the staged copy and fsyncs that file before moving the live database. An fsync failure aborts publication or installation; fault-injection tests verify that the previous live database is retained and no failed backup is published. These file-content flushes do not make parent-directory changes durable: hard-link publication, rename, and unlink directory entries can still have filesystem/platform-specific power-loss behavior. In particular, this implementation does not claim directory-entry durability on Windows or universal power-loss safety.
-- This runbook is a manual recovery path, not automatic crash recovery. Automatic recovery remains deferred until journal-state interpretation, stale-owner verification, and the crash-state protocol are designed and tested across Windows filesystem semantics.
+- This runbook is a manual recovery path, not automatic crash recovery. Automatic recovery remains deferred until journal-state interpretation and the crash-state protocol are designed and tested across Windows filesystem semantics.
 - Keep the original rollback file until a fresh backup has been created and verified.
 ## Directory-entry durability and platform boundary
 
-The durability helper flushes a parent directory after lock creation/removal, Restore Journal publication/removal, Backup hard-link publication, and Restore rename/link/cleanup operations on POSIX platforms where Node.js can open and fsync a directory descriptor. A directory-fsync error is propagated; it is not silently treated as a successful durable transition. If Backup has already linked its destination when that flush fails, the error reports publishedArtifact; preserve and inspect that artifact rather than assuming publication was rolled back. Restore preserves its journal and rollback evidence when installation has been published but the directory flush fails.
+The durability helper flushes a parent directory after Restore Journal publication/removal, Backup hard-link publication, and Restore rename/link/cleanup operations on POSIX platforms where Node.js can open and fsync a directory descriptor. A directory-fsync error is propagated; it is not silently treated as a successful durable transition. If Backup has already linked its destination when that flush fails, the error reports publishedArtifact; preserve and inspect that artifact rather than assuming publication was rolled back. Restore preserves its journal and rollback evidence when installation has been published but the directory flush fails.
 
 On Windows, the helper explicitly reports directory flushing as unsupported because portable Node.js filesystem APIs do not provide a supported directory-handle FlushFileBuffers operation. The application continues to flush file contents and performs the same atomic filesystem operations, but does not claim durable directory-entry ordering on Windows. The Windows CI tests exercise the explicit unsupported branch and simulated POSIX helper behavior. The Linux CI job runs the real directory-fsync integration test on the hosted Ubuntu filesystem for each supported Node.js CI version; this is an integration check on that runner filesystem, not coverage of every POSIX filesystem or storage stack.
 

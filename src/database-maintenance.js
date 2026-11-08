@@ -1,4 +1,4 @@
-import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock } from './database-runtime-lock.js';
+import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
 import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
@@ -27,7 +27,7 @@ export function inspectDatabaseRestore(databasePath) {
   const journalPath = destination + '.restore-journal.json';
   const report = {
     operation: 'restore-inspect', readOnly: true, database: inspectPath(destination),
-    locks: { runtime: inspectPath(destination + '.runtime.lock'), maintenance: inspectPath(destination + '.maintenance.lock') },
+    locks: inspectDatabaseRuntimeLocks(destination),
     journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: [] }
   };
   if (!report.journal.exists) {

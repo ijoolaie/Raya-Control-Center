@@ -5,8 +5,8 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   const rollback = observed(artifacts.rollback?.exists);
   const temporary = observed(artifacts.temporary?.exists);
   const source = observed(artifacts.source?.exists);
-  const runtimeLock = observed(locks.runtime?.exists);
-  const maintenanceLock = observed(locks.maintenance?.exists);
+  const runtimeLock = observed(locks.runtime?.active) ?? observed(locks.runtime?.exists);
+  const maintenanceLock = observed(locks.maintenance?.active) ?? observed(locks.maintenance?.exists);
   const observations = { live, rollback, temporary, source, runtimeLock, maintenanceLock };
 
   if (journalStatus === 'absent') {

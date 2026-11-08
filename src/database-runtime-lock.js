@@ -1,6 +1,6 @@
-import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
-import { syncDirectory } from './file-system-durability.js';
 
 function assertNoSymlinkParentComponents(filename) {
   const absolute = resolve(filename);
@@ -31,62 +31,115 @@ export function databaseRuntimeLockPath(databasePath) {
   assertNoSymlinkParentComponents(parentDirectory);
   const parent = realpathSync(parentDirectory);
   const database = join(parent, basename(absolute));
-  if (existsSync(database) && lstatSync(database).isSymbolicLink()) {
-    throw new Error('Symbolic-link database paths are not supported for runtime locking.');
+  try {
+    if (lstatSync(database).isSymbolicLink()) {
+      throw new Error('Symbolic-link database paths are not supported for runtime locking.');
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
   }
   return database + '.runtime.lock';
 }
 
-function acquireDatabaseFileLock(databasePath, suffix, label) {
-  const basePath = databaseRuntimeLockPath(databasePath);
-  const lockPath = basePath ? basePath.slice(0, -'.runtime.lock'.length) + suffix : null;
-  if (!lockPath) return () => {};
-  let descriptor;
-  let lockIdentity;
-  const owner = { pid: process.pid, startedAt: new Date().toISOString() };
+function lockPathFor(databasePath, suffix) {
+  const runtimePath = databaseRuntimeLockPath(databasePath);
+  return runtimePath ? runtimePath.slice(0, -'.runtime.lock'.length) + suffix : null;
+}
+
+function isBusyError(error) {
+  return error?.code === 'SQLITE_BUSY' || /database is locked|SQLITE_BUSY/i.test(error?.message || '');
+}
+
+function heldError(label, lockPath) {
+  return new Error('An existing ' + label + ' lock prevents access. Verify that its owner has stopped before taking operator action: ' + lockPath + '.');
+}
+
+function openLockDatabase(lockPath) {
   try {
-    descriptor = openSync(lockPath, 'wx', 0o600);
-    lockIdentity = fstatSync(descriptor);
-    writeFileSync(descriptor, JSON.stringify(owner) + '\n', 'utf8');
-    fsyncSync(descriptor);
-    syncDirectory(dirname(lockPath));
+    const stat = lstatSync(lockPath);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size !== 0) throw new Error('Lock path must be a zero-byte regular non-symbolic-link file: ' + lockPath);
   } catch (error) {
-    if (descriptor !== undefined) {
-      try { closeSync(descriptor); } catch {}
-      // Once the lock path has been created, a failed write/fsync/directory flush
-      // leaves its publication state uncertain. Preserve it for operator review;
-      // deleting by pathname here could remove a replacement lock owned by another process.
-      error.lockPath = lockPath;
-    }
-    if (error.code === 'EEXIST') {
-      let detail = 'An existing ' + label + ' lock prevents access.';
-      try {
-        const current = JSON.parse(readFileSync(lockPath, 'utf8'));
-        detail = (label === 'runtime' ? 'Database is already locked by process ' : label + ' lock is already held by process ') + String(current.pid) + ' (started ' + String(current.startedAt) + ').';
-      } catch {}
-      throw new Error(detail + ' If this is a stale lock, verify the process is stopped before removing ' + lockPath + '.');
-    }
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const database = new DatabaseSync(lockPath);
+  try {
+    // The lock transaction performs no data writes. OFF avoids leaving a hot
+    // rollback journal if the owning process is terminated without cleanup.
+    database.exec('PRAGMA journal_mode=OFF');
+    // Reject legacy JSON lock files and other non-SQLite artifacts; preserve them.
+    database.exec('PRAGMA schema_version');
+    return database;
+  } catch (error) {
+    try { database.close(); } catch {}
     throw error;
   }
+}
+function acquireDatabaseFileLock(databasePath, suffix, label) {
+  const lockPath = lockPathFor(databasePath, suffix);
+  if (!lockPath) return () => {};
+
+  // The persistent zero-byte SQLite file is only a rendezvous point. The open
+  // BEGIN IMMEDIATE transaction, not a pathname record, represents ownership.
+  // Never unlink this file: SQLite releases the reservation on close or crash.
+  let database;
+  try {
+    database = openLockDatabase(lockPath);
+    database.exec('BEGIN IMMEDIATE');
+  } catch (error) {
+    try { database?.close(); } catch {}
+    if (isBusyError(error)) throw heldError(label, lockPath);
+    error.lockPath = lockPath;
+    throw error;
+  }
+
   let released = false;
   return () => {
     if (released) return;
     released = true;
     try {
-      const current = JSON.parse(readFileSync(lockPath, 'utf8'));
-      if (current.pid === owner.pid && current.startedAt === owner.startedAt) {
-        const currentIdentity = lstatSync(lockPath);
-        if (!currentIdentity.isFile() || currentIdentity.dev !== lockIdentity.dev || currentIdentity.ino !== lockIdentity.ino) return;
-        unlinkSync(lockPath);
-        syncDirectory(dirname(lockPath));
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      database.exec('ROLLBACK');
     } finally {
-      try { closeSync(descriptor); } catch {}
+      database.close();
     }
   };
 }
 
-export function acquireDatabaseRuntimeLock(databasePath) { return acquireDatabaseFileLock(databasePath, '.runtime.lock', 'runtime'); }
-export function acquireDatabaseMaintenanceLock(databasePath) { return acquireDatabaseFileLock(databasePath, '.maintenance.lock', 'maintenance'); }
+export function inspectDatabaseFileLock(lockPath) {
+  let stat;
+  try { stat = lstatSync(lockPath); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { path: lockPath, exists: false, kind: null, active: false, error: null };
+    return { path: lockPath, exists: null, kind: null, active: null, error: error.code || 'inspection-failed' };
+  }
+  const kind = stat.isSymbolicLink() ? 'symbolic-link' : stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other';
+  if (!stat.isFile()) return { path: lockPath, exists: true, kind, active: null, error: 'not-a-regular-file' };
+
+  let database;
+  try {
+    database = openLockDatabase(lockPath);
+    database.exec('BEGIN IMMEDIATE');
+    database.exec('ROLLBACK');
+    return { path: lockPath, exists: true, kind: 'sqlite-lock', active: false, error: null };
+  } catch (error) {
+    if (isBusyError(error)) return { path: lockPath, exists: true, kind: 'sqlite-lock', active: true, error: null };
+    return { path: lockPath, exists: true, kind: 'unrecognized-lock-artifact', active: null, error: error.code || error.name || 'inspection-failed' };
+  } finally {
+    try { database?.close(); } catch {}
+  }
+}
+
+export function inspectDatabaseRuntimeLocks(databasePath) {
+  const database = resolve(databasePath);
+  return {
+    runtime: inspectDatabaseFileLock(database + '.runtime.lock'),
+    maintenance: inspectDatabaseFileLock(database + '.maintenance.lock')
+  };
+}
+
+export function acquireDatabaseRuntimeLock(databasePath) {
+  return acquireDatabaseFileLock(databasePath, '.runtime.lock', 'runtime');
+}
+
+export function acquireDatabaseMaintenanceLock(databasePath) {
+  return acquireDatabaseFileLock(databasePath, '.maintenance.lock', 'maintenance');
+}

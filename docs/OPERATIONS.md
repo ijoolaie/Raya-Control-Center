@@ -67,7 +67,7 @@ npm run operator:recover -- "D:/Data/raya-control-center.sqlite"
 
 Recovery uses the same exclusive runtime lock as server startup. It refuses to run while a server using that database is active, rotates the stored credential hash, and prints the new token once. Set RAYA_CC_OPERATOR_TOKEN to the recovered value before restarting. It does not modify task, participant, or event data.
 
-The lock file is next to the database with suffix .runtime.lock. A forced process termination can leave a stale lock behind. Never delete it merely to bypass an error: inspect its PID, verify that the process is no longer running and that no other Control Center instance uses the database, then remove only that exact lock file and retry recovery. Do not remove the lock while the server is running.
+The runtime lock is a persistent SQLite sidecar next to the database with suffix `.runtime.lock`. Ownership is represented by an open `BEGIN IMMEDIATE` transaction, not by the sidecar file existing. The sidecar normally remains after shutdown; this is expected and it must not be deleted as routine cleanup. `npm run db:restore:inspect` reports `locks.runtime.active`: `true` means a process currently holds the lock, `false` means the sidecar is idle, and `null` means the artifact could not be validated (for example, a legacy JSON lock). Process termination releases the SQLite reservation automatically. Preserve and manually review any unrecognized legacy artifact before moving it aside.
 
 ## Windows data-directory permissions
 
@@ -132,7 +132,7 @@ npm run db:backup
 npm run db:backup -- D:/Backups/raya-control-center.sqlite
 ```
 
-The default destination is a timestamped file under `.backups`. The backup and restore commands remove only stale regular temporary files matching their exact destination-specific UUID naming pattern after acquiring the maintenance lock. They do not follow or delete symbolic links, directories, or .pre-restore-* rollback files. If a process is forcibly terminated, first verify and resolve its stale .maintenance.lock using the documented lock procedure; then rerun maintenance to clean abandoned temporary files. Existing destination files are never overwritten. Set `RAYA_CC_DATABASE` if the live database is not at the default path.
+The default destination is a timestamped file under `.backups`. The backup and restore commands remove only stale regular temporary files matching their exact destination-specific UUID naming pattern after acquiring the maintenance lock. They do not follow or delete symbolic links, directories, or .pre-restore-* rollback files. If a process is forcibly terminated, SQLite releases its maintenance reservation automatically. Leave the persistent `.maintenance.lock` sidecar in place; rerun maintenance to clean abandoned temporary files after verifying `active: false` in the restore-inspection report. Existing destination files are never overwritten. Set `RAYA_CC_DATABASE` if the live database is not at the default path.
 
 Restore is deliberately offline. It acquires the same per-database runtime lock used by server startup, so an active Control Center is rejected before the database can be replaced. It also acquires the maintenance lock to exclude a simultaneous backup:
 

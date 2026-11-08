@@ -11,7 +11,7 @@ import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
-import { acquireDatabaseMaintenanceLock } from '../src/database-runtime-lock.js';
+import { acquireDatabaseMaintenanceLock, inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
 import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
 
 
@@ -290,7 +290,9 @@ test('restore inspect reports an unpublished fsynced journal temp after process 
     assert.equal(report.recovery.automaticAction, 'none');
     assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true, 'inspection must preserve the unpublished journal');
     assert.equal(existsSync(database + '.runtime.lock'), true);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
     assert.equal(existsSync(database + '.maintenance.lock'), true);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -327,7 +329,7 @@ test('restore crash simulation classifies journal publication and staging bounda
 
       const report = inspectDatabaseRestore(database);
       assert.equal(report.journal.status, 'valid');
-      assert.equal(report.recovery.state, 'blocked-lock-present');
+      assert.equal(report.recovery.state, scenario.temporary ? 'live-present-temporary-present-no-rollback' : 'live-present-no-rollback');
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, scenario.live);
       assert.equal(report.recovery.observations.temporary, scenario.temporary);
@@ -373,8 +375,6 @@ test('restore can recover the original database after a crash between move and i
     db = null;
 
     // The child is confirmed exited; remove only its exact stale lock files before recovery.
-    unlinkSync(database + '.maintenance.lock');
-    unlinkSync(database + '.runtime.lock');
     assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
     assert.equal(existsSync(journal.temporary), true, 'a blocked retry must preserve the staged snapshot');
     renameSync(rollback, database);
@@ -424,8 +424,6 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     db.close();
     db = null;
 
-    unlinkSync(database + '.maintenance.lock');
-    unlinkSync(database + '.runtime.lock');
     assert.throws(() => restoreDatabaseBackup(backup, database), /interrupted Restore journal/);
     assert.equal(existsSync(journal.temporary), true, 'a blocked retry must preserve the staged snapshot');
     for (const name of readdirSync(directory)) {
@@ -438,11 +436,11 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
-test('restore cleanup crash boundaries retain artifacts and classify the post-journal lock', () => {
+test('restore cleanup crash boundaries retain artifacts and classify released SQLite locks', () => {
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   const scenarios = [
-    { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'blocked-lock-present' },
-    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-pending-restore-lock-present' }
+    { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'live-and-rollback-present-ambiguous' },
+    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-pending-restore' }
   ];
   for (const scenario of scenarios) {
     const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-cleanup-crash-'));
@@ -466,7 +464,9 @@ test('restore cleanup crash boundaries retain artifacts and classify the post-jo
       assert.ok(rollbackName, 'the original database remains at the rollback path');
       const rollback = join(directory, rollbackName);
       assert.equal(existsSync(database + '.runtime.lock'), true);
+      assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
       assert.equal(existsSync(database + '.maintenance.lock'), true);
+      assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
       if (scenario.journal) {
         const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
         assert.equal(existsSync(journal.temporary), scenario.temporary);
@@ -477,8 +477,8 @@ test('restore cleanup crash boundaries retain artifacts and classify the post-jo
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, true);
       assert.equal(report.recovery.observations.rollback, scenario.journal ? true : null);
-      assert.equal(report.recovery.observations.runtimeLock, true);
-      assert.equal(report.recovery.observations.maintenanceLock, true);
+      assert.equal(report.recovery.observations.runtimeLock, false);
+      assert.equal(report.recovery.observations.maintenanceLock, false);
       assert.equal(existsSync(journalPath), scenario.journal, 'inspection must not mutate journal state');
       db = openDatabase(database);
       assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
@@ -621,6 +621,7 @@ test('backup is allowed during runtime; restore is locked out until graceful shu
   try {
     runtime = await startControlCenter({ databasePath: database, port: 0, operatorToken });
     assert.equal(existsSync(database + '.runtime.lock'), true);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, true);
 
     writer = openDatabase(database);
     const task = new ControlCenter(writer).createTask({ type: 'maintenance.active.snapshot', payload: { from: 'runtime' } });
@@ -629,13 +630,14 @@ test('backup is allowed during runtime; restore is locked out until graceful shu
 
     const result = createDatabaseBackup(database, backup);
     assert.equal(result.schemaVersion, 5);
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
-    assert.throws(() => restoreDatabaseBackup(backup, database), /Database is already locked by process/);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
+    assert.throws(() => restoreDatabaseBackup(backup, database), /runtime lock prevents access/);
     assert.equal(existsSync(database + '.runtime.lock'), true);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, true);
 
     await runtime.shutdown();
     runtime = null;
-    assert.equal(existsSync(database + '.runtime.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
 
     const restored = restoreDatabaseBackup(backup, database);
     assert.equal(restored.schemaVersion, 5);
@@ -643,8 +645,8 @@ test('backup is allowed during runtime; restore is locked out until graceful shu
     assert.deepEqual(new ControlCenter(checkDb).getTask(task.id).payload, { from: 'runtime' });
     checkDb.close();
     checkDb = null;
-    assert.equal(existsSync(database + '.runtime.lock'), false);
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
   } finally {
     if (writer) writer.close();
     if (checkDb) checkDb.close();
@@ -667,9 +669,9 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
     createDatabaseBackup(database, backup);
 
     release = acquireDatabaseMaintenanceLock(database);
-    assert.throws(() => createDatabaseBackup(database, join(directory, 'second-backup.sqlite')), /maintenance lock is already held/);
-    assert.throws(() => restoreDatabaseBackup(backup, database), /maintenance lock is already held/);
-    assert.equal(existsSync(database + '.runtime.lock'), false);
+    assert.throws(() => createDatabaseBackup(database, join(directory, 'second-backup.sqlite')), /maintenance lock prevents access/);
+    assert.throws(() => restoreDatabaseBackup(backup, database), /maintenance lock prevents access/);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
   } finally {
     release?.();
     if (db) db.close();
@@ -677,123 +679,104 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
   }
 });
 
-test('lock release preserves a lock file whose recorded owner changed', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-owner-change-'));
+test('SQLite runtime lock is exclusive across processes and releases automatically after process death', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-sqlite-lock-process-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  let child;
+  let release;
+  try {
+    const worker = new URL('../test-support/runtime-lock-crash-worker.js', import.meta.url);
+    child = spawn(process.execPath, [fileURLToPath(worker), 'hold', database], { stdio: ['ignore', 'pipe', 'pipe'] });
+    await new Promise((resolve, reject) => {
+      let output = '';
+      child.stdout.on('data', chunk => {
+        output += chunk.toString();
+        if (output.includes('LOCKED')) resolve();
+      });
+      child.once('error', reject);
+      child.once('exit', code => { if (code !== null) reject(new Error('lock holder exited before acquiring lock: ' + code)); });
+    });
+
+    assert.equal(inspectDatabaseFileLock(lockPath).active, true);
+    assert.throws(() => acquireDatabaseMaintenanceLock(database), /maintenance lock prevents access/);
+
+    child.kill('SIGKILL');
+    await new Promise(resolve => child.once('exit', resolve));
+    child = null;
+    assert.equal(inspectDatabaseFileLock(lockPath).active, false, 'SQLite must release the OS lock after process death');
+    release = acquireDatabaseMaintenanceLock(database);
+    assert.equal(inspectDatabaseFileLock(lockPath).active, true);
+  } finally {
+    release?.();
+    if (child) { child.kill('SIGKILL'); await new Promise(resolve => child.once('exit', resolve)); }
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('restore inspection probes an idle SQLite sidecar without changing its files', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-inspect-readonly-'));
   const database = join(directory, 'live.sqlite');
   const lockPath = database + '.maintenance.lock';
   let release;
   try {
     release = acquireDatabaseMaintenanceLock(database);
-    const replacement = { pid: process.pid + 1, startedAt: '2099-01-01T00:00:00.000Z' };
-    writeFileSync(lockPath, JSON.stringify(replacement) + '\n', 'utf8');
     release();
     release = null;
-    assert.equal(existsSync(lockPath), true,
-      'release must not remove a lock record that no longer belongs to this acquisition');
-    assert.deepEqual(JSON.parse(readFileSync(lockPath, 'utf8')), replacement);
+    const beforeNames = readdirSync(directory).sort();
+    const beforeBytes = readFileSync(lockPath);
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.locks.maintenance.exists, true);
+    assert.equal(readFileSync(lockPath).length, 0, 'lock sidecar remains an empty rendezvous file');
+    assert.equal(report.locks.maintenance.active, false);
+    assert.equal(report.recovery.observations.maintenanceLock, false);
+    assert.deepEqual(readdirSync(directory).sort(), beforeNames);
+    assert.deepEqual(readFileSync(lockPath), beforeBytes);
+    assert.equal(existsSync(lockPath + '-journal'), false);
   } finally {
     release?.();
-    if (existsSync(lockPath)) unlinkSync(lockPath);
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
-test('lock release preserves a replacement path published after owner read', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-release-race-'));
+test('legacy JSON lock artifacts are rejected and preserved for operator review', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-legacy-lock-'));
+  const database = join(directory, 'live.sqlite');
+  const lockPath = database + '.maintenance.lock';
+  const legacy = { pid: process.pid, startedAt: new Date().toISOString() };
+  try {
+    writeFileSync(lockPath, JSON.stringify(legacy) + String.fromCharCode(10), 'utf8');
+    assert.throws(() => acquireDatabaseMaintenanceLock(database), error => {
+      assert.equal(error.lockPath, lockPath);
+      return /not a database|file is not a database|malformed|zero-byte regular/i.test(error.message);
+    });
+    assert.deepEqual(JSON.parse(readFileSync(lockPath, 'utf8')), legacy, 'legacy lock evidence must not be overwritten');
+    const status = inspectDatabaseFileLock(lockPath);
+    assert.equal(status.exists, true);
+    assert.equal(status.active, null);
+    assert.equal(status.kind, 'unrecognized-lock-artifact');
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('runtime lock crash releases the SQLite reservation without deleting its persistent artifact', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-crash-'));
   const database = join(directory, 'live.sqlite');
   const lockPath = database + '.maintenance.lock';
   try {
-    const worker = new URL('../test-support/runtime-lock-release-race-worker.js', import.meta.url);
-    const result = spawnSync(process.execPath, [fileURLToPath(worker), database], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    const outcome = JSON.parse(result.stdout);
-    assert.equal(outcome.replaced, true);
-    assert.equal(outcome.exists, true);
-    assert.deepEqual(outcome.remaining, { pid: result.pid + 1, startedAt: '2099-01-01T00:00:00.000Z' });
-    assert.equal(existsSync(lockPath), true, 'release must not unlink a replacement lock inode');
-  } finally {
-    if (existsSync(lockPath)) unlinkSync(lockPath);
-    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-});
-
-test('failed lock fsync preserves the uncertain lock artifact for operator review', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-fsync-failure-'));
-  const database = join(directory, 'live.sqlite');
-  const lockPath = database + '.maintenance.lock';
-  try {
-    const worker = new URL('../test-support/runtime-lock-fault-worker.js', import.meta.url);
-    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'file-fsync-failure', database], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    const outcome = JSON.parse(result.stdout);
-    assert.equal(outcome.ok, false);
-    assert.equal(outcome.code, 'EIO');
-    assert.match(outcome.message, /injected-lock-file-fsync-failure/);
-    assert.equal(outcome.lockPath, lockPath);
-    assert.equal(existsSync(lockPath), true, 'uncertain lock publication must be preserved, not silently removed');
-    const owner = JSON.parse(readFileSync(lockPath, 'utf8'));
-    assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
-    assert.equal(typeof owner.startedAt, 'string');
-  } finally {
-    if (existsSync(lockPath)) unlinkSync(lockPath);
-    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-});
-
-test('lock release reports a directory-fsync failure after unlink without recreating the lock', { skip: process.platform === 'win32' }, () => {
-  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-release-fsync-failure-'));
-  const database = join(directory, 'live.sqlite');
-  const lockPath = database + '.maintenance.lock';
-  try {
-    const worker = new URL('../test-support/runtime-lock-fault-worker.js', import.meta.url);
-    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'release-directory-fsync-failure', database], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    const outcome = JSON.parse(result.stdout);
-    assert.equal(outcome.ok, false);
-    assert.equal(outcome.code, 'EIO');
-    assert.match(outcome.message, /injected-lock-release-directory-fsync-failure/);
-    assert.equal(outcome.lockStillExists, false);
-    assert.equal(existsSync(lockPath), false, 'release must not recreate a lock after unlink even when directory fsync fails');
-  } finally {
-    if (existsSync(lockPath)) unlinkSync(lockPath);
-    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-});
-
-test('runtime lock crash windows preserve exact artifacts across process termination', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-crash-windows-'));
-  const worker = new URL('../test-support/runtime-lock-crash-worker.js', import.meta.url);
-  const cases = [
-    { mode: 'after-open', expected: '' },
-    { mode: 'after-partial-write', expected: '{\"pid\":' },
-    { mode: 'after-file-fsync', expected: 'valid-owner' },
-    { mode: 'after-unlink', expected: null }
-  ];
-  try {
-    for (const scenario of cases) {
-      const database = join(directory, scenario.mode + '.sqlite');
-      const lockPath = database + '.maintenance.lock';
-      const result = spawnSync(process.execPath, [fileURLToPath(worker), scenario.mode, database], { encoding: 'utf8', timeout: 15000 });
-      assert.notEqual(result.status, 0, scenario.mode + ' must terminate before normal completion');
-      assert.notEqual(result.stdout, 'unexpected-normal-exit');
-      if (scenario.expected === null) {
-        assert.equal(existsSync(lockPath), false, 'unlink must remain visible after process termination');
-      } else {
-        assert.equal(existsSync(lockPath), true, 'lock artifact must remain after ' + scenario.mode);
-        const contents = readFileSync(lockPath, 'utf8');
-        if (scenario.expected === 'valid-owner') {
-          const owner = JSON.parse(contents);
-          assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
-          assert.equal(typeof owner.startedAt, 'string');
-        } else {
-          assert.equal(contents, scenario.expected);
-        }
-      }
-    }
+    const worker = new URL('../test-support/runtime-lock-crash-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash', database], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0, 'worker must be killed while holding its transaction');
+    assert.equal(existsSync(lockPath), true, 'the stable SQLite lock database remains on disk');
+    assert.equal(inspectDatabaseFileLock(lockPath).active, false, 'the dead process no longer owns the SQLite reservation');
+    assert.equal(existsSync(lockPath + '-journal'), false, 'journal_mode=OFF prevents a hot rollback journal after process death');
+    const release = acquireDatabaseMaintenanceLock(database);
+    release();
+    assert.equal(inspectDatabaseFileLock(lockPath).active, false);
   } finally {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
-
 test('backup destination lock serializes backups across processes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cross-process-'));
   const firstDatabase = join(directory, 'first.sqlite');
@@ -816,7 +799,7 @@ test('backup destination lock serializes backups across processes', async () => 
     assert.match(String(ready), /ready/);
     assert.equal(existsSync(marker), true);
 
-    assert.throws(() => createDatabaseBackup(firstDatabase, destination), /maintenance lock is already held/);
+    assert.throws(() => createDatabaseBackup(firstDatabase, destination), /maintenance lock prevents access/);
     assert.equal(existsSync(marker), true, 'a competing backup must not clean another process active temp file');
     assert.equal(existsSync(destination), false);
 
@@ -824,7 +807,7 @@ test('backup destination lock serializes backups across processes', async () => 
     const [code] = await once(child, 'exit');
     assert.equal(code, 0, output);
     child = null;
-    assert.equal(existsSync(destination + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(destination + '.maintenance.lock').active, false);
   } finally {
     if (child && child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited.catch(() => {}); }
     if (first) first.close();
@@ -832,7 +815,7 @@ test('backup destination lock serializes backups across processes', async () => 
   }
 });
 
-test('backup crash leaves a stale lock and temp that require verified recovery', () => {
+test('backup crash releases its SQLite reservation and leaves the orphaned temp for normal cleanup', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-crash-recovery-'));
   const database = join(directory, 'source.sqlite');
   const destination = join(directory, 'backup.sqlite');
@@ -846,23 +829,21 @@ test('backup crash leaves a stale lock and temp that require verified recovery',
 
     const worker = new URL('../test-support/backup-crash-worker.js', import.meta.url);
     const result = spawnSync(process.execPath, [fileURLToPath(worker), destination, marker], { encoding: 'utf8' });
-    assert.equal(result.status, 77, result.stderr);
-    assert.equal(existsSync(destination + '.maintenance.lock'), true);
+    assert.notEqual(result.status, 0, result.stderr);
+    assert.equal(existsSync(destination + '.maintenance.lock'), true, 'persistent lock database remains');
+    assert.equal(inspectDatabaseFileLock(destination + '.maintenance.lock').active, false, 'crashed owner no longer holds SQLite reservation');
+    assert.equal(existsSync(destination + '.maintenance.lock-journal'), false, 'lock crash must not leave a rollback journal');
     assert.equal(existsSync(marker), true);
-    assert.throws(() => createDatabaseBackup(database, destination), /maintenance lock is already held/);
 
-    // The child has exited; only now remove its stale lock and let cleanup remove the orphaned temp.
-    unlinkSync(destination + '.maintenance.lock');
     const backup = createDatabaseBackup(database, destination);
     assert.equal(backup.schemaVersion, 5);
     assert.equal(existsSync(destination), true);
-    assert.equal(existsSync(marker), false);
+    assert.equal(existsSync(marker), false, 'normal maintenance cleanup may remove the orphaned temporary after acquiring the lock');
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-});
-test('backup destination lock serializes backups from different source databases', () => {
+});test('backup destination lock serializes backups from different source databases', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-destination-lock-'));
   const firstDatabase = join(directory, 'first.sqlite');
   const secondDatabase = join(directory, 'second.sqlite');
@@ -884,7 +865,7 @@ test('backup destination lock serializes backups from different source databases
     release = acquireDatabaseMaintenanceLock(destination);
     assert.throws(
       () => createDatabaseBackup(firstDatabase, destination),
-      /maintenance lock is already held/
+      /maintenance lock prevents access/
     );
     assert.equal(existsSync(destination), false);
     assert.equal(
@@ -918,8 +899,8 @@ test('backup does not overwrite a destination created after preflight validation
     assert.equal(existsSync(backup), true);
     assert.equal(readFileSync(backup, 'utf8'), 'concurrent destination', 'atomic hard-link publication must not replace the raced-in file');
     assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
-    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(backup + '.maintenance.lock').active, false);
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -1062,8 +1043,8 @@ test('backup attaches a cleanup warning when VACUUM fails and its partial temp c
     assert.equal(existsSync(backup), false);
     assert.equal(existsSync(warning.path), true);
     assert.equal(readFileSync(warning.path, 'utf8'), 'partial snapshot');
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
-    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(backup + '.maintenance.lock').active, false);
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -1115,8 +1096,8 @@ test('backup refuses publication when the completed snapshot cannot be fsynced',
     assert.match(outcome.message, /injected-backup-fsync-failure/);
     assert.equal(existsSync(backup), false, 'an unflushed snapshot must not be published');
     assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.backup.sqlite.') && name.endsWith('.tmp')), []);
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
-    assert.equal(existsSync(backup + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(backup + '.maintenance.lock').active, false);
   } finally {
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -1150,8 +1131,8 @@ test('restore keeps the original live database when the staged copy cannot be fs
     assert.equal(existsSync(database), true);
     assert.equal(existsSync(database + '.restore-journal.json'), false);
     assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.live.sqlite.') && name.endsWith('.restore')), []);
-    assert.equal(existsSync(database + '.runtime.lock'), false);
-    assert.equal(existsSync(database + '.maintenance.lock'), false);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
 
     db = openDatabase(database);
     assert.equal(db.prepare('SELECT type FROM tasks').get().type, 'restore.original');
@@ -1195,8 +1176,8 @@ test('restore handles directory fsync failures at journal, rollback, install, an
       assert.equal(existsSync(database + '.restore-journal.json'), scenario.journal, 'journal state at boundary ' + scenario.failureAt);
       const rollbackFiles = readdirSync(directory).filter(name => name.startsWith('live.sqlite.pre-restore-'));
       assert.equal(rollbackFiles.length, scenario.rollback ? 1 : 0, 'rollback evidence at boundary ' + scenario.failureAt);
-      assert.equal(existsSync(database + '.runtime.lock'), false);
-      assert.equal(existsSync(database + '.maintenance.lock'), false);
+      assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
+      assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
 
       db = openDatabase(database);
       assert.equal(db.prepare('SELECT type FROM tasks').get().type, scenario.task);

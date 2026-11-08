@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase } from '../src/db.js';
 import { startControlCenter } from '../src/server-runtime.js';
+import { inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
 
 test('shutdown releases SQLite and runtime lock when the listener was already stopped', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-shutdown-listener-stopped-'));
@@ -14,7 +15,7 @@ test('shutdown releases SQLite and runtime lock when the listener was already st
   try {
     runtime = await startControlCenter({ databasePath, port: 0, operatorToken });
     const lockPath = databasePath + '.runtime.lock';
-    assert.equal(existsSync(lockPath), true);
+    assert.equal(inspectDatabaseFileLock(lockPath).active, true);
 
     await new Promise((resolve, reject) => {
       runtime.server.close(error => error ? reject(error) : resolve());
@@ -24,7 +25,7 @@ test('shutdown releases SQLite and runtime lock when the listener was already st
     const failedShutdown = runtime.shutdown();
     assert.equal(runtime.shutdown(), failedShutdown, 'a failed shutdown must remain idempotent');
     await assert.rejects(failedShutdown, error => error?.code === 'ERR_SERVER_NOT_RUNNING');
-    assert.equal(existsSync(lockPath), false, 'shutdown error must not strand the runtime lock');
+    assert.equal(inspectDatabaseFileLock(lockPath).active, false, 'shutdown error must not strand the runtime lock');
 
     const reopened = openDatabase(databasePath);
     assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 5);

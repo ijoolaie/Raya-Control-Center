@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { openDatabase } from '../src/db.js';
 import { startControlCenter } from '../src/server-runtime.js';
+import { inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
 
 test('offline Operator token recovery is excluded while the server is running and works after shutdown', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-token-recovery-'));
@@ -16,16 +17,16 @@ test('offline Operator token recovery is excluded while the server is running an
   try {
     runtime = await startControlCenter({ databasePath, port: 0, operatorToken: originalToken });
     const lockPath = databasePath + '.runtime.lock';
-    assert.equal(existsSync(lockPath), true);
+    assert.equal(inspectDatabaseFileLock(lockPath).active, true);
 
     const blocked = spawnSync(process.execPath, ['src/rotate-operator-token.js', databasePath], { cwd: process.cwd(), encoding: 'utf8' });
     assert.equal(blocked.status, 2);
-    assert.match(blocked.stderr, /already locked by process/);
+    assert.match(blocked.stderr, /runtime lock prevents access/);
     assert.equal(blocked.stdout.includes(originalToken), false);
 
     await runtime.shutdown();
     runtime = undefined;
-    assert.equal(existsSync(lockPath), false);
+    assert.equal(inspectDatabaseFileLock(lockPath).active, false);
 
     const recovered = spawnSync(process.execPath, ['src/rotate-operator-token.js', databasePath], { cwd: process.cwd(), encoding: 'utf8' });
     assert.equal(recovered.status, 0, recovered.stderr);
@@ -98,7 +99,7 @@ test('startup listener failure closes SQLite and releases the runtime lock', asy
       error => error?.code === 'EADDRINUSE'
     );
 
-    assert.equal(existsSync(failedDatabase + '.runtime.lock'), false, 'failed startup must release its runtime lock');
+    assert.equal(inspectDatabaseFileLock(failedDatabase + '.runtime.lock').active, false, 'failed startup must release its runtime lock');
     const reopened = openDatabase(failedDatabase);
     assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 5);
     reopened.close();
