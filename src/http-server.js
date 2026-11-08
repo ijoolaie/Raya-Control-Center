@@ -42,7 +42,7 @@ function validateQuery(method, url) {
   else if (method === 'GET' && path === BASE + '/tasks') allowed = ['status', 'type', 'assignedParticipantId', 'limit', 'offset'];
   else if (method === 'GET' && path === BASE + '/events') allowed = ['entityType', 'entityId', 'limit'];
   else if (method === 'GET' && new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) allowed = [];
-  else if (method === 'POST' && new RegExp('^' + BASE + '/participants/[^/]+/revoke$').test(path)) allowed = [];
+  else if (method === 'POST' && new RegExp('^' + BASE + '/participants/[^/]+/(revoke|capabilities)$').test(path)) allowed = [];
   else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) allowed = [];
   else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) allowed = [];
   else if (method === 'POST' && (
@@ -80,10 +80,10 @@ function bearer(req) {
 
 function allowedMethods(path) {
   if (DASHBOARD_ASSETS.has(path)) return ['GET'];
-  if (path === BASE + '/health' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
+  if (path === BASE + '/health' || path === BASE + '/routing/summary' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
   if (path === BASE + '/participants/register' || path === BASE + '/operator/rotate-token' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
   if (path === BASE + '/tasks') return ['GET', 'POST'];
-  if (new RegExp('^' + BASE + '/participants/[^/]+/revoke$').test(path)) return ['POST'];
+  if (new RegExp('^' + BASE + '/participants/[^/]+/(revoke|capabilities)$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) return ['GET'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) return ['GET'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').test(path)) return ['POST'];
@@ -243,9 +243,15 @@ export function createControlServer({ db, operatorToken }) {
         const body = await readJson(req);
         requireOperator();
         const result = center.registerParticipant({
-          displayName: body.displayName, kind: body.kind, scopes: body.scopes
+          displayName: body.displayName, kind: body.kind, scopes: body.scopes, capabilities: body.capabilities
         });
         send(res, 201, result);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === BASE + '/routing/summary') {
+        requireOperator();
+        send(res, 200, { routing: center.getRoutingSummary() });
         return;
       }
 
@@ -262,6 +268,15 @@ export function createControlServer({ db, operatorToken }) {
         requireOperator();
         const participant = center.getParticipant(decodePathPart(participantPath[1]));
         if (!participant) throw new ControlCenterError('not_found', 'Participant not found');
+        send(res, 200, { participant });
+        return;
+      }
+
+      const capabilitiesPath = new RegExp('^' + BASE + '/participants/([^/]+)/capabilities$').exec(url.pathname);
+      if (req.method === 'POST' && capabilitiesPath) {
+        const body = await readJson(req);
+        requireOperator();
+        const participant = center.updateParticipantCapabilities(decodePathPart(capabilitiesPath[1]), body.capabilities);
         send(res, 200, { participant });
         return;
       }
@@ -294,7 +309,7 @@ export function createControlServer({ db, operatorToken }) {
         requireOperator();
         const task = center.createTask({
           type: body.type, payload: body.payload, priority: body.priority,
-          idempotencyKey: body.idempotencyKey
+          idempotencyKey: body.idempotencyKey, requiredCapabilities: body.requiredCapabilities
         });
         send(res, task.idempotentReplay ? 200 : 201, { task, idempotentReplay: task.idempotentReplay });
         return;

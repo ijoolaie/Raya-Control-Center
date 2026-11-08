@@ -37,28 +37,31 @@
     $('refresh').disabled = true;
     try {
       const q = filters();
-      const [tasksData, participantsData, eventsData] = await Promise.all([
+      const [tasksData, participantsData, eventsData, routingData] = await Promise.all([
         request('/control/v1/tasks?' + q.task),
         request('/control/v1/participants?' + q.participant),
-        request('/control/v1/events?' + q.events)
+        request('/control/v1/events?' + q.events),
+        request('/control/v1/routing/summary')
       ]);
       const tasks = tasksData.tasks || [], participants = participantsData.participants || [], events = eventsData.events || [];
+      const routing = routingData.routing || {};
       const counts = tasks.reduce((acc, task) => { acc[task.status] = (acc[task.status] || 0) + 1; return acc; }, {});
       setText('metric-active', (counts.claimed || 0) + (counts.running || 0) + (counts.cancellation_requested || 0));
       setText('metric-queued', counts.queued || 0);
       setText('metric-blocked', counts.blocked || 0);
-      setText('metric-participants', participants.length);
+      setText('metric-participants', routing.activeClaimParticipants ?? '-');
+      setText('metric-unmatched', routing.unmatchedQueuedTasks ?? '-');
       const tb = $('tasks-body'); tb.replaceChildren();
-      if (!tasks.length) empty(tb, 5, 'No matching tasks.');
+      if (!tasks.length) empty(tb, 6, 'No matching tasks.');
       tasks.forEach(task => {
-        const tr = document.createElement('tr'); cell(tr, task.id); cell(tr, task.type); const status = cell(tr, ''); pill(status, task.status);
+        const tr = document.createElement('tr'); cell(tr, task.id); cell(tr, task.type); cell(tr, (task.requiredCapabilities || []).join(', ') || 'Any claim-capable participant'); const status = cell(tr, ''); pill(status, task.status);
         cell(tr, task.progress?.percent == null ? '—' : task.progress.percent + '%'); cell(tr, task.updatedAt); tb.append(tr);
       });
       const pb = $('participants-body'); pb.replaceChildren();
-      if (!participants.length) empty(pb, 5, 'No matching participants.');
+      if (!participants.length) empty(pb, 6, 'No matching participants.');
       participants.forEach(person => {
         const tr = document.createElement('tr'); cell(tr, person.displayName); cell(tr, person.kind); const status = cell(tr, ''); pill(status, person.status);
-        cell(tr, (person.scopes || []).join(', ') || '—'); cell(tr, person.lastSeenAt); pb.append(tr);
+        cell(tr, (person.scopes || []).join(', ') || '-'); cell(tr, (person.capabilities || []).join(', ') || '-'); cell(tr, person.lastSeenAt); pb.append(tr);
       });
       const eb = $('events-body'); eb.replaceChildren();
       if (!events.length) empty(eb, 5, 'No matching events.');
@@ -75,10 +78,10 @@
   function disconnect(message = 'Disconnected') {
     operatorToken = ''; $('operator-token').value = ''; $('refresh').disabled = true;
     setText('auth-status', message);
-    empty($('tasks-body'), 5, 'Connect to load tasks.');
-    empty($('participants-body'), 5, 'Connect to load participants.');
+    empty($('tasks-body'), 6, 'Connect to load tasks.');
+    empty($('participants-body'), 6, 'Connect to load participants.');
     empty($('events-body'), 5, 'Connect to load events.');
-    ['metric-active','metric-queued','metric-blocked','metric-participants'].forEach(id => setText(id, '—'));
+    ['metric-active','metric-queued','metric-blocked','metric-participants','metric-unmatched'].forEach(id => setText(id, '—'));
   }
   $('auth-form').addEventListener('submit', async event => {
     event.preventDefault(); operatorToken = $('operator-token').value.trim();

@@ -19,6 +19,8 @@ function parseOptions(args) {
       result[key] = true;
     } else {
       if (key === 'scope') (result.scope ||= []).push(value);
+      else if (key === 'capability') (result.capability ||= []).push(value);
+      else if (key === 'requires') (result.requires ||= []).push(value);
       else result[key] = value;
       i++;
     }
@@ -54,11 +56,12 @@ function usage() {
     'Raya Control Center CLI',
     '',
     '  npm run cli -- health',
-    '  npm run cli -- participant register --name NAME [--kind worker] [--scope tasks:claim]',
+    '  npm run cli -- participant register --name NAME [--kind worker] [--scope tasks:claim] [--capability worker:python]',
     '  npm run cli -- participant get PARTICIPANT_ID',
     '  npm run cli -- participant list [--status active] [--kind worker] [--limit 50] [--offset 0]',
+    '  npm run cli -- participant capabilities PARTICIPANT_ID --capability worker:python',
     '  npm run cli -- participant revoke PARTICIPANT_ID',
-    '  npm run cli -- task create --type TASK.TYPE [--payload JSON] [--priority N] [--idempotency-key KEY]',
+    '  npm run cli -- task create --type TASK.TYPE [--payload JSON] [--priority N] [--idempotency-key KEY] [--requires worker:python]',
     '  npm run cli -- task get TASK_ID',
     '  npm run cli -- task list [--status queued] [--type TASK.TYPE] [--limit 50] [--offset 0]',
     '  npm run cli -- task cancel TASK_ID',
@@ -86,7 +89,7 @@ export async function main(args = process.argv.slice(2)) {
     if (typeof opts.name !== 'string' || !opts.name.trim()) throw new Error('--name is required');
     const data = await callApi('/participants/register', {
       method: 'POST',
-      body: { displayName: opts.name, kind: opts.kind || 'worker', scopes: opts.scope || [] }
+      body: { displayName: opts.name, kind: opts.kind || 'worker', scopes: opts.scope || [], capabilities: opts.capability || [] }
     });
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;
@@ -102,6 +105,15 @@ export async function main(args = process.argv.slice(2)) {
     for (const key of ['status','kind','limit','offset']) if (opts[key] !== undefined) query.set(key, String(opts[key]));
     const data = await callApi('/participants' + (query.size ? '?' + query.toString() : ''));
     process.stdout.write(JSON.stringify(data, null, 2) + '\n'); return;
+  }
+  if (group === 'participant' && action === 'capabilities') {
+    if (!rest[0]) throw new Error('Participant ID is required');
+    const opts = parseOptions(rest.slice(1));
+    const data = await callApi('/participants/' + encodeURIComponent(rest[0]) + '/capabilities', {
+      method: 'POST', body: { capabilities: opts.capability || [] }
+    });
+    process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+    return;
   }
   if (group === 'participant' && action === 'revoke') {
     if (!rest[0]) throw new Error('Participant ID is required');
@@ -121,7 +133,7 @@ export async function main(args = process.argv.slice(2)) {
     if (!Number.isSafeInteger(priority)) throw new Error('--priority must be an integer');
     const data = await callApi('/tasks', {
       method: 'POST',
-      body: { type: opts.type, payload, priority, idempotencyKey: opts['idempotency-key'] }
+      body: { type: opts.type, payload, priority, idempotencyKey: opts['idempotency-key'], requiredCapabilities: opts.requires || [] }
     });
     process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     return;

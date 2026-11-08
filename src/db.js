@@ -81,6 +81,11 @@ const migrations = [
   {
     version: 5,
     sql: 'ALTER TABLE tasks ADD COLUMN result_json TEXT;'
+  },
+  {
+    version: 6,
+    sql: `ALTER TABLE participants ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE tasks ADD COLUMN required_capabilities_json TEXT NOT NULL DEFAULT '[]';`
   }
 ];
 

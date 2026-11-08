@@ -28,7 +28,7 @@ test('shutdown releases SQLite and runtime lock when the listener was already st
     assert.equal(inspectDatabaseFileLock(lockPath).active, false, 'shutdown error must not strand the runtime lock');
 
     const reopened = openDatabase(databasePath);
-    assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 5);
+    assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 6);
     reopened.close();
   } finally {
     if (runtime?.server.listening) await runtime.shutdown();

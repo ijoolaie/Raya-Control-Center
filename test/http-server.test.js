@@ -408,7 +408,12 @@ test('serves the read-only dashboard and static assets with restrictive security
     assert.match(page.headers.get('content-type'), /text\/html/);
     assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
     assert.equal(page.headers.get('x-frame-options'), 'DENY');
-    assert.match(await page.text(), /Read-only operational overview/);
+    const pageText = await page.text();
+    assert.match(pageText, /Read-only operational overview/);
+    assert.match(pageText, /Required capabilities/);
+    assert.match(pageText, /Capabilities/);
+    assert.match(pageText, /id="metric-unmatched"/);
+    assert.match(pageText, /Active claim-capable participants/);
 
     const script = await fetch(base + '/dashboard.js');
     assert.equal(script.status, 200);
@@ -417,6 +422,8 @@ test('serves the read-only dashboard and static assets with restrictive security
     assert.match(scriptText, /let operatorToken =/);
     assert.doesNotMatch(scriptText, /localStorage|sessionStorage/);
     assert.match(scriptText, /textContent/);
+    assert.match(scriptText, /routing\/summary/);
+    assert.match(scriptText, /metric-unmatched/);
     assert.doesNotMatch(scriptText, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
     assert.doesNotMatch(scriptText, /console\.(?:log|error|warn)/);
     assert.doesNotMatch(scriptText, /task\.(?:payload|result)/);
@@ -429,6 +436,58 @@ test('serves the read-only dashboard and static assets with restrictive security
     assert.equal(deniedMethod.status, 405);
     const query = await fetch(base + '/dashboard.js?x=1');
     assert.equal(query.status, 400);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
+
+test('HTTP Operator capability management and capability-aware task claims', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'operator-capability-routing-test-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const operator = { authorization: 'Bearer ' + operatorToken, 'content-type': 'application/json' };
+  const request = (path, options = {}) => fetch(base + path, options);
+  try {
+    const summaryDenied = await request('/routing/summary');
+    assert.equal(summaryDenied.status, 401);
+    const initialSummary = await request('/routing/summary', { headers: operator });
+    assert.equal(initialSummary.status, 200);
+    assert.deepEqual((await initialSummary.json()).routing, { queuedTasks: 0, unmatchedQueuedTasks: 0, activeClaimParticipants: 0 });
+    const registration = await request('/participants/register', { method: 'POST', headers: operator,
+      body: JSON.stringify({ displayName: 'capability-http-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] }) });
+    assert.equal(registration.status, 201);
+    const registered = await registration.json();
+    assert.deepEqual(registered.participant.capabilities, ['worker:python']);
+    const participantList = await request('/participants', { headers: operator });
+    assert.deepEqual((await participantList.json()).participants[0].capabilities, ['worker:python']);
+    const taskResponse = await request('/tasks', { method: 'POST', headers: operator,
+      body: JSON.stringify({ type: 'http.capability.task', requiredCapabilities: ['worker:python'] }) });
+    assert.equal(taskResponse.status, 201);
+    const task = (await taskResponse.json()).task;
+    assert.deepEqual(task.requiredCapabilities, ['worker:python']);
+    const queuedSummary = await request('/routing/summary', { headers: operator });
+    assert.deepEqual((await queuedSummary.json()).routing, { queuedTasks: 1, unmatchedQueuedTasks: 0, activeClaimParticipants: 1 });
+    const claim = await request('/tasks/claim', { method: 'POST', headers: { authorization: 'Bearer ' + registered.token, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(claim.status, 200);
+    const claimed = (await claim.json()).claim;
+    assert.equal(claimed.task.id, task.id);
+    const leaseBefore = db.prepare('SELECT id, status, expires_at FROM leases WHERE id = ?').get(claimed.lease.id);
+    const capabilityUpdateDenied = await request('/participants/' + registered.participant.id + '/capabilities', { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ capabilities: ['worker:admin'] }) });
+    assert.equal(capabilityUpdateDenied.status, 401, 'Only the Operator may change Participant capabilities');
+    assert.deepEqual(JSON.parse(db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(registered.participant.id).capabilities_json), ['worker:python']);
+    const updated = await request('/participants/' + registered.participant.id + '/capabilities', { method: 'POST', headers: operator,
+      body: JSON.stringify({ capabilities: ['worker:node'] }) });
+    assert.equal(updated.status, 200);
+    assert.deepEqual((await updated.json()).participant.capabilities, ['worker:node']);
+    assert.deepEqual(db.prepare('SELECT id, status, expires_at FROM leases WHERE id = ?').get(claimed.lease.id), leaseBefore);
+    const audit = db.prepare("SELECT event_type FROM events WHERE entity_id = ? AND event_type = 'participant.capabilities_updated'").get(registered.participant.id);
+    assert.equal(audit.event_type, 'participant.capabilities_updated');
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

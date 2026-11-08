@@ -20,8 +20,10 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | Method | Path | Authentication | Purpose |
 |---|---|---|---|
 | GET | `/health` | None | Process/API health |
+| GET | `/routing/summary` | Operator | Exact queue eligibility counts across all queued Tasks and active claim-capable Participants |
 | POST | `/operator/rotate-token` | Current Operator | Rotate the Operator token immediately; returns replacement token once |
-| POST | `/participants/register` | Operator | Register participant; returns token once |
+| POST | `/participants/register` | Operator | Register participant with optional capabilities; returns token once |
+| POST | `/participants/{id}/capabilities` | Operator | Replace capabilities; append audit event; active Leases unchanged |
 | GET | `/participants` | Operator | List participants with bounded filters and pagination |
 | GET | `/participants/{id}` | Operator | Read participant metadata |
 | POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks; safe to repeat |
@@ -44,9 +46,9 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 
 All non-empty request bodies must be valid UTF-8 JSON objects and are limited to 16 KiB. Invalid UTF-8 byte sequences are rejected with 400 validation_error; they are never decoded with replacement characters.
 
-- Register: `{ "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"] }`
-- Create task: `{ "type": "job.example", "payload": {}, "priority": 0, "idempotencyKey": "optional-key" }`
-- Task creation with an idempotency key returns `201` for the first creation and `200` with `idempotentReplay: true` for an identical replay. Reusing the key with a different type, payload, or priority returns `409 conflict`.
+- Register: { "displayName": "worker", "kind": "worker", "scopes": ["tasks:claim"], "capabilities": ["worker:python"] }
+- Create task: { "type": "job.example", "payload": {}, "priority": 0, "requiredCapabilities": ["worker:python"], "idempotencyKey": "optional-key" }
+- Task creation with an idempotency key returns `201` for the first creation and `200` with `idempotentReplay: true` for an identical replay. Reusing the key with a different type, payload, priority, or required-capability set returns `409 conflict`.
 - Claim: `{ "leaseDurationMs": 30000 }`
 - Heartbeat: `{ "leaseDurationMs": 30000 }`
 - Progress: `{ "percent": 50, "message": "Halfway", "details": {} }` (percent may be null; message max 240 chars; details max 2 KiB).
@@ -137,3 +139,8 @@ Do not store prompts, transcripts, hidden reasoning, secrets, raw tool arguments
 
 - SIGINT and SIGTERM stop new connections, close idle keep-alive connections, and allow active requests up to 10 seconds to finish.
 - Remaining HTTP connections are force-closed after the grace period; SQLite is closed only after the HTTP server finishes closing.
+
+
+## Capability-aware claims
+
+Participant capabilities and Task requiredCapabilities are optional bounded identifier arrays. A Participant may claim a Task only when its stored capability set contains every required capability. Matching is exact and case-sensitive. Empty Task requirements preserve legacy behavior. Only Operator routes can assign or change these values; changing a Participant affects future claims only and is recorded as participant.capabilities_updated. It does not change active Leases. Capabilities are scheduling metadata, not authorization scopes or an execution sandbox.

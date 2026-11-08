@@ -36,7 +36,9 @@ Current route boundary:
 | Read own lease/cancellation status | Participant Bearer plus matching active Lease token |
 
 Important implementation limitations:
-- Participant `kind` (`worker`, `adapter`, `operator_client`) is descriptive metadata, not an authorization policy.
+- Participant `kind` (`worker`, `adapter`, `operator_client`) is descriptive metadata, not an authorization policy or task-routing filter.
+- Claim selection takes the highest-priority oldest queued Task whose `requiredCapabilities` are all present in the authenticated Participant's stored capabilities. Empty requirements preserve legacy behavior: any active Participant with `tasks:claim` may claim the Task. Participant `kind` remains descriptive and is not a routing filter.
+- The Control Center maintains bounded Participant capability metadata and Task required-capability metadata for scheduling. This does not replace Worker-side validation: each Worker must still validate Task type and payload against its own allowlist/schema; unsupported work must fail safely and must never be executed.
 - The only currently enforced Participant scope is `tasks:claim`, checked when claiming.
 - Other worker lifecycle actions are protected by Participant authentication and matching active Lease ownership, not by separate per-action scopes.
 - Arbitrary scope strings may be stored, but an unrecognized scope grants no implemented capability.

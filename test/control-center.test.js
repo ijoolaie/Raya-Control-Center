@@ -17,6 +17,67 @@ function fixture(options) {
   return { db, center, participant: registered.participant, token: registered.token };
 }
 
+
+test('capability routing skips incompatible high-priority tasks and preserves legacy empty requirements', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  const python = center.registerParticipant({ displayName: 'python-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] });
+  const node = center.registerParticipant({ displayName: 'node-worker', scopes: ['tasks:claim'], capabilities: ['worker:node'] });
+  const high = center.createTask({ type: 'route.python', priority: 100, requiredCapabilities: ['worker:python'] });
+  const legacy = center.createTask({ type: 'route.legacy', priority: 10 });
+  const claimNode = center.claimTask({ participantId: node.participant.id, token: node.token });
+  assert.equal(claimNode.task.id, legacy.id, 'incompatible high-priority task is skipped');
+  const claimPython = center.claimTask({ participantId: python.participant.id, token: python.token });
+  assert.equal(claimPython.task.id, high.id);
+  db.close();
+});
+
+test('capability routing requires every requested capability and leaves unmatched work queued', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  const partial = center.registerParticipant({ displayName: 'partial-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] });
+  const complete = center.registerParticipant({ displayName: 'complete-worker', scopes: ['tasks:claim'], capabilities: ['worker:python', 'tool:browser'] });
+  const task = center.createTask({ type: 'route.multi', requiredCapabilities: ['tool:browser', 'worker:python'] });
+  assert.equal(center.claimTask({ participantId: partial.participant.id, token: partial.token }), null);
+  assert.equal(center.getTask(task.id).status, 'queued');
+  const claim = center.claimTask({ participantId: complete.participant.id, token: complete.token });
+  assert.equal(claim.task.id, task.id);
+  assert.throws(() => center.registerParticipant({ displayName: 'bad-cap', capabilities: ['Worker:Python'] }), error => error.code === 'validation_error');
+  assert.throws(() => center.createTask({ type: 'route.duplicate', requiredCapabilities: ['worker:python', 'worker:python'] }), error => error.code === 'validation_error');
+  db.close();
+});
+
+test('routing summary counts queued tasks without any active claim-capable compatible participant', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  center.createTask({ type: 'summary.legacy' });
+  center.createTask({ type: 'summary.python', requiredCapabilities: ['worker:python'] });
+  assert.deepEqual(center.getRoutingSummary(), { queuedTasks: 2, unmatchedQueuedTasks: 2, activeClaimParticipants: 0 });
+  const worker = center.registerParticipant({ displayName: 'summary-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] });
+  assert.deepEqual(center.getRoutingSummary(), { queuedTasks: 2, unmatchedQueuedTasks: 0, activeClaimParticipants: 1 });
+  center.updateParticipantCapabilities(worker.participant.id, ['worker:node']);
+  assert.deepEqual(center.getRoutingSummary(), { queuedTasks: 2, unmatchedQueuedTasks: 1, activeClaimParticipants: 1 });
+  db.close();
+});
+
+test('capability changes are operator-side, audited and affect future claims without changing active leases', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  const worker = center.registerParticipant({ displayName: 'cap-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] });
+  const task = center.createTask({ type: 'route.active', requiredCapabilities: ['worker:python'] });
+  const claim = center.claimTask({ participantId: worker.participant.id, token: worker.token });
+  const before = db.prepare('SELECT id, status, expires_at FROM leases WHERE id = ?').get(claim.lease.id);
+  const updated = center.updateParticipantCapabilities(worker.participant.id, ['worker:node']);
+  assert.deepEqual(updated.capabilities, ['worker:node']);
+  const after = db.prepare('SELECT id, status, expires_at FROM leases WHERE id = ?').get(claim.lease.id);
+  assert.deepEqual(after, before);
+  const event = center.listEvents({ entityType: 'participant', entityId: worker.participant.id }).find(item => item.eventType === 'participant.capabilities_updated');
+  assert.deepEqual(event.data.previousCapabilities, ['worker:python']);
+  assert.deepEqual(event.data.capabilities, ['worker:node']);
+  assert.equal(center.getTask(task.id).status, 'claimed');
+  db.close();
+});
+
 test('POSIX database and WAL files are restricted to owner-only permissions', { skip: process.platform === 'win32' }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'raya-cc-private-db-'));
   const filename = join(dir, 'private.sqlite');
@@ -63,7 +124,7 @@ test('migrates a clean database and preserves task state across database reopen'
   const filename = join(dir, 'state.sqlite');
   try {
     let db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
     const task = new ControlCenter(db).createTask({ type: 'persist.check', payload: { durable: true } });
     db.close();
     db = openDatabase(filename);
@@ -74,11 +135,11 @@ test('migrates a clean database and preserves task state across database reopen'
 });
 
 
-test('schema migration upgrades an existing version 3 database to version 5', () => {
+test('schema migration upgrades an existing version 3 database to version 6', () => {
   const db = openDatabase(':memory:');
-  db.exec('ALTER TABLE tasks DROP COLUMN result_json; ALTER TABLE tasks DROP COLUMN progress_json; PRAGMA user_version = 3');
+  db.exec("ALTER TABLE tasks DROP COLUMN result_json; ALTER TABLE tasks DROP COLUMN progress_json; ALTER TABLE tasks DROP COLUMN required_capabilities_json; ALTER TABLE participants DROP COLUMN capabilities_json; PRAGMA user_version = 3");
   migrate(db);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get().count, 1);
   db.close();
 });
@@ -94,11 +155,11 @@ test('participant credentials are returned once and authentication is revocable'
 
 test('task creation is idempotent for an identical key and rejects key reuse with different input', () => {
   const { db, center } = fixture();
-  const request = { type: 'demo.idempotent', payload: { value: 1, label: 'same' }, priority: 4, idempotencyKey: 'create-once-1' };
+  const request = { type: 'demo.idempotent', payload: { value: 1, label: 'same' }, priority: 4, requiredCapabilities: ['worker:python', 'tool:browser'], idempotencyKey: 'create-once-1' };
   const first = center.createTask(request);
   assert.equal(first.idempotentReplay, false);
   const eventCount = center.listEvents({ entityType: 'task', entityId: first.id }).length;
-  const replay = center.createTask({ ...request, payload: { label: 'same', value: 1 } });
+  const replay = center.createTask({ ...request, payload: { label: 'same', value: 1 }, requiredCapabilities: ['tool:browser', 'worker:python'] });
   assert.equal(replay.id, first.id);
   assert.equal(replay.idempotentReplay, true);
   assert.equal(center.listTasks({ type: 'demo.idempotent' }).length, 1);

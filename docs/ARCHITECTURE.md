@@ -4,7 +4,7 @@
 Raya Control Center is the authoritative coordination service for registered participants and durable work. Its core subsystem is the Raya Control Plane. The product name and architectural subsystem name are intentionally distinct.
 
 ## System boundary
-This repository owns participant identity records, status, scopes, credential verifiers, task records, lifecycle transitions, assignment, lease ownership, authorization policy, append-only operational events, local API, CLI, migrations, and (later) dashboard.
+This repository owns participant identity records, status, scopes, credential verifiers, task records, lifecycle transitions, assignment, lease ownership, authorization policy, append-only operational events, local API, CLI, migrations, and read-only operational dashboard.
 
 External clients do not own authoritative state:
 - Raya-Agent may later register as a participant and claim/execute tasks.
@@ -21,7 +21,7 @@ External clients do not own authoritative state:
 | Event journal | Append-only state-change and security events |
 | Persistence | SQLite schema, transactions, migrations |
 | CLI | Local operator workflows |
-| Dashboard (later) | Read-oriented operational view and guarded controls |
+| Dashboard | Operator-authenticated, read-only task, participant, routing, and audit-event inspection |
 
 Business rules belong in services, not HTTP handlers or CLI commands.
 
@@ -31,7 +31,9 @@ Single-machine, local-first deployment: one Control Center process; SQLite using
 The initial implementation must not assume a cloud database, message broker, Kubernetes, or multi-node consensus.
 
 ## Task ownership and execution
-A participant claims a queued task in a database transaction. The claim operation must atomically verify participant status and scopes, verify task eligibility, assign a unique lease token and expiry, transition the task to claimed, and append the corresponding event.
+A Participant claims the highest-priority oldest queued Task for which its stored capability set contains every requiredCapabilities entry. The claim operation atomically verifies Participant status and the tasks:claim scope, applies exact capability matching, assigns a unique Lease token and expiry, transitions the Task to claimed, and appends the corresponding event. Empty Task requirements preserve legacy unrestricted routing. Participant kind remains descriptive metadata. Task-type and payload safety is still validated by the consuming Worker.
+
+The capability-aware routing model is approved and implemented in the current working tree; see TASK-ROUTING-DESIGN.md and API-CONTRACT.md. Independent security review remains pending.
 
 The worker then reports running, bounded progress metadata, heartbeat, and terminal outcome. A heartbeat proves liveness only; it is not evidence of progress.
 
@@ -52,3 +54,5 @@ The Control Center cannot inspect arbitrary ChatGPT sessions, hidden reasoning, 
 
 ## Deferred
 Not MVP: multi-machine coordination, remote ingress, plugin marketplace, autonomous scheduling, dashboard analytics, and automatic retries for arbitrary external work.
+
+The Operator-only GET /control/v1/routing/summary endpoint reports exact queued and unmatched-queued counts using the same capability inclusion rule as Claim; it is not limited to the Dashboard latest-100 task/participant tables.

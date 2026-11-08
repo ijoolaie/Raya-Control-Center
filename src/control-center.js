@@ -12,6 +12,13 @@ const canonicalJson = value => {
   return JSON.stringify(sort(normalized));
 };
 const parse = value => JSON.parse(value);
+function validateCapabilities(value, field, max) {
+  if (!Array.isArray(value) || value.length > max || value.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9:._-]{0,79}$/.test(item)))
+    throw new ControlCenterError('validation_error', `Invalid ${field}`);
+  if (new Set(value).size !== value.length)
+    throw new ControlCenterError('validation_error', `${field} must not contain duplicates`);
+  return [...value].sort();
+}
 
 export class ControlCenterError extends Error {
   constructor(code, message) { super(message); this.name = 'ControlCenterError'; this.code = code; }
@@ -44,13 +51,14 @@ export class ControlCenter {
     this.leaseDurationMs = leaseDurationMs;
   }
 
-  registerParticipant({ displayName, kind = 'worker', scopes = [] }) {
+  registerParticipant({ displayName, kind = 'worker', scopes = [], capabilities = [] }) {
     if (typeof displayName !== 'string' || !displayName.trim() || displayName.length > 120)
       throw new ControlCenterError('validation_error', 'displayName must contain 1..120 characters');
     if (!['worker', 'adapter', 'operator_client'].includes(kind))
       throw new ControlCenterError('validation_error', 'Unsupported participant kind');
     if (!Array.isArray(scopes) || scopes.some(s => typeof s !== 'string' || !/^[a-z][a-z0-9:._-]{0,79}$/.test(s)))
       throw new ControlCenterError('validation_error', 'Invalid scopes');
+    const normalizedCapabilities = validateCapabilities(capabilities, 'capabilities (maximum 64)', 64);
     const id = randomUUID();
     const token = randomBytes(32).toString('base64url');
     const timestamp = now();
@@ -59,7 +67,8 @@ export class ControlCenter {
       (id, display_name, kind, scopes_json, token_hash, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(id, displayName.trim(), kind, json([...new Set(scopes)]), hash(token), timestamp, timestamp);
-    appendEvent(this.db, { entityType: 'participant', entityId: id, eventType: 'participant.registered', data: { kind, scopes: [...new Set(scopes)] } });
+    this.db.prepare('UPDATE participants SET capabilities_json = ? WHERE id = ?').run(json(normalizedCapabilities), id);
+    appendEvent(this.db, { entityType: 'participant', entityId: id, eventType: 'participant.registered', data: { kind, scopes: [...new Set(scopes)], capabilities: normalizedCapabilities } });
     });
     return { participant: this.getParticipant(id), token };
   }
@@ -67,21 +76,21 @@ export class ControlCenter {
   authenticateParticipant(token) {
     if (typeof token !== 'string') return null;
     const candidateHash = hash(token);
-    const row = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, token_hash
+    const row = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, capabilities_json, token_hash
       FROM participants WHERE status = 'active' AND token_hash = ?`).get(candidateHash);
     if (!row || !verifyToken(token, row.token_hash)) return null;
     const timestamp = now();
     this.db.prepare('UPDATE participants SET last_seen_at = ?, updated_at = ? WHERE id = ?')
       .run(timestamp, timestamp, row.id);
-    return { id: row.id, displayName: row.display_name, kind: row.kind, scopes: parse(row.scopes_json) };
+    return { id: row.id, displayName: row.display_name, kind: row.kind, scopes: parse(row.scopes_json), capabilities: parse(row.capabilities_json) };
   }
 
   getParticipant(id) {
-    const row = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, created_at, updated_at, last_seen_at
+    const row = this.db.prepare(`SELECT id, display_name, kind, status, scopes_json, capabilities_json, created_at, updated_at, last_seen_at
       FROM participants WHERE id = ?`).get(id);
     if (!row) return null;
     return { id: row.id, displayName: row.display_name, kind: row.kind, status: row.status,
-      scopes: parse(row.scopes_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at };
+      scopes: parse(row.scopes_json), capabilities: parse(row.capabilities_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at };
   }
 
   listParticipants({ status, kind, limit = 50, offset = 0 } = {}) {
@@ -89,12 +98,46 @@ export class ControlCenter {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) throw new ControlCenterError('validation_error', 'Participant offset must be 0..1000000');
     if (status !== undefined && !['active','disabled','revoked'].includes(status)) throw new ControlCenterError('validation_error', 'Invalid participant status filter');
     if (kind !== undefined && !['worker','adapter','operator_client'].includes(kind)) throw new ControlCenterError('validation_error', 'Invalid participant kind filter');
-    let sql = 'SELECT id, display_name, kind, status, scopes_json, created_at, updated_at, last_seen_at FROM participants WHERE 1 = 1';
+    let sql = 'SELECT id, display_name, kind, status, scopes_json, capabilities_json, created_at, updated_at, last_seen_at FROM participants WHERE 1 = 1';
     const args = [];
     if (status) { sql += ' AND status = ?'; args.push(status); }
     if (kind) { sql += ' AND kind = ?'; args.push(kind); }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
-    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, displayName: row.display_name, kind: row.kind, status: row.status, scopes: parse(row.scopes_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at }));
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, displayName: row.display_name, kind: row.kind, status: row.status, scopes: parse(row.scopes_json), capabilities: parse(row.capabilities_json), createdAt: row.created_at, updatedAt: row.updated_at, lastSeenAt: row.last_seen_at }));
+  }
+
+  getRoutingSummary() {
+    const row = this.db.prepare("SELECT "
+      + "(SELECT COUNT(*) FROM tasks WHERE status = 'queued') AS queued_tasks, "
+      + "(SELECT COUNT(*) FROM tasks t WHERE t.status = 'queued' AND NOT EXISTS ( "
+      + "SELECT 1 FROM participants p WHERE p.status = 'active' "
+      + "AND EXISTS (SELECT 1 FROM json_each(p.scopes_json) scope WHERE scope.value = 'tasks:claim') "
+      + "AND NOT EXISTS (SELECT 1 FROM json_each(t.required_capabilities_json) required "
+      + "WHERE NOT EXISTS (SELECT 1 FROM json_each(p.capabilities_json) available WHERE available.value = required.value)) "
+      + ")) AS unmatched_queued_tasks, "
+      + "(SELECT COUNT(*) FROM participants p WHERE p.status = 'active' "
+      + "AND EXISTS (SELECT 1 FROM json_each(p.scopes_json) scope WHERE scope.value = 'tasks:claim')) "
+      + "AS active_claim_participants").get();
+    return {
+      queuedTasks: row.queued_tasks,
+      unmatchedQueuedTasks: row.unmatched_queued_tasks,
+      activeClaimParticipants: row.active_claim_participants
+    };
+  }
+
+  updateParticipantCapabilities(id, capabilities) {
+    const normalized = validateCapabilities(capabilities, 'capabilities (maximum 64)', 64);
+    return transaction(this.db, () => {
+      const existing = this.db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(id);
+      if (!existing) throw new ControlCenterError('not_found', 'Participant not found');
+      const previous = parse(existing.capabilities_json);
+      if (JSON.stringify(previous) === JSON.stringify(normalized)) return this.getParticipant(id);
+      this.db.prepare('UPDATE participants SET capabilities_json = ?, updated_at = ? WHERE id = ?')
+        .run(json(normalized), now(), id);
+      appendEvent(this.db, { entityType: 'participant', entityId: id, eventType: 'participant.capabilities_updated',
+        data: { previousCapabilities: previous, capabilities: normalized, affects: 'future_claims_only' } });
+      return this.getParticipant(id);
+    });
   }
 
   revokeParticipant(id) {
@@ -124,7 +167,7 @@ export class ControlCenter {
     });
   }
 
-  createTask({ type, payload = {}, priority = 0, createdBy = null, idempotencyKey = null }) {
+  createTask({ type, payload = {}, priority = 0, createdBy = null, idempotencyKey = null, requiredCapabilities = [] }) {
     if (typeof type !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,159}$/.test(type))
       throw new ControlCenterError('validation_error', 'Invalid task type');
     if (!Number.isSafeInteger(priority) || priority < -1000 || priority > 1000)
@@ -133,6 +176,7 @@ export class ControlCenter {
       throw new ControlCenterError('validation_error', 'Task payload must be a JSON object');
     if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 200))
       throw new ControlCenterError('validation_error', 'idempotencyKey must contain 1..200 characters');
+    const normalizedRequirements = validateCapabilities(requiredCapabilities, 'requiredCapabilities (maximum 32)', 32);
     let payloadText;
     try { payloadText = canonicalJson(payload); }
     catch { throw new ControlCenterError('validation_error', 'Task payload must be JSON serializable'); }
@@ -145,10 +189,10 @@ export class ControlCenter {
     try {
       transaction(this.db, () => {
         if (idempotencyKey !== null) {
-          const existing = this.db.prepare(`SELECT id, type, payload_json, priority
+          const existing = this.db.prepare(`SELECT id, type, payload_json, priority, required_capabilities_json
             FROM tasks WHERE idempotency_key = ?`).get(idempotencyKey);
           if (existing) {
-            if (existing.type !== type || existing.payload_json !== payloadText || existing.priority !== priority)
+            if (existing.type !== type || existing.payload_json !== payloadText || existing.priority !== priority || existing.required_capabilities_json !== json(normalizedRequirements))
               throw new ControlCenterError('conflict', 'Idempotency key was already used for a different task request');
             taskId = existing.id;
             idempotentReplay = true;
@@ -156,10 +200,10 @@ export class ControlCenter {
           }
         }
         this.db.prepare(`INSERT INTO tasks
-          (id, type, status, payload_json, priority, created_by, idempotency_key, created_at, updated_at)
-          VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)`)
-          .run(id, type, payloadText, priority, createdBy, idempotencyKey, timestamp, timestamp);
-        appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority } });
+          (id, type, status, payload_json, priority, created_by, idempotency_key, created_at, updated_at, required_capabilities_json)
+          VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, type, payloadText, priority, createdBy, idempotencyKey, timestamp, timestamp, json(normalizedRequirements));
+        appendEvent(this.db, { entityType: 'task', entityId: id, eventType: 'task.queued', data: { type, priority, requiredCapabilities: normalizedRequirements } });
       });
     } catch (error) {
       if (error instanceof ControlCenterError) throw error;
@@ -175,7 +219,7 @@ export class ControlCenter {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     if (!row) return null;
     return { id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json),
-      priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id,
+      priority: row.priority, requiredCapabilities: parse(row.required_capabilities_json), createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id,
       leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at,
       startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null, result: row.result_json ? parse(row.result_json) : null };
   }
@@ -192,14 +236,14 @@ export class ControlCenter {
     if (type) { sql += ' AND type = ?'; args.push(type); }
     if (assignedParticipantId) { sql += ' AND assigned_participant_id = ?'; args.push(assignedParticipantId); }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?'; args.push(limit, offset);
-    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null, result: row.result_json ? parse(row.result_json) : null }));
+    return this.db.prepare(sql).all(...args).map(row => ({ id: row.id, type: row.type, status: row.status, payload: parse(row.payload_json), priority: row.priority, requiredCapabilities: parse(row.required_capabilities_json), createdBy: row.created_by, assignedParticipantId: row.assigned_participant_id, leaseId: row.lease_id, createdAt: row.created_at, updatedAt: row.updated_at, startedAt: row.started_at, finishedAt: row.finished_at, progress: row.progress_json ? parse(row.progress_json) : null, result: row.result_json ? parse(row.result_json) : null }));
   }
 
   claimTask({ participantId, token, leaseDurationMs = this.leaseDurationMs }) {
     if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs < 1000 || leaseDurationMs > 3_600_000)
       throw new ControlCenterError('validation_error', 'Lease duration must be 1s..1h');
     return transaction(this.db, () => {
-      const participant = this.db.prepare(`SELECT id, scopes_json, token_hash FROM participants
+      const participant = this.db.prepare(`SELECT id, scopes_json, capabilities_json, token_hash FROM participants
         WHERE id = ? AND status = 'active'`).get(participantId);
       if (!participant || !verifyToken(token, participant.token_hash)) throw new ControlCenterError('authentication_required', 'Valid participant credentials required');
       if (!parse(participant.scopes_json).includes('tasks:claim'))
@@ -208,8 +252,15 @@ export class ControlCenter {
       const leaseId = randomUUID();
       const timestamp = now();
       const expiresAt = new Date(Date.now() + leaseDurationMs).toISOString();
-      const task = this.db.prepare(`SELECT id FROM tasks WHERE status = 'queued'
-        ORDER BY priority DESC, created_at ASC LIMIT 1`).get();
+      const task = this.db.prepare(`SELECT t.id FROM tasks t
+        WHERE t.status = 'queued'
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(t.required_capabilities_json) required
+            WHERE NOT EXISTS (
+              SELECT 1 FROM json_each(?) available WHERE available.value = required.value
+            )
+          )
+        ORDER BY t.priority DESC, t.created_at ASC LIMIT 1`).get(participant.capabilities_json);
       if (!task) return null;
       const update = this.db.prepare(`UPDATE tasks SET status = 'claimed', assigned_participant_id = ?,
         lease_id = ?, updated_at = ? WHERE id = ? AND status = 'queued'`)

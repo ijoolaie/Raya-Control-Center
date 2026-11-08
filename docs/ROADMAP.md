@@ -71,9 +71,18 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 
 This phase does not authorize development in either external repository. Raya-Agent and Raya-MCP remain future consumers/adapters only.
 
+### Capability-aware Task routing
+- [x] Approve TASK-ROUTING-DESIGN.md (2026-11-08).
+- [x] Add migration, Operator-managed Participant capabilities, and Task required-capability metadata.
+- [x] Filter atomic claims by exact capability-set inclusion; leave unmatched Tasks queued.
+- [x] Add backward-compatibility, core routing, HTTP, audit, and active-Lease preservation tests.
+- [x] Add an Operator-only exact routing summary and expose required/available capabilities in the read-only Dashboard.
+- [ ] Complete independent security review before treating the routing change as independently reviewed.
+
 ## Phase 4 — Dashboard and operational hardening
 **Status: In progress**
 - [x] Read-oriented dashboard for task, participant, and health inspection (Operator-authenticated data reads; no mutations exposed).
+- [x] Manual Chrome acceptance on an isolated temporary database: valid/invalid Operator login, routing metrics, capability columns, task/participant filters, disconnect cleanup, and 390px responsive layout.
 - [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.
