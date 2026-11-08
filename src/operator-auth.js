@@ -2,13 +2,14 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const timestamp = () => new Date().toISOString();
+const isValidOperatorToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{32,}$/.test(value);
 
 export function bootstrapOperatorToken(db, suppliedToken = process.env.RAYA_CC_OPERATOR_TOKEN) {
   const existing = db.prepare("SELECT value FROM settings WHERE key = 'operator_token_hash'").get();
 
   if (existing) {
-    if (typeof suppliedToken !== 'string' || suppliedToken.length < 32) {
-      throw new Error('RAYA_CC_OPERATOR_TOKEN must be set to the existing operator token before starting this initialized Control Center.');
+    if (!isValidOperatorToken(suppliedToken)) {
+      throw new Error('RAYA_CC_OPERATOR_TOKEN must be the existing operator token using only letters, digits, underscore, or hyphen (at least 32 characters).');
     }
     const candidate = Buffer.from(hash(suppliedToken), 'hex');
     const expected = Buffer.from(existing.value, 'hex');
@@ -18,8 +19,8 @@ export function bootstrapOperatorToken(db, suppliedToken = process.env.RAYA_CC_O
     return { token: suppliedToken, created: false };
   }
 
-  if (suppliedToken !== undefined && (typeof suppliedToken !== 'string' || suppliedToken.length < 32)) {
-    throw new Error('RAYA_CC_OPERATOR_TOKEN must contain at least 32 characters when provided.');
+  if (suppliedToken !== undefined && !isValidOperatorToken(suppliedToken)) {
+    throw new Error('RAYA_CC_OPERATOR_TOKEN must contain at least 32 characters and use only letters, digits, underscore, or hyphen.');
   }
   const token = typeof suppliedToken === 'string'
     ? suppliedToken

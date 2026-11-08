@@ -135,8 +135,8 @@ function statusFor(error) {
 
 export function createControlServer({ db, operatorToken }) {
   if (!db) throw new TypeError('A database connection is required');
-  if (typeof operatorToken !== 'string' || operatorToken.length < 32) {
-    throw new TypeError('A valid operator token (at least 32 characters) is required');
+  if (typeof operatorToken !== 'string' || !/^[A-Za-z0-9_-]{32,}$/.test(operatorToken)) {
+    throw new TypeError('A valid operator token (at least 32 URL-safe characters) is required');
   }
   const center = new ControlCenter(db);
   let operatorHash = hash(operatorToken).toString('hex');

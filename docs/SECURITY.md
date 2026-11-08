@@ -8,7 +8,7 @@ The initial deployment assumes a single trusted machine but does not assume ever
 2. **Host validation:** accept only the exact `127.0.0.1`, `localhost`, or `[::1]` authority (optionally with a valid port); reject alternate numeric address spellings and all non-loopback authorities.
 3. **Scoped credentials:** distinct credentials per participant and purpose; least privilege; revocable.
 4. **Credential storage:** store only SHA-256 hashes of high-entropy random tokens. Never log or persist plaintext participant or lease tokens.
-5. **Operator separation:** operator token is separate from participant tokens; stored as a hash in the local settings table and shown only at bootstrap/rotation.
+5. **Operator separation:** operator token is separate from participant tokens; stored as a hash in the local settings table and shown only at bootstrap/rotation. Custom operator tokens must use the same URL-safe alphabet accepted by the HTTP Bearer parser (at least 32 ASCII letters, digits, `_`, or `-`).
 6. **Lease enforcement:** every worker mutation checks participant identity, task ownership, active lease status, expiry, and lease token.
 7. **Revocation safety:** revoking a participant revokes its active leases and moves affected nonterminal tasks to blocked; uncertain work is not retried automatically.
 8. **Input and connection limits:** strict JSON object validation, an 8 KiB header limit, 10-second header receipt timeout (1-second check interval), 30-second request receipt timeout, 16 KiB body limit, bounded task payloads, and parameterized SQL.

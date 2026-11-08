@@ -197,7 +197,35 @@ Remediation:
 Verification:
 - Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
 - `npm run check` and `git diff --check` passed.
-- Supported-runtime CI for this change is pending.
+- Supported-runtime CI run `42477292999` passed on Node 24/26 × Linux/Windows.
 
 Residual risk:
 - This is an internal finding and has not been independently reviewed. The API remains loopback-only; no remote ingress is authorized.
+
+### SEC-005 - Operator token bootstrap accepted values rejected by the Bearer parser
+
+Severity: **Low**
+Status: **Remediated; local regression tests passed on 2026-11-08; CI pending**
+
+Evidence (pre-remediation):
+- `bootstrapOperatorToken` accepted any supplied string of at least 32 characters and persisted its SHA-256 hash.
+- The HTTP Bearer parser accepts only `[A-Za-z0-9_-]` characters. A supplied token containing characters such as `+`, `/`, `=`, or whitespace could therefore initialize the database but could never authenticate an HTTP request.
+- The same minimum-length-only validation existed at the HTTP server construction boundary.
+
+Impact:
+- A custom operator token could leave an initialized instance inaccessible through normal authenticated API operations. Offline token recovery remained available, but required stopping the server and performing a separate recovery operation.
+
+Remediation:
+- Enforce the exact URL-safe Bearer alphabet and minimum 32-character length before persisting a supplied token.
+- Apply the same validation when constructing the HTTP server.
+- Keep generated and rotated credentials as cryptographically random base64url tokens.
+- Add regression tests proving invalid custom tokens are rejected before the initial credential hash is stored and that the server rejects invalid token inputs.
+- Document the accepted custom-token format.
+
+Verification:
+- Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
+- `npm run check` and `git diff --check` passed.
+- Supported-runtime CI: pending.
+
+Residual risk:
+- The finding concerns custom token format consistency, not token entropy. Operators supplying custom values remain responsible for using high-entropy secrets. Independent review remains pending.
