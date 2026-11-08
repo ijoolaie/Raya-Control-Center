@@ -1,9 +1,9 @@
 ﻿# Independent Security Review Handoff
 
 Status: **Prepared; independent review not yet performed**
-Review target (current PR head): `7856ae84819f237f78dbdb90eff5f937eda43346`
+Review target: the latest PR head at the time the independent review begins. The reviewer must fetch the current head SHA from PR #1 immediately before checkout and record that exact SHA in the report; do not rely on a SHA copied from this document.
 Capability-routing implementation commit: `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03`
-The review target includes the implementation commit and the subsequent documentation-only handoff commit.
+The review target is the exact PR-head SHA recorded by the reviewer before testing; it includes all changes present on the branch at that time.
 Repository: `ijoolaie/Raya-Control-Center`
 Branch: `bootstrap/project-foundation`
 PR: [#1](https://github.com/ijoolaie/Raya-Control-Center/pull/1) — keep Open, Draft, Unmerged.
@@ -15,7 +15,7 @@ This is a handoff for a reviewer independent of the implementation. Internal cod
 
 ## Scope
 
-Review the exact PR-head SHA above. Confirm `git rev-parse HEAD` equals `7856ae84819f237f78dbdb90eff5f937eda43346` before testing. Do not review only the earlier implementation commit; the PR head is the authoritative review target.
+Immediately before testing, fetch PR #1 and record its current `head.sha` as the review target. Check out that exact SHA and confirm `git rev-parse HEAD` matches it. Do not review only the earlier implementation commit; the PR head at review start is authoritative.
 
 In scope:
 - HTTP lifecycle, loopback binding, Host/request-target parsing, limits, errors, and authentication timing.
@@ -106,10 +106,10 @@ git diff --check
 Recorded implementation evidence for commit `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03` (the capability-routing code commit):
 - Windows local suite: 118 passed, 3 skipped, 0 failed (121 total).
 - `npm run check` and `git diff --check`: passed.
-- GitHub Actions for the current review target `7856ae84819f237f78dbdb90eff5f937eda43346`: workflow run `42493528396` passed all four Node 24/26 × Linux/Windows jobs. The implementation commit also had its own successful matrix as recorded in the PR.
+- The documentation handoff commit `7856ae84819f237f78dbdb90eff5f937eda43346` passed all four Node 24/26 × Linux/Windows jobs in workflow run `42493528396`. The subsequent target-correction commit `b4ca0a8863a8ac759eea87fa62f9a91f986075d2` passed all four jobs in workflow run `42494034252`.
 - Isolated Chrome 157 acceptance: valid/invalid Operator auth, routing metrics, capability columns, filters, 390px layout, disconnect clearing, and empty local/session storage passed. This was functional DOM/layout acceptance, not pixel-level visual review.
 
-The Chrome acceptance and 118/3 test counts are author-provided evidence for implementation commit `1eaa1c04`; the later `7856ae8` commit updates the review handoff documentation. These are not independent results. The reviewer must check out and rerun the exact review target SHA above, then record independent results. Three Windows skips are POSIX-specific permission/fsync tests; Linux CI exercises platform-specific cases.
+The Chrome acceptance and 118/3 test counts are author-provided evidence for implementation commit `1eaa1c04`; later commits update review-handoff documentation only. These are not independent results. The reviewer must fetch and check out the exact PR head at review start, rerun it, and record that SHA and independent results in the report. Three Windows skips are POSIX-specific permission/fsync tests; Linux CI exercises platform-specific cases.
 
 ## Suggested artifacts
 
