@@ -1,4 +1,4 @@
-# Internal Security Review Preparation
+### SEC-012 - Runtime retained and exposed an unnecessary plaintext Operator token Internal Security Review Preparation
 
 Status: in progress  
 Review type: internal code and test inspection; **not an independent security review**  
@@ -379,7 +379,7 @@ Mitigation:
 - Add an integration regression proving the rollback behavior and the documented recovery sequence: Operator recovery rejects the old token, and Participant revocation rejects the old Participant/Lease credentials.
 
 Verification:
-- Windows local npm test: 111 passed, 3 skipped, 0 failed (114 total). The focused Restore credential rollback/recovery regression passed. npm run check and git diff --check passed. Supported-runtime CI run 42483216441 passed all four Node 24/26 x Linux/Windows jobs.
+- Windows local npm test: 111 passed, 3 skipped, 0 failed (114 total). The focused Restore credential rollback/recovery regression passed. npm run check and git diff --check passed. Supported-runtime CI run 42483414521 passed all four Node 24/26 x Linux/Windows jobs.
 
 Residual risk:
 - The procedure is operational and requires the operator to follow it. A user who starts workers before revoking restored Participants can temporarily re-enable old credentials. Restore intentionally preserves snapshot state and does not silently invalidate identities. Independent security review remains pending.
@@ -402,7 +402,7 @@ Remediation:
 - Add a regression proving first-start token access succeeds once and subsequent access, plus all existing-database startup access, returns undefined.
 
 Verification:
-- Windows local npm test: 112 passed, 3 skipped, 0 failed (115 total). The one-time runtime-token getter regression passed. npm run check and git diff --check passed. Supported-runtime CI run 42483216441 passed all four Node 24/26 x Linux/Windows jobs.
+- Windows local npm test: 112 passed, 3 skipped, 0 failed (115 total). The one-time runtime-token getter regression passed. npm run check and git diff --check passed. Supported-runtime CI run 42483414521 passed all four Node 24/26 x Linux/Windows jobs.
 
 Residual risk:
 - The server still must briefly hold the generated token to display it once at first initialization, and the HTTP layer retains only its hash for request authentication. Same-process memory inspection and privileged local access remain outside this control. Independent security review remains pending.
