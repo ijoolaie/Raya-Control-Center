@@ -58,9 +58,14 @@ export async function startControlCenter({
       });
       return shutdownPromise;
     };
+    let initialOperatorToken = operator.created ? operator.token : undefined;
     return {
       server,
-      operatorToken: operator.token,
+      get operatorToken() {
+        const token = initialOperatorToken;
+        initialOperatorToken = undefined;
+        return token;
+      },
       operatorTokenCreated: operator.created,
       shutdown
     };

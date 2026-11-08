@@ -383,3 +383,26 @@ Verification:
 
 Residual risk:
 - The procedure is operational and requires the operator to follow it. A user who starts workers before revoking restored Participants can temporarily re-enable old credentials. Restore intentionally preserves snapshot state and does not silently invalidate identities. Independent security review remains pending.
+
+### SEC-012 - Runtime retained and exposed an unnecessary plaintext Operator token
+
+Severity: **Low**
+Status: **Remediated; local full suite passed**
+
+Evidence:
+- startControlCenter returned operatorToken as a normal property for every startup, including when an existing token was supplied through the environment.
+- The only production consumer was server.js, which needs the token once only when the database is first initialized. After the initial display, the runtime object continued to retain the plaintext token for the full server lifetime; after rotation that retained value was stale.
+
+Impact:
+- Any code holding the runtime object could read a plaintext credential that it did not need. After rotation the retained token was invalid, but it remained unnecessary secret material in memory. This was not an API authentication bypass.
+
+Remediation:
+- Return the bootstrap token through a one-time consuming getter only when a new token was generated.
+- Existing credentials are never exposed on the runtime return object.
+- Add a regression proving first-start token access succeeds once and subsequent access, plus all existing-database startup access, returns undefined.
+
+Verification:
+- Windows local npm test: 112 passed, 3 skipped, 0 failed (115 total). The one-time runtime-token getter regression passed. npm run check and git diff --check passed. Supported-runtime CI pending.
+
+Residual risk:
+- The server still must briefly hold the generated token to display it once at first initialization, and the HTTP layer retains only its hash for request authentication. Same-process memory inspection and privileged local access remain outside this control. Independent security review remains pending.

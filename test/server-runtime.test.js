@@ -9,6 +9,27 @@ import { openDatabase } from '../src/db.js';
 import { startControlCenter } from '../src/server-runtime.js';
 import { inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
 
+test('runtime exposes a newly generated Operator token once and never returns an existing token', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-runtime-token-exposure-'));
+  const databasePath = join(directory, 'runtime.sqlite');
+  let runtime;
+  try {
+    runtime = await startControlCenter({ databasePath, port: 0 });
+    assert.equal(runtime.operatorTokenCreated, true);
+    const initialToken = runtime.operatorToken;
+    assert.match(initialToken, /^[A-Za-z0-9_-]{32,1024}$/);
+    assert.equal(runtime.operatorToken, undefined, 'the bootstrap token must be consumed after one read');
+    await runtime.shutdown();
+    runtime = undefined;
+
+    runtime = await startControlCenter({ databasePath, port: 0, operatorToken: initialToken });
+    assert.equal(runtime.operatorTokenCreated, false);
+    assert.equal(runtime.operatorToken, undefined, 'an existing Operator token is not returned by the runtime');
+  } finally {
+    if (runtime?.server.listening) await runtime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('offline Operator token recovery is excluded while the server is running and works after shutdown', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-token-recovery-'));
   const databasePath = join(directory, 'recovery.sqlite');
