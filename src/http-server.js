@@ -74,7 +74,7 @@ function validateQuery(method, url) {
 }
 function bearer(req) {
   const value = req.headers.authorization;
-  const match = typeof value === 'string' && /^Bearer ([A-Za-z0-9_-]{32,})(?![\s\S])/.exec(value);
+  const match = typeof value === 'string' && /^Bearer ([A-Za-z0-9_-]{32,1024})(?![\s\S])/.exec(value);
   return match ? match[1] : null;
 }
 
@@ -136,7 +136,7 @@ function statusFor(error) {
 export function createControlServer({ db, operatorToken }) {
   if (!db) throw new TypeError('A database connection is required');
   if (typeof operatorToken !== 'string' || !/^[A-Za-z0-9_-]{32,1024}(?![\s\S])/.test(operatorToken)) {
-    throw new TypeError('A valid operator token (at least 32 URL-safe characters) is required');
+    throw new TypeError('A valid operator token (32 to 1024 URL-safe characters) is required');
   }
   const center = new ControlCenter(db);
   let operatorHash = hash(operatorToken).toString('hex');
