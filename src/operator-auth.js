@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const timestamp = () => new Date().toISOString();
-const isValidOperatorToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{32,}$/.test(value);
+const isValidOperatorToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{32,}(?![\s\S])/.test(value);
 
 export function bootstrapOperatorToken(db, suppliedToken = process.env.RAYA_CC_OPERATOR_TOKEN) {
   const existing = db.prepare("SELECT value FROM settings WHERE key = 'operator_token_hash'").get();

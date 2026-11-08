@@ -11,6 +11,8 @@ const jsonHeaders = { 'content-type': 'application/json' };
 test('operator token is bootstrapped once, verified on restart, and rotatable', () => {
   const invalidDb = openDatabase(':memory:');
   assert.throws(() => bootstrapOperatorToken(invalidDb, 'invalid+token/'.padEnd(40, 'x')), /letters, digits, underscore, or hyphen/);
+  assert.throws(() => bootstrapOperatorToken(invalidDb, 'x'.repeat(32) + String.fromCharCode(10)), /letters, digits, underscore, or hyphen/);
+  assert.throws(() => bootstrapOperatorToken(invalidDb, 'x'.repeat(32) + '\\n'), /letters, digits, underscore, or hyphen/);
   assert.equal(invalidDb.prepare('SELECT value FROM settings').get(), undefined);
   invalidDb.close();
   const db = openDatabase(':memory:');
@@ -33,6 +35,8 @@ test('operator token rotation is immediate and invalidates the previous token', 
   const db = openDatabase(':memory:');
   const originalToken = 'operator-rotation-original-token-123456';
   assert.throws(() => createControlServer({ db, operatorToken: 'invalid+token/'.padEnd(40, 'x') }), /URL-safe/);
+  assert.throws(() => createControlServer({ db, operatorToken: 'x'.repeat(32) + String.fromCharCode(10) }), /URL-safe/);
+  assert.throws(() => createControlServer({ db, operatorToken: 'x'.repeat(32) + '\\n' }), /URL-safe/);
   const server = createControlServer({ db, operatorToken: originalToken });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
