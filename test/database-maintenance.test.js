@@ -740,6 +740,41 @@ test('lock release reports a directory-fsync failure after unlink without recrea
   }
 });
 
+test('runtime lock crash windows preserve exact artifacts across process termination', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-crash-windows-'));
+  const worker = new URL('../test-support/runtime-lock-crash-worker.js', import.meta.url);
+  const cases = [
+    { mode: 'after-open', expected: '' },
+    { mode: 'after-partial-write', expected: '{\"pid\":' },
+    { mode: 'after-file-fsync', expected: 'valid-owner' },
+    { mode: 'after-unlink', expected: null }
+  ];
+  try {
+    for (const scenario of cases) {
+      const database = join(directory, scenario.mode + '.sqlite');
+      const lockPath = database + '.maintenance.lock';
+      const result = spawnSync(process.execPath, [fileURLToPath(worker), scenario.mode, database], { encoding: 'utf8', timeout: 15000 });
+      assert.notEqual(result.status, 0, scenario.mode + ' must terminate before normal completion');
+      assert.notEqual(result.stdout, 'unexpected-normal-exit');
+      if (scenario.expected === null) {
+        assert.equal(existsSync(lockPath), false, 'unlink must remain visible after process termination');
+      } else {
+        assert.equal(existsSync(lockPath), true, 'lock artifact must remain after ' + scenario.mode);
+        const contents = readFileSync(lockPath, 'utf8');
+        if (scenario.expected === 'valid-owner') {
+          const owner = JSON.parse(contents);
+          assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
+          assert.equal(typeof owner.startedAt, 'string');
+        } else {
+          assert.equal(contents, scenario.expected);
+        }
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('backup destination lock serializes backups across processes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-cross-process-'));
   const firstDatabase = join(directory, 'first.sqlite');
