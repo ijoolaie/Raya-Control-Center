@@ -1,7 +1,9 @@
 ﻿# Independent Security Review Handoff
 
 Status: **Prepared; independent review not yet performed**
-Target commit: `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03`
+Review target (current PR head): `7856ae84819f237f78dbdb90eff5f937eda43346`
+Capability-routing implementation commit: `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03`
+The review target includes the implementation commit and the subsequent documentation-only handoff commit.
 Repository: `ijoolaie/Raya-Control-Center`
 Branch: `bootstrap/project-foundation`
 PR: [#1](https://github.com/ijoolaie/Raya-Control-Center/pull/1) — keep Open, Draft, Unmerged.
@@ -13,7 +15,7 @@ This is a handoff for a reviewer independent of the implementation. Internal cod
 
 ## Scope
 
-Review the exact SHA above unless a later SHA is explicitly agreed. Confirm `git rev-parse HEAD` before testing.
+Review the exact PR-head SHA above. Confirm `git rev-parse HEAD` equals `7856ae84819f237f78dbdb90eff5f937eda43346` before testing. Do not review only the earlier implementation commit; the PR head is the authoritative review target.
 
 In scope:
 - HTTP lifecycle, loopback binding, Host/request-target parsing, limits, errors, and authentication timing.
@@ -101,13 +103,13 @@ npm test -- --test-concurrency=1
 git diff --check
 ```
 
-Recorded evidence for the target commit:
+Recorded implementation evidence for commit `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03` (the capability-routing code commit):
 - Windows local suite: 118 passed, 3 skipped, 0 failed (121 total).
 - `npm run check` and `git diff --check`: passed.
-- GitHub Actions Node 24/26 on Linux/Windows: all four matrix combinations passed.
+- GitHub Actions for the current review target `7856ae84819f237f78dbdb90eff5f937eda43346`: workflow run `42493528396` passed all four Node 24/26 × Linux/Windows jobs. The implementation commit also had its own successful matrix as recorded in the PR.
 - Isolated Chrome 157 acceptance: valid/invalid Operator auth, routing metrics, capability columns, filters, 390px layout, disconnect clearing, and empty local/session storage passed. This was functional DOM/layout acceptance, not pixel-level visual review.
 
-These are author-provided results. The reviewer must rerun and record independent results. Three Windows skips are POSIX-specific permission/fsync tests; Linux CI exercises platform-specific cases.
+The Chrome acceptance and 118/3 test counts are author-provided evidence for implementation commit `1eaa1c04`; the later `7856ae8` commit updates the review handoff documentation. These are not independent results. The reviewer must check out and rerun the exact review target SHA above, then record independent results. Three Windows skips are POSIX-specific permission/fsync tests; Linux CI exercises platform-specific cases.
 
 ## Suggested artifacts
 
