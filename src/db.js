@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const migrations = [
@@ -84,15 +84,36 @@ const migrations = [
   }
 ];
 
+function restrictPrivateDatabaseFile(path, { optional = false } = {}) {
+  if (process.platform === 'win32') return;
+  try { chmodSync(path, 0o600); }
+  catch (error) {
+    if (optional && error.code === 'ENOENT') return;
+    throw error;
+  }
+  const mode = statSync(path).mode & 0o777;
+  if (mode !== 0o600) throw new Error('Database file permissions could not be restricted to owner-only access: ' + path);
+}
 export function openDatabase(filename = '.data/control-center.sqlite') {
   const path = filename === ':memory:' ? filename : resolve(filename);
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA foreign_keys = ON');
-  db.exec('PRAGMA busy_timeout = 5000');
-  if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-  migrate(db);
-  return db;
+  try {
+    // Restrict the main file before enabling WAL so newly created sidecars inherit its private mode.
+    if (path !== ':memory:') restrictPrivateDatabaseFile(path);
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA busy_timeout = 5000');
+    if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+    migrate(db);
+    if (path !== ':memory:') {
+      restrictPrivateDatabaseFile(path + '-wal', { optional: true });
+      restrictPrivateDatabaseFile(path + '-shm', { optional: true });
+    }
+    return db;
+  } catch (error) {
+    try { db.close(); } catch {}
+    throw error;
+  }
 }
 
 export function migrate(db) {

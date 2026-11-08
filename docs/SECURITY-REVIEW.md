@@ -144,10 +144,10 @@ The WAL recovery regression launches a child process, opens an immediate write t
 | Host validation | HTTP handler accepts loopback Host names and rejects others | Inspected; parser edge cases need independent testing |
 | HTTP limits | Header, request, body, keep-alive, and per-socket limits are configured | Inspected; existing integration coverage present |
 | Credential separation | Operator and Participant credentials use distinct routes and checks; lease token is separately required for worker mutations | Inspected; independent adversarial testing pending |
-| Token storage | Operator and Participant token hashes are stored; lease hashes are stored | Application behavior inspected; Windows data ACL helper available but not applied to the live data directory |
+| Token storage | Operator and Participant token hashes are stored; lease hashes are stored | POSIX main DB and WAL/SHM files are restricted to 0600; Windows ACL helper remains operator-managed and has not been applied to live data |
 | Audit immutability | SQLite triggers reject event UPDATE and DELETE | Inspected; privileged filesystem/database access can bypass application-level guarantees |
 | Dashboard | Operator token is held in page memory; dynamic values use `textContent`; no HTML injection sinks, console logging, or payload/result rendering | Static asset and source regression checks pass; interactive browser testing remains pending |
-| Backup/restore | Dedicated backup and offline restore implementation exists; fault-injection covers installation and rollback failures | POSIX backup/restored database modes are restricted to 0600; Windows ACLs on data and backup directories remain an operator responsibility |
+| Backup/restore | Dedicated backup and offline restore implementation exists; fault-injection covers installation and rollback failures | POSIX database, WAL/SHM, backup, and restored database modes are restricted to 0600; Windows ACLs on data and backup directories remain an operator responsibility |
 | Startup recovery | Expired active leases are reconciled before listening and periodically | Startup integration test exists; forced WAL termination and graceful runtime shutdown tests passed in CI on Node 24/26 Windows |
 
 ## Open review work
@@ -257,3 +257,31 @@ Verification:
 
 Residual risk:
 - The destination directory and its parent must still be protected while a snapshot is being generated. This change restricts the completed snapshot before publication, not the permissions of pre-existing directories or temporary-file exposure during generation. Windows ACLs remain operator-managed. Independent security review remains pending.
+### SEC-007 - SQLite database and WAL sidecars inherited permissive POSIX modes
+
+Severity: **Low**
+Status: **Remediated in code; Windows local regression suite passed 2026-11-08; POSIX CI verification pending**
+
+Evidence (pre-remediation):
+- `openDatabase` created or opened the SQLite database and enabled WAL without restricting the main database file mode.
+- On POSIX systems, SQLite file creation can inherit umask-derived permissions; with a common `022` umask, the database and its WAL/SHM sidecars could be readable by other local users when the parent directory was traversable.
+- The database contains participant metadata, task payloads, credential hashes, leases, and audit history.
+
+Impact:
+- Local accounts other than the application owner could read sensitive application state from the database or active WAL sidecars on hosts with permissive file and directory defaults.
+
+Remediation:
+- Restrict the main database file to POSIX mode `0600` immediately after opening it and before enabling WAL.
+- After migrations, restrict any existing WAL and SHM sidecars to `0600`; subsequent SQLite sidecars inherit the protected database mode.
+- Verify the effective mode and fail closed if it cannot be restricted.
+- Close the database handle if permission hardening or initialization fails.
+- Add a POSIX regression that verifies the main database and active WAL/SHM modes, then deliberately loosens the main DB mode and confirms reopening tightens it.
+- Document that Windows requires the separate operator-run NTFS ACL helper.
+
+Verification:
+- Windows local `npm test`: 108 passed, 3 skipped, 0 failed (111 total); POSIX mode regression is skipped on Windows.
+- `npm run check` and `git diff --check`: pending.
+- Node 24/26 Linux CI: pending.
+
+Residual risk:
+- This does not restrict pre-existing parent-directory permissions or Windows ACLs. A privileged local user can still access or replace files. Independent security review remains pending.

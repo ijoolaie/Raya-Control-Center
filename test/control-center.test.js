@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -17,6 +17,27 @@ function fixture(options) {
   return { db, center, participant: registered.participant, token: registered.token };
 }
 
+test('POSIX database and WAL files are restricted to owner-only permissions', { skip: process.platform === 'win32' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-cc-private-db-'));
+  const filename = join(dir, 'private.sqlite');
+  let db;
+  try {
+    db = openDatabase(filename);
+    new ControlCenter(db).createTask({ type: 'private.file.mode' });
+    for (const path of [filename, filename + '-wal', filename + '-shm']) {
+      assert.equal(existsSync(path), true, 'expected SQLite file to exist: ' + path);
+      assert.equal(statSync(path).mode & 0o777, 0o600, 'SQLite file must be owner-readable/writable only: ' + path);
+    }
+    db.close();
+    db = null;
+    chmodSync(filename, 0o644);
+    db = openDatabase(filename);
+    assert.equal(statSync(filename).mode & 0o777, 0o600, 'opening an existing database tightens its mode');
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('migrates a clean database and preserves task state across database reopen', () => {
   const dir = mkdtempSync(join(tmpdir(), 'raya-cc-'));
   const filename = join(dir, 'state.sqlite');
