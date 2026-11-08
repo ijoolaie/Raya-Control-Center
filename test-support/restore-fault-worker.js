@@ -91,6 +91,7 @@ if (mode.startsWith('directory-sync-failure-')) {
   const failureAt = Number(mode.slice('directory-sync-failure-'.length));
   const originalOpen = fs.openSync;
   const originalFsync = fs.fsyncSync;
+  const originalClose = fs.closeSync;
   const directories = new Set();
   let directorySyncCount = 0;
   fs.openSync = (target, flags, permissions) => {
@@ -99,6 +100,10 @@ if (mode.startsWith('directory-sync-failure-')) {
       try { if (fs.statSync(target).isDirectory()) directories.add(descriptor); } catch {}
     }
     return descriptor;
+  };
+  fs.closeSync = descriptor => {
+    directories.delete(descriptor);
+    return originalClose(descriptor);
   };
   fs.fsyncSync = descriptor => {
     if (directories.has(descriptor)) {
