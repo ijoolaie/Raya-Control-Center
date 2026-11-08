@@ -72,7 +72,6 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
   return () => {
     if (released) return;
     released = true;
-    try { closeSync(descriptor); } catch {}
     try {
       const current = JSON.parse(readFileSync(lockPath, 'utf8'));
       if (current.pid === owner.pid && current.startedAt === owner.startedAt) {
@@ -83,6 +82,8 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
+    } finally {
+      try { closeSync(descriptor); } catch {}
     }
   };
 }
