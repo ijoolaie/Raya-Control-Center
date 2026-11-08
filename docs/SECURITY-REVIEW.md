@@ -409,7 +409,7 @@ Residual risk:
 ### SEC-013 - Operator authorization decision survived token rotation during body receipt
 
 Severity: **Low**
-Status: **Remediated; focused regression passed, full local and supported-runtime CI verification pending**
+Status: **Remediated; full local suite, static checks, diff checks, and supported-runtime CI passed on commit `1eaa1c04`**
 
 Evidence:
 - The HTTP handler originally compared the supplied Operator token with the current hash once, before route processing.
@@ -428,7 +428,7 @@ Remediation:
 Verification:
 - Before the fix, the focused regression failed as expected: old-token request returned HTTP 201 after rotation.
 - After the fix, `node --test test/http-server.test.js` passed all 10 tests, including the new in-flight rotation regression.
-- Full local suite, static checks, diff checks, and supported-runtime CI remain to be run for this change.
+- Final verification on commit `1eaa1c04`: Windows local suite 118 passed, 3 skipped, 0 failed; `npm run check` and `git diff --check` passed; GitHub Actions Node 24/26 Linux and Windows all passed.
 
 Residual risk:
 - A synchronous operation that has already passed authorization and begun execution cannot be interrupted mid-operation by a later rotation; JavaScript event-loop execution serializes that operation with the rotation handler. Requests still awaiting their body are now checked after receipt. Independent security review remains pending.
