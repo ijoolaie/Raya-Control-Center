@@ -69,6 +69,20 @@ Recovery uses the same exclusive runtime lock as server startup. It refuses to r
 
 The runtime lock is a persistent SQLite sidecar next to the database with suffix `.runtime.lock`. Ownership is represented by an open `BEGIN IMMEDIATE` transaction, not by the sidecar file existing. The sidecar normally remains after shutdown; this is expected and it must not be deleted as routine cleanup. `npm run db:restore:inspect` reports `locks.runtime.active`: `true` means a process currently holds the lock, `false` means the sidecar is idle, and `null` means the artifact could not be validated (for example, a legacy JSON lock). Process termination releases the SQLite reservation automatically. Preserve and manually review any unrecognized legacy artifact before moving it aside.
 
+## Credential safety after Restore
+
+A database Backup is a point-in-time snapshot of the complete SQLite state. It includes the Operator token hash, Participant token hashes and statuses, active/revoked Lease records, and task assignments. Restoring an older snapshot therefore also rolls credential state back: an Operator token rotated after the snapshot can become valid again, a Participant revoked after the snapshot can become active again, and a previously active Lease token can become usable again if it has not expired. This is expected snapshot behavior, not a failure of the live revocation endpoints.
+
+**Do not reconnect workers or adapters immediately after Restore.** Use this sequence every time an older Backup is installed:
+
+1. Stop the Control Center and every Worker, adapter, and other client that can use Participant or Lease credentials.
+2. Restore the selected Backup using npm run db:restore -- <backup-file>.
+3. Before starting the server, rotate the restored Operator credential offline using npm run operator:recover (or pass the exact database path as documented above). Save the one-time token securely.
+4. Start the server using the recovered RAYA_CC_OPERATOR_TOKEN.
+5. Before restarting any Worker or adapter, list all active Participants with npm run cli -- participant list --status active and revoke every restored active Participant using npm run cli -- participant revoke <PARTICIPANT_ID>. Revocation also invalidates its active Leases and blocks affected nonterminal tasks.
+6. Re-register the required Participants and distribute their newly issued tokens only to their intended processes. Reassess blocked tasks and external side effects before creating replacement work.
+
+The blanket revocation is intentional: the restored database cannot identify which active Participant credentials were revoked or rotated after the Backup was taken. Re-registering all active Participants is the reliable way to ensure those stale credentials do not survive recovery. Keep all clients stopped until this sequence is complete.
 ## Windows data-directory permissions
 
 The database, WAL/SHM sidecars, and backups contain sensitive application state. On Windows, the default NTFS ACL inherited from a broadly writable parent directory may allow other local accounts to read or modify these files. Inspect the configured data directory and any separate backup directory before using the application with real data.

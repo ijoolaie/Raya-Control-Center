@@ -13,6 +13,8 @@ import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } f
 import { startControlCenter } from '../src/server-runtime.js';
 import { acquireDatabaseMaintenanceLock, inspectDatabaseFileLock, inspectDatabaseRuntimeLocks } from '../src/database-runtime-lock.js';
 import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
+import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
+import { recoverOperatorToken } from '../src/rotate-operator-token.js';
 
 
 
@@ -175,6 +177,68 @@ test('SQLite backup captures committed WAL data and restores a validated databas
   }
 });
 
+test('Restore rolls credential revocations back; offline recovery and participant re-provisioning invalidate restored credentials', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-restore-credential-rollback-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const originalOperatorToken = 'restore-credential-original-operator-token-123456';
+  let db;
+  try {
+    db = openDatabase(database);
+    bootstrapOperatorToken(db, originalOperatorToken);
+    const center = new ControlCenter(db);
+    const registered = center.registerParticipant({
+      displayName: 'restore rollback test worker',
+      kind: 'worker',
+      scopes: ['tasks:claim']
+    });
+    const task = center.createTask({ type: 'restore.credential.rollback' });
+    const claim = center.claimTask({ participantId: registered.participant.id, token: registered.token });
+    assert.equal(claim.task.id, task.id);
+    createDatabaseBackup(database, backup);
+
+    // Revoke and rotate after the snapshot; those later security changes are not in it.
+    rotateOperatorToken(db);
+    center.revokeParticipant(registered.participant.id);
+    assert.equal(center.authenticateParticipant(registered.token), null);
+    db.close();
+    db = null;
+
+    restoreDatabaseBackup(backup, database);
+    db = openDatabase(database);
+    assert.equal(bootstrapOperatorToken(db, originalOperatorToken).created, false,
+      'the pre-snapshot Operator token becomes valid again after Restore');
+    const restoredCenter = new ControlCenter(db);
+    assert.ok(restoredCenter.authenticateParticipant(registered.token),
+      'the pre-snapshot Participant token becomes valid again after Restore');
+    assert.equal(restoredCenter.startTask({
+      taskId: task.id,
+      participantId: registered.participant.id,
+      leaseToken: claim.lease.token
+    }).status, 'running', 'the pre-snapshot active Lease token is restored too');
+    db.close();
+    db = null;
+
+    const recoveredOperatorToken = recoverOperatorToken(database);
+    assert.notEqual(recoveredOperatorToken, originalOperatorToken);
+    db = openDatabase(database);
+    assert.throws(() => bootstrapOperatorToken(db, originalOperatorToken), /does not match/);
+    assert.equal(bootstrapOperatorToken(db, recoveredOperatorToken).created, false);
+
+    const postRecoveryCenter = new ControlCenter(db);
+    postRecoveryCenter.revokeParticipant(registered.participant.id);
+    assert.equal(postRecoveryCenter.authenticateParticipant(registered.token), null);
+    assert.equal(postRecoveryCenter.getTask(task.id).status, 'blocked');
+    assert.throws(() => postRecoveryCenter.startTask({
+      taskId: task.id,
+      participantId: registered.participant.id,
+      leaseToken: claim.lease.token
+    }), /lease|participant/i);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('restore refuses active WAL sidecars and rejects corrupt snapshots', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-'));
   const database = join(directory, 'source.sqlite');

@@ -359,3 +359,27 @@ Verification:
 
 Residual risk:
 - Startup sanitization occurs after Node process initialization. It does not defend against injected preload hooks, a compromised launcher, or a malicious same-user process that can inspect process memory/environment at launch. Production process supervisors should construct an explicit allowlisted child environment and must not pass Operator credentials to Worker processes. Independent security review remains pending.
+
+### SEC-011 - Restore can resurrect credentials revoked after the snapshot
+
+Severity: **Medium**
+Status: **Mitigated by a mandatory post-Restore credential-reset procedure; local full suite passed**
+
+Evidence:
+- SQLite Backup includes the settings.operator_token_hash, participants.token_hash and participant status, plus active Lease hashes/status and task assignments.
+- A regression test creates a Backup, then rotates the Operator token and revokes a Participant. Restoring the older Backup makes the old Operator token valid again, restores the Participant as active, and restores its previously active Lease token.
+- This is inherent point-in-time snapshot behavior; the live rotation and revocation operations themselves work as designed.
+
+Impact:
+- If clients reconnect immediately after restoring an older Backup, credentials revoked or rotated after the snapshot can become valid again. A restored unexpired Lease may also permit a worker to continue mutating a task.
+
+Mitigation:
+- Document a mandatory post-Restore sequence: keep all clients stopped, run offline Operator token recovery before server startup, start with the recovered token, revoke every restored active Participant before reconnecting any Worker/adapter, and re-register Participants with fresh tokens.
+- Participant revocation also revokes active Leases and blocks affected nonterminal tasks.
+- Add an integration regression proving the rollback behavior and the documented recovery sequence: Operator recovery rejects the old token, and Participant revocation rejects the old Participant/Lease credentials.
+
+Verification:
+- Windows local npm test: 111 passed, 3 skipped, 0 failed (114 total). The focused Restore credential rollback/recovery regression passed. npm run check and git diff --check passed. Supported-runtime CI pending.
+
+Residual risk:
+- The procedure is operational and requires the operator to follow it. A user who starts workers before revoking restored Participants can temporarily re-enable old credentials. Restore intentionally preserves snapshot state and does not silently invalidate identities. Independent security review remains pending.
