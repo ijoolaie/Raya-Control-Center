@@ -432,3 +432,29 @@ Verification:
 
 Residual risk:
 - A synchronous operation that has already passed authorization and begun execution cannot be interrupted mid-operation by a later rotation; JavaScript event-loop execution serializes that operation with the rotation handler. Requests still awaiting their body are now checked after receipt. Independent security review remains pending.
+
+### SEC-AUTO-001 - Dashboard refresh could repopulate data after Disconnect
+
+Severity: **Low**
+Status: **Remediated; focused regression, full local suite, static checks, and diff checks passed; supported-runtime CI verification pending**
+
+Evidence:
+- `dashboard/dashboard.js` previously allowed `refresh()` to update the DOM after its four parallel API requests completed, without checking whether the Operator session that initiated the refresh was still active.
+- `disconnect()` cleared the token and rendered empty states but did not cancel or invalidate in-flight refreshes.
+
+Impact:
+- A response arriving after Disconnect could repopulate operational data in the page after the user had ended the dashboard session. This was a local browser data-retention/UI-state issue; it did not bypass API authorization or restore the cleared Operator token.
+
+Remediation:
+- Give each connected session an epoch and each refresh an AbortController.
+- Abort the active refresh on Disconnect and when a newer refresh/session supersedes it.
+- Capture the initiating token and signal for requests; only the still-current session/refresh may render data, report errors, or update button state.
+- Clear any displayed error during Disconnect.
+
+Verification:
+- Added `test/dashboard-session.test.js`, which starts all four API requests, disconnects, then deliberately resolves the mocked requests successfully despite their aborted signals. It verifies that task/participant/event tables, routing metrics, status, and button state remain disconnected/empty.
+- Focused regression test passed locally. Full Windows local suite: 119 passed, 3 skipped, 0 failed (122 total). `npm run check` and `git diff --check` passed.
+- Local runtime was Node.js 22.23.2, below the declared Node >=24.15.0 engine; supported-runtime CI on Node 24/26 is pending for this patch.
+
+Residual risk:
+- AbortController is best-effort cancellation; the session/refresh epoch checks are the enforcement mechanism that prevents late responses from mutating the DOM. Independent security review remains pending.

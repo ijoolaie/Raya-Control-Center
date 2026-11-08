@@ -73,7 +73,7 @@ The reviewer should identify assumptions that are unstated, unrealistic, or inco
 16. Are backup publication, rollback, staging cleanup, and errors safe on Windows and POSIX?
 
 ### Dashboard, CLI, Worker
-17. Can untrusted API data reach HTML/script or URL sinks, or unsafe browser storage? Does disconnect clear sensitive state?
+17. Can untrusted API data reach HTML/script or URL sinks, or unsafe browser storage? Does disconnect clear sensitive state? Verify SEC-AUTO-001 against in-flight refreshes and overlapping sessions, including late success/error responses after Disconnect.
 18. Can CLI config, environment variables, error responses, process inheritance, or arguments leak credentials?
 19. Does the reference Worker constrain supported types/payloads and fail closed? Is its trust boundary accurately documented?
 

@@ -1,16 +1,18 @@
 (() => {
   'use strict';
   let operatorToken = '';
+  let sessionEpoch = 0;
+  let activeRefresh = null;
   const $ = id => document.getElementById(id);
   const escapeText = value => String(value ?? '—');
   const setText = (id, value) => { $(id).textContent = escapeText(value); };
   const cell = (tr, value) => { const td = document.createElement('td'); td.textContent = escapeText(value); tr.append(td); return td; };
   const pill = (td, value) => { const span = document.createElement('span'); span.className = 'pill ' + String(value).replace(/[^a-z_]/g, ''); span.textContent = value; td.replaceChildren(span); };
   const empty = (tbody, columns, message) => { tbody.replaceChildren(); const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = columns; td.className = 'empty'; td.textContent = message; tr.append(td); tbody.append(tr); };
-  async function request(path, auth = true) {
+  async function request(path, auth = true, { token = operatorToken, signal } = {}) {
     const headers = {};
-    if (auth) headers.authorization = 'Bearer ' + operatorToken;
-    const response = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin' });
+    if (auth) headers.authorization = 'Bearer ' + token;
+    const response = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin', signal });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.code || 'http_' + response.status);
     return data;
@@ -33,16 +35,24 @@
   }
   async function refresh() {
     if (!operatorToken) return;
+    const requestEpoch = sessionEpoch;
+    const requestToken = operatorToken;
+    activeRefresh?.abort();
+    const controller = new AbortController();
+    activeRefresh = controller;
+    const isCurrent = () => requestEpoch === sessionEpoch && activeRefresh === controller && operatorToken === requestToken;
     $('error').textContent = '';
     $('refresh').disabled = true;
     try {
       const q = filters();
+      const requestOptions = { token: requestToken, signal: controller.signal };
       const [tasksData, participantsData, eventsData, routingData] = await Promise.all([
-        request('/control/v1/tasks?' + q.task),
-        request('/control/v1/participants?' + q.participant),
-        request('/control/v1/events?' + q.events),
-        request('/control/v1/routing/summary')
+        request('/control/v1/tasks?' + q.task, true, requestOptions),
+        request('/control/v1/participants?' + q.participant, true, requestOptions),
+        request('/control/v1/events?' + q.events, true, requestOptions),
+        request('/control/v1/routing/summary', true, requestOptions)
       ]);
+      if (!isCurrent()) return;
       const tasks = tasksData.tasks || [], participants = participantsData.participants || [], events = eventsData.events || [];
       const routing = routingData.routing || {};
       const counts = tasks.reduce((acc, task) => { acc[task.status] = (acc[task.status] || 0) + 1; return acc; }, {});
@@ -71,21 +81,36 @@
       });
       setText('auth-status', 'Connected · data refreshed ' + new Date().toLocaleTimeString());
     } catch (error) {
+      if (!isCurrent() || error.name === 'AbortError') return;
       $('error').textContent = 'Could not load dashboard data: ' + error.message;
       if (error.message === 'authentication_required') disconnect('Authentication failed. Check the operator token.');
-    } finally { $('refresh').disabled = !operatorToken; }
+    } finally {
+      if (isCurrent()) {
+        activeRefresh = null;
+        $('refresh').disabled = false;
+      }
+    }
   }
   function disconnect(message = 'Disconnected') {
+    sessionEpoch++;
+    activeRefresh?.abort();
+    activeRefresh = null;
     operatorToken = ''; $('operator-token').value = ''; $('refresh').disabled = true;
     setText('auth-status', message);
     empty($('tasks-body'), 6, 'Connect to load tasks.');
     empty($('participants-body'), 6, 'Connect to load participants.');
     empty($('events-body'), 5, 'Connect to load events.');
+    $('error').textContent = '';
     ['metric-active','metric-queued','metric-blocked','metric-participants','metric-unmatched'].forEach(id => setText(id, '—'));
   }
   $('auth-form').addEventListener('submit', async event => {
-    event.preventDefault(); operatorToken = $('operator-token').value.trim();
-    if (operatorToken.length < 32) { disconnect('Token must contain at least 32 characters.'); return; }
+    event.preventDefault();
+    const token = $('operator-token').value.trim();
+    if (token.length < 32) { disconnect('Token must contain at least 32 characters.'); return; }
+    sessionEpoch++;
+    activeRefresh?.abort();
+    activeRefresh = null;
+    operatorToken = token;
     $('operator-token').value = ''; $('refresh').disabled = false; setText('auth-status', 'Connecting…'); await refresh();
   });
   $('disconnect').addEventListener('click', () => disconnect());
