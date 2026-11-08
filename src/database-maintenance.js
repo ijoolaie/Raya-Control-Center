@@ -301,7 +301,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata, cleanupWarnings };
   } catch (error) {
     try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); } catch {}
-    if (movedOriginal) {
+    if (movedOriginal && !installPublished) {
       if (!pathEntryExists(destination)) {
         try { renameSync(rollback, destination); syncDirectory(dirname(destination)); }
         catch (rollbackError) {
