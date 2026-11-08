@@ -5,7 +5,7 @@ The initial deployment assumes a single trusted machine but does not assume ever
 
 ## Required controls
 1. **Loopback binding:** API listens on 127.0.0.1 only. No wildcard bind.
-2. **Host validation:** reject requests whose Host header is not a loopback host.
+2. **Host validation:** accept only the exact `127.0.0.1`, `localhost`, or `[::1]` authority (optionally with a valid port); reject alternate numeric address spellings and all non-loopback authorities.
 3. **Scoped credentials:** distinct credentials per participant and purpose; least privilege; revocable.
 4. **Credential storage:** store only SHA-256 hashes of high-entropy random tokens. Never log or persist plaintext participant or lease tokens.
 5. **Operator separation:** operator token is separate from participant tokens; stored as a hash in the local settings table and shown only at bootstrap/rotation.

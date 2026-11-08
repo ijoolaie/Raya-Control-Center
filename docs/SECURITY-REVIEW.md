@@ -175,3 +175,29 @@ The WAL recovery regression launches a child process, opens an immediate write t
 Phase 4 security work remains **in progress**. This document is preparation for an independent review, not evidence that such a review has passed. Keep the API loopback-only until the independent review gate is completed.
 
 Backup temporary-file handling: failed VACUUM INTO operations remove partial snapshots in an error path. After a maintenance lock is acquired, the next operation removes only regular files matching the exact destination-specific UUID temp pattern; symlinks, directories, and preserved .pre-restore-* rollback files are not removed. A forced crash can leave a stale maintenance lock, which still requires operator verification before removal.
+
+### SEC-004 — URL canonicalization expanded the exact Host allowlist
+
+Severity: **Low**
+Status: **Remediated; local regression tests passed on 2026-11-08**
+
+Evidence (pre-remediation):
+- `src/http-server.js` passed the raw Host authority to the WHATWG `URL` parser and then compared only the canonicalized `hostname` with the loopback allowlist.
+- WHATWG URL parsing canonicalizes alternate numeric IPv4 forms such as the integer, hexadecimal, and octal spellings of `127.0.0.1` to the same hostname. Those forms were therefore accepted even though the documented policy names only the conventional loopback authorities.
+
+Impact:
+- The accepted Host syntax was broader than the explicit allowlist. These examples still canonicalize to loopback; this finding does not establish remote access or a network-boundary bypass. It is a strict-policy and parser-consistency defect.
+
+Remediation:
+- Validate the raw authority against the exact `127.0.0.1`, `localhost`, or `[::1]` forms, with an optional numeric port, before URL parsing.
+- Keep URL parsing as a secondary syntax/port validation step.
+- Add raw TCP regression cases for integer (`2130706433`), hexadecimal (`0x7f000001`), and octal (`0177.0.0.1`) spellings.
+- Document the exact accepted authority forms in the API and security contracts.
+
+Verification:
+- Windows local `npm test`: 108 passed, 2 skipped, 0 failed (110 total).
+- `npm run check` and `git diff --check` passed.
+- Supported-runtime CI for this change is pending.
+
+Residual risk:
+- This is an internal finding and has not been independently reviewed. The API remains loopback-only; no remote ingress is authorized.

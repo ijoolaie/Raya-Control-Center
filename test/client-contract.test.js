@@ -403,7 +403,7 @@ test('HTTP accepts only the documented loopback Host names with optional valid p
 });
 test('HTTP rejects malformed loopback Host port authorities', async () => {
   await createHarness(async ({ server }) => {
-    for (const host of ['localhost:abc', 'localhost:99999', '127.0.0.1:-1', '[::1]:abc', 'localhost:80/path']) {
+    for (const host of ['localhost:abc', 'localhost:99999', '127.0.0.1:-1', '[::1]:abc', 'localhost:80/path', '2130706433', '0x7f000001', '0177.0.0.1']) {
       const raw = await new Promise((resolve, reject) => {
         const socket = createConnection(server.address().port, '127.0.0.1');
         let response = '';

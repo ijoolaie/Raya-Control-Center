@@ -161,6 +161,10 @@ export function createControlServer({ db, operatorToken }) {
         // Host is an authority, not a URL: reject userinfo, path, query, fragment,
         // escapes, backslashes, and whitespace before using URL for hostname parsing.
         if (!hostHeader || /[\s/@\\?#%]/.test(hostHeader)) throw new Error('Invalid Host authority');
+        // Do not let WHATWG URL canonicalization expand the Host allowlist (for
+        // example, integer/octal/hex IPv4 spellings of 127.0.0.1).
+        if (!/^(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]{1,5})?$/i.test(hostHeader))
+          throw new Error('Host is not in the exact loopback allowlist');
         const parsedHost = new URL('http://' + hostHeader);
         if (parsedHost.username || parsedHost.password || parsedHost.pathname !== '/' || parsedHost.search || parsedHost.hash)
           throw new Error('Invalid Host authority');

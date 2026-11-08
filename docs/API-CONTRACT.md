@@ -95,7 +95,7 @@ Query parameters are route-specific and strict:
 - A known route used with an unsupported HTTP method returns `405 method_not_allowed` and an `Allow` header listing the supported methods; an unknown route returns `404 not_found`.
 - No CORS and no wildcard network binding.
 - HTTP parser framing errors (including conflicting Content-Length and Transfer-Encoding) are rejected by Node HTTP before route handling.
-- Host headers are restricted to `127.0.0.1`, `localhost`, and `::1`; other hosts receive `421 misdirected_request` without echoing the supplied host.
+- Host headers are restricted to the exact authorities `127.0.0.1`, `localhost`, and `[::1]`, optionally followed by a valid port; alternate numeric IPv4 spellings are rejected. Other hosts receive `421 misdirected_request` without echoing the supplied host.
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
