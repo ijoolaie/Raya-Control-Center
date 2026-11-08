@@ -129,7 +129,32 @@ export function inspectDatabaseFileLock(lockPath) {
 }
 
 export function inspectDatabaseRuntimeLocks(databasePath) {
-  const database = resolve(databasePath);
+  const absolute = resolve(databasePath);
+  const parentDirectory = dirname(absolute);
+  let database;
+  try {
+    // Match acquisition's canonical parent path without creating directories.
+    // Inspection must fail closed rather than report absent locks through an alias.
+    assertNoSymlinkParentComponents(parentDirectory);
+    let canonicalParent;
+    try { canonicalParent = realpathSync(parentDirectory); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      canonicalParent = parentDirectory;
+    }
+    database = join(canonicalParent, basename(absolute));
+    try {
+      if (lstatSync(database).isSymbolicLink()) {
+        throw new Error('Symbolic-link database paths are not supported for runtime locking.');
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  } catch (error) {
+    const reason = error.code || (error.message.includes('symbolic link') ? 'unsafe-database-path' : 'inspection-failed');
+    const unknown = suffix => ({ path: absolute + suffix, exists: null, kind: null, active: null, error: reason });
+    return { runtime: unknown('.runtime.lock'), maintenance: unknown('.maintenance.lock') };
+  }
   return {
     runtime: inspectDatabaseFileLock(database + '.runtime.lock'),
     maintenance: inspectDatabaseFileLock(database + '.maintenance.lock')

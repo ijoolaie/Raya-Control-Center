@@ -11,7 +11,7 @@ import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
-import { acquireDatabaseMaintenanceLock, inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
+import { acquireDatabaseMaintenanceLock, inspectDatabaseFileLock, inspectDatabaseRuntimeLocks } from '../src/database-runtime-lock.js';
 import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
 
 
@@ -768,6 +768,27 @@ test('restore inspection probes an idle SQLite sidecar without changing its file
     assert.deepEqual(readdirSync(directory).sort(), beforeNames);
     assert.deepEqual(readFileSync(lockPath), beforeBytes);
     assert.equal(existsSync(lockPath + '-journal'), false);
+  } finally {
+    release?.();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('runtime lock inspection fails closed for symlinked database parent paths', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-inspect-link-'));
+  const realDirectory = join(directory, 'real');
+  const linkedDirectory = join(directory, 'linked');
+  const database = join(realDirectory, 'live.sqlite');
+  let release;
+  try {
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    release = acquireDatabaseMaintenanceLock(database);
+    const report = inspectDatabaseRuntimeLocks(join(linkedDirectory, 'live.sqlite'));
+    assert.equal(report.maintenance.exists, null);
+    assert.equal(report.maintenance.active, null);
+    assert.equal(report.maintenance.error, 'unsafe-database-path');
+    assert.equal(report.runtime.exists, null);
+    assert.equal(existsSync(database + '.maintenance.lock'), true);
   } finally {
     release?.();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
