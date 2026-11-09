@@ -105,8 +105,8 @@
   }
   $('auth-form').addEventListener('submit', async event => {
     event.preventDefault();
-    const token = $('operator-token').value.trim();
-    if (token.length < 32) { disconnect('Token must contain at least 32 characters.'); return; }
+    const token = $('operator-token').value;
+    if (!/^[A-Za-z0-9_-]{32,1024}$/.test(token)) { disconnect('Token must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).'); return; }
     sessionEpoch++;
     activeRefresh?.abort();
     activeRefresh = null;

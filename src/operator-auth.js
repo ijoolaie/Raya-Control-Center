@@ -9,7 +9,7 @@ export function bootstrapOperatorToken(db, suppliedToken = process.env.RAYA_CC_O
 
   if (existing) {
     if (!isValidOperatorToken(suppliedToken)) {
-      throw new Error('RAYA_CC_OPERATOR_TOKEN must be the existing operator token using only letters, digits, underscore, or hyphen (at least 32 characters).');
+      throw new Error('RAYA_CC_OPERATOR_TOKEN must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).');
     }
     const candidate = Buffer.from(hash(suppliedToken), 'hex');
     const expected = Buffer.from(existing.value, 'hex');
@@ -20,7 +20,7 @@ export function bootstrapOperatorToken(db, suppliedToken = process.env.RAYA_CC_O
   }
 
   if (suppliedToken !== undefined && !isValidOperatorToken(suppliedToken)) {
-    throw new Error('RAYA_CC_OPERATOR_TOKEN must contain at least 32 characters and use only letters, digits, underscore, or hyphen.');
+    throw new Error('RAYA_CC_OPERATOR_TOKEN must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).');
   }
   const token = typeof suppliedToken === 'string'
     ? suppliedToken

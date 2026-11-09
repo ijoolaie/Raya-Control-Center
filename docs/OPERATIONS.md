@@ -39,7 +39,7 @@ The server also repeats lease reconciliation every 15 seconds while running. Thi
 
 - `RAYA_CC_PORT`: TCP port, default `4317`.
 - `RAYA_CC_DATABASE`: SQLite file path, default `.data/control-center.sqlite`.
-- `RAYA_CC_OPERATOR_TOKEN`: operator token, minimum 32 characters.
+- `RAYA_CC_OPERATOR_TOKEN`: operator token, 32–1024 URL-safe ASCII characters (letters, digits, `_`, or `-`).
 
 The API is local-only. Do not expose it through a reverse proxy, tunnel, port forward, or wildcard bind. Remote ingress is explicitly outside the MVP.
 

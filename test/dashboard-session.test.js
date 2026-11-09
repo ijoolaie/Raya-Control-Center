@@ -1,4 +1,4 @@
-﻿import test from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -41,13 +41,13 @@ async function createDashboard() {
     Date
   };
   vm.runInNewContext(source, context, { filename: 'dashboard.js' });
-  const connect = token => {
-    elements.get('operator-token').value = token.padEnd(40, 'x');
+  const submitToken = token => {
+    elements.get('operator-token').value = token;
     const submit = elements.get('auth-form').listeners.get('submit');
-    const connecting = submit({ preventDefault() {} });
-    return connecting;
+    return submit({ preventDefault() {} });
   };
-  return { elements, pending, connect, disconnect: () => elements.get('disconnect').listeners.get('click')() };
+  const connect = token => submitToken(token.padEnd(40, 'x'));
+  return { elements, pending, connect, submitToken, disconnect: () => elements.get('disconnect').listeners.get('click')() };
 }
 
 function responseFor(path, suffix) {
@@ -125,4 +125,14 @@ test('a previous session cannot overwrite a newer session refresh', async () => 
   assert.equal(elements.get('participants-body').children[0].children[0].textContent, 'new participant');
   assert.equal(elements.get('metric-participants').textContent, '2');
   assert.equal(elements.get('metric-unmatched').textContent, '3');
+});
+
+test('dashboard rejects Operator tokens outside the exact server length and alphabet before making API requests', async () => {
+  const { elements, pending, submitToken } = await createDashboard();
+  for (const invalid of ['x'.repeat(31), 'x'.repeat(1025), 'x'.repeat(39) + '!', 'x'.repeat(39) + ' ']) {
+    await submitToken(invalid);
+    assert.equal(pending.length, 0, 'invalid token must not reach the API');
+    assert.match(elements.get('auth-status').textContent, /between 32 and 1024 URL-safe ASCII characters/);
+    assert.equal(elements.get('operator-token').value, '', 'invalid token is cleared from the input');
+  }
 });
