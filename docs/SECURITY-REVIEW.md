@@ -436,7 +436,7 @@ Residual risk:
 ### SEC-AUTO-001 - Dashboard refresh could repopulate data after Disconnect
 
 Severity: **Low**
-Status: **Remediated; focused regression, full local suite, static checks, and diff checks passed; supported-runtime CI verification pending**
+Status: **Remediated; expanded local regression coverage and supported-runtime CI passed; independent review pending**
 
 Evidence:
 - `dashboard/dashboard.js` previously allowed `refresh()` to update the DOM after its four parallel API requests completed, without checking whether the Operator session that initiated the refresh was still active.
@@ -452,9 +452,9 @@ Remediation:
 - Clear any displayed error during Disconnect.
 
 Verification:
-- Added `test/dashboard-session.test.js`, which starts all four API requests, disconnects, then deliberately resolves the mocked requests successfully despite their aborted signals. It verifies that task/participant/event tables, routing metrics, status, and button state remain disconnected/empty.
-- Focused regression test passed locally. Full Windows local suite: 119 passed, 3 skipped, 0 failed (122 total). `npm run check` and `git diff --check` passed.
-- Local runtime was Node.js 22.23.2, below the declared Node >=24.15.0 engine; supported-runtime CI on Node 24/26 is pending for this patch.
+- Added `test/dashboard-session.test.js`, which starts all four API requests, disconnects, then deliberately resolves the mocked requests successfully despite their aborted signals. It verifies that task/participant/event tables, routing metrics, status, and button state remain disconnected/empty. Additional tests cover late request errors after Disconnect and ensure an older session cannot overwrite a newer session.
+- Focused regression test passed locally. Full Windows local suite on the current local worktree: 121 passed, 3 skipped, 0 failed (124 total). `npm run check` and `git diff --check` passed. A separate regression in `test/http-server.test.js` was made deterministic by ending the in-flight request body only after the token-rotation response, rather than relying on competing timers.
+- Local runtime was Node.js 22.23.2, below the declared Node >=24.15.0 engine; supported-runtime CI for the original SEC-AUTO-001 fix passed both full Node 24/26 × Linux/Windows runs [42499872878](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499872878) and [42499868351](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499868351). The expanded test-only changes described above are local and still need CI after authorized push.
 
 Residual risk:
 - AbortController is best-effort cancellation; the session/refresh epoch checks are the enforcement mechanism that prevents late responses from mutating the DOM. Independent security review remains pending.

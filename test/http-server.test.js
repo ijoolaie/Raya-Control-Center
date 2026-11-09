@@ -40,9 +40,10 @@ test('in-flight Operator request is re-authorized after token rotation', async (
   const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
   const body = JSON.stringify({ type: 'rotation.race.task' });
   let pending;
+  let inFlightRequest;
   try {
     pending = new Promise((resolve, reject) => {
-      const request = httpRequest(base + '/tasks', {
+      inFlightRequest = httpRequest(base + '/tasks', {
         method: 'POST',
         headers: {
           authorization: 'Bearer ' + originalToken,
@@ -55,16 +56,15 @@ test('in-flight Operator request is re-authorized after token rotation', async (
         response.on('data', chunk => { responseBody += chunk; });
         response.on('end', () => resolve({ status: response.statusCode, body: responseBody }));
       });
-      request.on('error', reject);
-      request.write(body.slice(0, 8));
-      setTimeout(() => request.end(body.slice(8)), 50);
+      inFlightRequest.on('error', reject);
+      inFlightRequest.write(body.slice(0, 8));
     });
 
-    await new Promise(resolve => setTimeout(resolve, 20));
     const rotated = await fetch(base + '/operator/rotate-token', {
       method: 'POST', headers: { authorization: 'Bearer ' + originalToken }
     });
     assert.equal(rotated.status, 200);
+    inFlightRequest.end(body.slice(8));
     const result = await pending;
     assert.equal(result.status, 401, 'a request whose body completes after rotation must not retain stale authorization');
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE type = 'rotation.race.task'").get().count, 0);

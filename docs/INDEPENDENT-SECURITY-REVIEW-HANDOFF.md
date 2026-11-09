@@ -97,11 +97,21 @@ From a clean checkout of the exact SHA (Node 24.15+; CI also uses Node 26):
 ```powershell
 node --version
 git rev-parse HEAD
-npm ci
 npm run check
 npm test -- --test-concurrency=1
 git diff --check
 ```
+
+The repository currently has no package-lock.json and declares no external npm dependencies. Do not run `npm ci` for this checkout; there is no lockfile. The test and check commands use Node built-ins.
+
+### Latest PR-head evidence — SEC-AUTO-001
+
+- Fix commit: `99187713115f3d722a02fe5baed0db0cd03eb5ce`.
+- Dashboard refreshes capture their session epoch and token; Disconnect invalidates the epoch and aborts the in-flight refresh. Late responses must not mutate tables, metrics, status, errors, or button state. Starting a new session invalidates prior refreshes.
+- Regression test: `test/dashboard-session.test.js` starts the four API requests, disconnects, then resolves the mocked requests successfully despite abort; it verifies the disconnected UI remains cleared.
+- Local Windows full suite on the current local worktree: 121 passed, 3 skipped, 0 failed (124 total); all three dashboard session regressions, the deterministic in-flight token-rotation regression, `npm run check`, and `git diff --check` passed. Local Node was 22.23.2, below the declared Node >=24.15.0 engine. The additional local test refinements are not yet on the PR head and require their own CI run after an authorized push.
+- Supported-runtime CI: runs [42499872878](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499872878) and [42499868351](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499868351) both passed all four jobs: Node 24/Linux, Node 24/Windows, Node 26/Linux, Node 26/Windows.
+- Reviewer must independently inspect SEC-AUTO-001 on the exact PR head at review start, including late success and error responses after Disconnect and overlapping sessions. These implementer tests and CI are evidence, not independent verification.
 
 Recorded implementation evidence for commit `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03` (the capability-routing code commit):
 - Windows local suite: 118 passed, 3 skipped, 0 failed (121 total).
