@@ -454,7 +454,15 @@ Remediation:
 Verification:
 - Added `test/dashboard-session.test.js`, which starts all four API requests, disconnects, then deliberately resolves the mocked requests successfully despite their aborted signals. It verifies that task/participant/event tables, routing metrics, status, and button state remain disconnected/empty. Additional tests cover late request errors after Disconnect and ensure an older session cannot overwrite a newer session.
 - Focused regression test passed locally. Full Windows local suite on the current local worktree: 121 passed, 3 skipped, 0 failed (124 total). `npm run check` and `git diff --check` passed. A separate regression in `test/http-server.test.js` was made deterministic by ending the in-flight request body only after the token-rotation response, rather than relying on competing timers.
-- Local runtime was Node.js 22.23.2, below the declared Node >=24.15.0 engine; supported-runtime CI for the original SEC-AUTO-001 fix passed both full Node 24/26 × Linux/Windows runs [42499872878](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499872878) and [42499868351](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499868351). The expanded test-only changes described above are local and still need CI after authorized push.
+- Local runtime was Node.js 22.23.2, below the declared Node >=24.15.0 engine; supported-runtime CI for the original SEC-AUTO-001 fix passed both full Node 24/26 × Linux/Windows runs [42499872878](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499872878) and [42499868351](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499868351). The expanded regression changes are included in PR head `bcd559845990479fb33760471f389d0b2b5e0c20` and passed two complete Node 24/26 Linux/Windows CI matrices (8/8 jobs total; runs 42567422511 and 42567415316).
 
 Residual risk:
 - AbortController is best-effort cancellation; the session/refresh epoch checks are the enforcement mechanism that prevents late responses from mutating the DOM. Independent security review remains pending.
+
+### SEC-AUTO-001 expanded regression and supported-runtime verification - bcd5598
+
+- Added separate regressions for late API errors after Disconnect and stale responses from an older session arriving after a newer session starts; retained the late-success-after-Disconnect regression.
+- Stabilized the in-flight token-rotation HTTP regression by holding the old request body open until the rotation response completes, removing timer-order dependence.
+- Local Windows full suite: 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine.
+- Commit `bcd559845990479fb33760471f389d0b2b5e0c20` passed both full Node 24/26 x Linux/Windows CI runs: [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) and [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316). All 8/8 job executions succeeded.
+- The independent security review remains pending; CI and implementer-authored tests are not independent verification.

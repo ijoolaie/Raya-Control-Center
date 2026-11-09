@@ -109,7 +109,7 @@ The repository currently has no package-lock.json and declares no external npm d
 - Fix commit: `99187713115f3d722a02fe5baed0db0cd03eb5ce`.
 - Dashboard refreshes capture their session epoch and token; Disconnect invalidates the epoch and aborts the in-flight refresh. Late responses must not mutate tables, metrics, status, errors, or button state. Starting a new session invalidates prior refreshes.
 - Regression test: `test/dashboard-session.test.js` starts the four API requests, disconnects, then resolves the mocked requests successfully despite abort; it verifies the disconnected UI remains cleared.
-- Local Windows full suite on the current local worktree: 121 passed, 3 skipped, 0 failed (124 total); all three dashboard session regressions, the deterministic in-flight token-rotation regression, `npm run check`, and `git diff --check` passed. Local Node was 22.23.2, below the declared Node >=24.15.0 engine. The additional local test refinements are not yet on the PR head and require their own CI run after an authorized push.
+- Local Windows full suite on the current local worktree: 121 passed, 3 skipped, 0 failed (124 total); all three dashboard session regressions, the deterministic in-flight token-rotation regression, `npm run check`, and `git diff --check` passed. Local Node was 22.23.2, below the declared Node >=24.15.0 engine. The expanded test refinements are included in PR head `bcd559845990479fb33760471f389d0b2b5e0c20`; both full supported-runtime CI runs [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) and [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316) passed all four jobs (Node 24/26 × Linux/Windows), 8/8 total.
 - Supported-runtime CI: runs [42499872878](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499872878) and [42499868351](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42499868351) both passed all four jobs: Node 24/Linux, Node 24/Windows, Node 26/Linux, Node 26/Windows.
 - Reviewer must independently inspect SEC-AUTO-001 on the exact PR head at review start, including late success and error responses after Disconnect and overlapping sessions. These implementer tests and CI are evidence, not independent verification.
 
@@ -148,3 +148,13 @@ Also record reviewer identity/independence, date, exact SHA, OS/Node/tools/comma
 - Never include tokens, database contents, user data, or private logs in the package.
 - Use disposable isolated databases/directories; do not run destructive review tests against live `.data`.
 - Independent security review remains pending. This document is not a completed review or certification.
+
+### Expanded SEC-AUTO-001 regression evidence - current PR head bcd5598
+
+- Exact tested commit: `bcd559845990479fb33760471f389d0b2b5e0c20` (current PR head at the time this evidence was recorded).
+- Dashboard session regressions cover late successful responses after Disconnect, late API errors after Disconnect, and an older session attempting to overwrite a newer session.
+- The in-flight token-rotation regression now enforces ordering explicitly: keep the old request body open, complete token rotation, then send the remaining body and assert the old request is rejected. This avoids reliance on competing timers.
+- Local Windows suite: 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine.
+- CI run [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) passed Node 24/Linux, Node 24/Windows, Node 26/Linux, and Node 26/Windows.
+- Duplicate CI run [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316) passed the same four jobs. Total: 8/8 successful job executions across both runs.
+- Reviewer must still independently inspect the exact PR head at review start and reproduce these cases. These tests and CI are implementer evidence, not independent verification.
