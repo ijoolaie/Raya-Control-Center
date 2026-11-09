@@ -473,3 +473,13 @@ Residual risk:
 - Fresh local Windows validation on this checkout: `npm test -- --test-concurrency=1` — 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine.
 - Both CI runs for exact PR head `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49` passed the full Node 24/26 x Linux/Windows matrix: [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493), 8/8 job executions successful.
 - Independent security review remains pending; local tests and CI do not constitute independent verification.
+
+### Authoritative PR-head verification - 33aada8
+
+This section supersedes earlier notes that identify `bcd5598` or `e236c27` as the current PR head, or state that CI for `33aada8` is pending.
+
+- Current PR head: `33aada816360b247383c1796a4727a9d2115f9b0` (documentation-only synchronization; implementation code is unchanged from `e236c27`).
+- CI for exact current head passed all four Node 24/26 x Linux/Windows jobs in [42569592118](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569592118).
+- The preceding implementation/test head `bcd5598` passed both complete matrices [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) and [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316); `e236c27` passed both [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493).
+- Local Windows suite on `e236c27`: 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Node 22.23.2 is below the declared Node >=24.15.0 engine; CI provides supported Node 24/26 coverage.
+- Independent security review remains pending. The reviewer must fetch and review the exact PR head at review start. CI and implementer tests are not independent verification.

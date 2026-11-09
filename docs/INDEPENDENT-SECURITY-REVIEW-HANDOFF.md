@@ -167,3 +167,16 @@ Also record reviewer identity/independence, date, exact SHA, OS/Node/tools/comma
 - CI for exact head `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49`: [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493) both passed the complete Node 24/26 x Linux/Windows matrix (8/8 job executions total).
 - These checks are implementation/CI evidence only. Independent security review remains pending and must begin by fetching the then-current PR head SHA.
 - PR #1 remains Open, Draft, and Unmerged. API remains loopback-only. No live `.data`, ACLs, credentials, or network binding settings were changed.
+
+### Authoritative review handoff status - PR head 33aada8
+
+This section supersedes all earlier statements in this document that describe `bcd5598` or `e236c27` as the current PR head, or describe CI for `33aada8` as pending.
+
+- Current PR head verified against GitHub and local `HEAD`: `33aada816360b247383c1796a4727a9d2115f9b0`.
+- Commit `33aada8` changes documentation only; no application source or tests changed relative to `e236c27`.
+- CI for exact current head passed: workflow [42569592118](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569592118), all four jobs successful (Node 24/Linux, Node 24/Windows, Node 26/Linux, Node 26/Windows).
+- The immediately preceding implementation/test head `bcd5598` passed two complete CI matrices (8/8 jobs total): [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) and [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316). The documentation-only `e236c27` also passed two complete matrices: [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493).
+- Local Windows test result on `e236c27`: 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine; supported-runtime CI supplies Node 24/26 coverage.
+- Worktree was clean at the verified head before this documentation correction. No live `.data`, ACLs, credentials, or API binding settings were changed.
+- Review instructions remain unchanged: reviewer must fetch PR #1 immediately before review, record the exact then-current head SHA, check out that SHA, and independently rerun the review. No independent review has yet been performed. CI and implementer-authored tests are not independent verification.
+- PR #1 remains Open, Draft, and Unmerged. API remains loopback-only.
