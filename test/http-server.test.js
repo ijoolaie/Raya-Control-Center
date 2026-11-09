@@ -494,3 +494,89 @@ test('HTTP Operator capability management and capability-aware task claims', asy
     db.close();
   }
 });
+
+test('in-flight participant lease action is rejected when participant is revoked during body upload', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'operator-participant-race-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const operatorHeaders = { ...jsonHeaders, authorization: 'Bearer ' + operatorToken };
+  let inFlightRequest;
+  try {
+    const registeredResponse = await fetch(base + '/participants/register', {
+      method: 'POST', headers: operatorHeaders,
+      body: JSON.stringify({ displayName: 'participant-race', scopes: ['tasks:claim'] })
+    });
+    assert.equal(registeredResponse.status, 201);
+    const registered = await registeredResponse.json();
+
+    const createdResponse = await fetch(base + '/tasks', {
+      method: 'POST', headers: operatorHeaders,
+      body: JSON.stringify({ type: 'participant.revocation.race' })
+    });
+    assert.equal(createdResponse.status, 201);
+    const taskId = (await createdResponse.json()).task.id;
+
+    const claimResponse = await fetch(base + '/tasks/claim', {
+      method: 'POST',
+      headers: { ...jsonHeaders, authorization: 'Bearer ' + registered.token },
+      body: '{}'
+    });
+    assert.equal(claimResponse.status, 200);
+    const leaseToken = (await claimResponse.json()).claim.lease.token;
+    const started = await fetch(base + '/tasks/' + taskId + '/start', {
+      method: 'POST',
+      headers: { ...jsonHeaders, authorization: 'Bearer ' + registered.token, 'x-lease-token': leaseToken },
+      body: '{}'
+    });
+    assert.equal(started.status, 200);
+
+    const lastSeenBeforeRace = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const body = JSON.stringify({ result: { marker: 'must-not-commit-after-revocation' } });
+    const pending = new Promise((resolve, reject) => {
+      inFlightRequest = httpRequest(base + '/tasks/' + taskId + '/complete', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer ' + registered.token,
+          'x-lease-token': leaseToken,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body)
+        }
+      }, response => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { responseBody += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body: responseBody }));
+      });
+      inFlightRequest.on('error', reject);
+      inFlightRequest.write(body.slice(0, 8));
+    });
+
+    const authDeadline = Date.now() + 2000;
+    while (Date.now() < authDeadline) {
+      const lastSeen = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at;
+      if (lastSeen !== lastSeenBeforeRace) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.notEqual(db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at, lastSeenBeforeRace, 'request must pass initial participant authentication before revocation');
+
+    const revoked = await fetch(base + '/participants/' + registered.participant.id + '/revoke', {
+      method: 'POST', headers: operatorHeaders, body: '{}'
+    });
+    assert.equal(revoked.status, 200);
+    inFlightRequest.end(body.slice(8));
+
+    const result = await pending;
+    assert.equal(result.status, 409, 'lease must be revalidated after the delayed request body is read');
+    const task = db.prepare('SELECT status, result_json FROM tasks WHERE id = ?').get(taskId);
+    assert.equal(task.status, 'blocked');
+    assert.equal(task.result_json, null);
+  } finally {
+    inFlightRequest?.destroy();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
