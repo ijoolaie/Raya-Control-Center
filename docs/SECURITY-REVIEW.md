@@ -493,3 +493,11 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Limited implementer source reinspection revisited HTTP Host/request-target and bearer parsing, post-body Operator authorization, database path checks, SQLite runtime/maintenance locks, and Worker environment sanitization. No additional confirmed issue is recorded from this limited pass; this is not exhaustive and does not constitute independent verification.
 - Local automated security scanners `gitleaks`, `semgrep`, `codeql`, `osv-scanner`, and `trivy` are not installed and have not been run. No lockfile-backed npm dependency audit is available because this repository has no `package-lock.json` and declares no external npm dependencies.
 - No independent reviewer has submitted a review. Independent security review remains pending; this status is not a certification or proof of absence of vulnerabilities. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only. No live `.data`, ACLs, credentials, or network binding settings were changed.
+
+### Automated security workflow - first successful runs (2026-11-09)
+
+- Added `.github/workflows/security.yml` with Gitleaks full-history scanning and CodeQL JavaScript/TypeScript analysis. Actions are pinned to release commit SHAs; Gitleaks comments and SARIF artifact uploads are disabled.
+- Gitleaks passed in both Security Scans runs [42608720608](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720608) and [42608727762](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727762).
+- CodeQL completed and uploaded results in both runs. The logged scan covered 36/36 JavaScript files and 1/1 HTML files. The available connector did not expose the code-scanning alert inventory; successful analysis must not be interpreted as zero alerts. Review alerts in [GitHub Code Scanning](https://github.com/ijoolaie/Raya-Control-Center/security/code-scanning).
+- CI runs [42608720748](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720748) and [42608727733](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727733) passed all four Node 24/26 x Linux/Windows jobs in each run.
+- These are automated/implementer checks, not an independent security review. Independent review remains pending; PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.

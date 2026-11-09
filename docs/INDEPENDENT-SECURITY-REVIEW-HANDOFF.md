@@ -191,3 +191,11 @@ This section supersedes all earlier statements in this document that describe `b
 - `gitleaks`, `semgrep`, `codeql`, `osv-scanner`, and `trivy` are not installed in the local environment; none is claimed to have run. The repository has no `package-lock.json` and declares no external npm dependencies, so an npm audit would not provide a lockfile-backed dependency assessment.
 - GitHub reports no requested reviewers, submitted PR reviews, or review comments as of this check. Independent security review remains **pending**; the reviewer must fetch and record the then-current PR head before beginning.
 - PR #1 remains Open, Draft, and Unmerged. API remains loopback-only. No `.data`, ACLs, credentials, or network binding settings were changed.
+
+### Automated security workflow first-run evidence - 2026-11-09 - PR head 4242010
+
+- Added `.github/workflows/security.yml`. It runs Gitleaks against full Git history and CodeQL JavaScript/TypeScript analysis on pushes, pull requests, weekly schedule, and manual dispatch. Action dependencies are pinned to release commit SHAs; Gitleaks PR comments and SARIF artifact uploads are disabled.
+- Security workflow runs [42608720608](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720608) and [42608727762](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727762) both completed successfully. Gitleaks passed in both runs. CodeQL completed and uploaded its analysis results in both runs; the logged analysis covered 36/36 JavaScript files and 1/1 HTML files.
+- The available GitHub connector did not expose the CodeQL alert inventory/count. A successful analysis upload is not evidence of zero alerts. The reviewer/operator must inspect [GitHub Code Scanning](https://github.com/ijoolaie/Raya-Control-Center/security/code-scanning) and triage any reported alerts.
+- CI runs [42608720748](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720748) and [42608727733](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727733) both passed the complete Node 24/26 x Linux/Windows matrix (8/8 successful job executions per run).
+- These automated checks supplement but do not replace independent security review. No independent reviewer has submitted a report. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
