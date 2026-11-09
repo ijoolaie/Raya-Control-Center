@@ -129,7 +129,7 @@ test('a previous session cannot overwrite a newer session refresh', async () => 
 
 test('dashboard rejects Operator tokens outside the exact server length and alphabet before making API requests', async () => {
   const { elements, pending, submitToken } = await createDashboard();
-  for (const invalid of ['x'.repeat(31), 'x'.repeat(1025), 'x'.repeat(39) + '!', 'x'.repeat(39) + ' ']) {
+  for (const invalid of ['x'.repeat(31), 'x'.repeat(1025), 'x'.repeat(39) + '!', 'x'.repeat(39) + ' ', 'x'.repeat(39) + '\n', '\n' + 'x'.repeat(39), 'x'.repeat(39) + '\r\n', 'x'.repeat(39) + 'é']) {
     await submitToken(invalid);
     assert.equal(pending.length, 0, 'invalid token must not reach the API');
     assert.match(elements.get('auth-status').textContent, /between 32 and 1024 URL-safe ASCII characters/);
