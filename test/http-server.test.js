@@ -580,3 +580,77 @@ test('in-flight participant lease action is rejected when participant is revoked
     db.close();
   }
 });
+
+test('in-flight task claim is rejected when participant is revoked during body upload', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'operator-claim-race-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const operatorHeaders = { ...jsonHeaders, authorization: 'Bearer ' + operatorToken };
+  let inFlightRequest;
+  try {
+    const registeredResponse = await fetch(base + '/participants/register', {
+      method: 'POST', headers: operatorHeaders,
+      body: JSON.stringify({ displayName: 'claim-race', scopes: ['tasks:claim'] })
+    });
+    assert.equal(registeredResponse.status, 201);
+    const registered = await registeredResponse.json();
+
+    const createdResponse = await fetch(base + '/tasks', {
+      method: 'POST', headers: operatorHeaders,
+      body: JSON.stringify({ type: 'participant.claim.race' })
+    });
+    assert.equal(createdResponse.status, 201);
+    const taskId = (await createdResponse.json()).task.id;
+    const lastSeenBeforeRace = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const body = '{}';
+
+    const pending = new Promise((resolve, reject) => {
+      inFlightRequest = httpRequest(base + '/tasks/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer ' + registered.token,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body)
+        }
+      }, response => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { responseBody += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body: responseBody }));
+      });
+      inFlightRequest.on('error', reject);
+      inFlightRequest.write(body.slice(0, 1));
+    });
+
+    const authDeadline = Date.now() + 2000;
+    while (Date.now() < authDeadline) {
+      const lastSeen = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at;
+      if (lastSeen !== lastSeenBeforeRace) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.notEqual(db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(registered.participant.id).last_seen_at, lastSeenBeforeRace,
+      'claim request must pass initial participant authentication before revocation');
+
+    const revoked = await fetch(base + '/participants/' + registered.participant.id + '/revoke', {
+      method: 'POST', headers: operatorHeaders, body: '{}'
+    });
+    assert.equal(revoked.status, 200);
+    inFlightRequest.end(body.slice(1));
+
+    const result = await pending;
+    assert.equal(result.status, 401, 'claim must re-check participant status after body upload');
+    const task = db.prepare('SELECT status, assigned_participant_id, lease_id FROM tasks WHERE id = ?').get(taskId);
+    assert.equal(task.status, 'queued');
+    assert.equal(task.assigned_participant_id, null);
+    assert.equal(task.lease_id, null);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM leases WHERE task_id = ?').get(taskId).count, 0);
+  } finally {
+    inFlightRequest?.destroy();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
