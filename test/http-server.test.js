@@ -654,3 +654,74 @@ test('in-flight task claim is rejected when participant is revoked during body u
     db.close();
   }
 });
+
+test('in-flight lease action is rejected when lease expires during body upload', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'operator-expiry-race-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const operatorHeaders = { ...jsonHeaders, authorization: 'Bearer ' + operatorToken };
+  let inFlightRequest;
+  try {
+    const registration = await fetch(base + '/participants/register', {
+      method: 'POST', headers: operatorHeaders,
+      body: JSON.stringify({ displayName: 'lease-expiry-race', scopes: ['tasks:claim'] })
+    });
+    assert.equal(registration.status, 201);
+    const participant = await registration.json();
+    const createdResponse = await fetch(base + '/tasks', {
+      method: 'POST', headers: operatorHeaders, body: JSON.stringify({ type: 'lease.expiry.race' })
+    });
+    assert.equal(createdResponse.status, 201);
+    const taskId = (await createdResponse.json()).task.id;
+    const claimResponse = await fetch(base + '/tasks/claim', {
+      method: 'POST', headers: { ...jsonHeaders, authorization: 'Bearer ' + participant.token }, body: '{}'
+    });
+    assert.equal(claimResponse.status, 200);
+    const claim = (await claimResponse.json()).claim;
+    const leaseHeaders = { ...jsonHeaders, authorization: 'Bearer ' + participant.token, 'x-lease-token': claim.lease.token };
+    const started = await fetch(base + '/tasks/' + taskId + '/start', { method: 'POST', headers: leaseHeaders, body: '{}' });
+    assert.equal(started.status, 200);
+
+    const lastSeenBeforeRace = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(participant.participant.id).last_seen_at;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const body = JSON.stringify({ result: { marker: 'must-not-commit-after-expiry' } });
+    const pending = new Promise((resolve, reject) => {
+      inFlightRequest = httpRequest(base + '/tasks/' + taskId + '/complete', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + participant.token, 'x-lease-token': claim.lease.token,
+          'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
+      }, response => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { responseBody += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body: responseBody }));
+      });
+      inFlightRequest.on('error', reject);
+      inFlightRequest.write(body.slice(0, 8));
+    });
+
+    const authDeadline = Date.now() + 2000;
+    while (Date.now() < authDeadline) {
+      const lastSeen = db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(participant.participant.id).last_seen_at;
+      if (lastSeen !== lastSeenBeforeRace) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.notEqual(db.prepare('SELECT last_seen_at FROM participants WHERE id = ?').get(participant.participant.id).last_seen_at,
+      lastSeenBeforeRace, 'request must pass initial participant authentication before lease expiry');
+
+    db.prepare('UPDATE leases SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), claim.lease.id);
+    inFlightRequest.end(body.slice(8));
+    const result = await pending;
+    assert.equal(result.status, 409, 'expired lease must be rejected after delayed request body is read');
+    const task = db.prepare('SELECT status, result_json FROM tasks WHERE id = ?').get(taskId);
+    assert.equal(task.status, 'running');
+    assert.equal(task.result_json, null);
+  } finally {
+    inFlightRequest?.destroy();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
