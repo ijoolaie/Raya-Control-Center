@@ -501,3 +501,10 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - CodeQL completed and uploaded results in both runs. The logged scan covered 36/36 JavaScript files and 1/1 HTML files. The available connector did not expose the code-scanning alert inventory; successful analysis must not be interpreted as zero alerts. Review alerts in [GitHub Code Scanning](https://github.com/ijoolaie/Raya-Control-Center/security/code-scanning).
 - CI runs [42608720748](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720748) and [42608727733](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727733) passed all four Node 24/26 x Linux/Windows jobs in each run.
 - These are automated/implementer checks, not an independent security review. Independent review remains pending; PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
+
+### PR CodeQL alert result - 2026-11-09 - head 558a783
+
+- The GitHub `CodeQL` Check Run for PR #1 at exact head `558a7835b0abac498137d711ac6c87623ff1bb5c` completed successfully and reported: **No new alerts in code changed by this pull request**. Annotation count: 0.
+- Scope limitation: this means no new CodeQL alerts were reported in the PR's changed code. It does not prove that the default branch has no existing open alerts. The full branch alert inventory still needs review in GitHub Security > Code scanning.
+- CI runs [42608970562](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970562) and [42608964114](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964114) passed all four Node 24/26 x Linux/Windows jobs. Security Scans [42608970625](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970625) and [42608964174](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964174) also completed successfully.
+- Independent security review remains pending. No independent reviewer has been identified or submitted a report.

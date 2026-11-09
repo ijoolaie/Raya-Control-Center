@@ -199,3 +199,10 @@ This section supersedes all earlier statements in this document that describe `b
 - The available GitHub connector did not expose the CodeQL alert inventory/count. A successful analysis upload is not evidence of zero alerts. The reviewer/operator must inspect [GitHub Code Scanning](https://github.com/ijoolaie/Raya-Control-Center/security/code-scanning) and triage any reported alerts.
 - CI runs [42608720748](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608720748) and [42608727733](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608727733) both passed the complete Node 24/26 x Linux/Windows matrix (8/8 successful job executions per run).
 - These automated checks supplement but do not replace independent security review. No independent reviewer has submitted a report. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
+
+### Latest PR CodeQL check result - 2026-11-09 - head 558a783
+
+- GitHub Check Run `CodeQL` for PR #1 on exact head `558a7835b0abac498137d711ac6c87623ff1bb5c` completed successfully with summary: **No new alerts in code changed by this pull request**; annotations count was 0.
+- This result applies to newly changed code in PR #1 only. It does not establish that the default branch has no pre-existing open CodeQL alerts. The full branch alert inventory remains to be reviewed in GitHub Security > Code scanning.
+- Both CI runs [42608970562](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970562) and [42608964114](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964114) passed all four Node 24/26 x Linux/Windows jobs. Both Security Scans runs [42608970625](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970625) and [42608964174](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964174) completed successfully with Gitleaks and CodeQL jobs successful.
+- Independent security review remains pending. The repository commit list currently shows only the project owner as a contributor; no independent reviewer is identified or requested. PR #1 remains Open, Draft, and Unmerged.
