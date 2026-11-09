@@ -158,3 +158,12 @@ Also record reviewer identity/independence, date, exact SHA, OS/Node/tools/comma
 - CI run [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) passed Node 24/Linux, Node 24/Windows, Node 26/Linux, and Node 26/Windows.
 - Duplicate CI run [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316) passed the same four jobs. Total: 8/8 successful job executions across both runs.
 - Reviewer must still independently inspect the exact PR head at review start and reproduce these cases. These tests and CI are implementer evidence, not independent verification.
+
+### Latest PR-head verification - e236c27
+
+- Exact PR head: `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49` (`Update security review evidence for PR head`). This is a documentation-only synchronization commit; implementation code is unchanged from `bcd5598`.
+- The current PR head was fetched from GitHub and confirmed to match local `HEAD` and `origin/bootstrap/project-foundation`.
+- Fresh local Windows validation on this checkout: `npm test -- --test-concurrency=1` — 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 remains below the declared Node >=24.15.0 engine.
+- CI for exact head `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49`: [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493) both passed the complete Node 24/26 x Linux/Windows matrix (8/8 job executions total).
+- These checks are implementation/CI evidence only. Independent security review remains pending and must begin by fetching the then-current PR head SHA.
+- PR #1 remains Open, Draft, and Unmerged. API remains loopback-only. No live `.data`, ACLs, credentials, or network binding settings were changed.

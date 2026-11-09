@@ -466,3 +466,10 @@ Residual risk:
 - Local Windows full suite: 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine.
 - Commit `bcd559845990479fb33760471f389d0b2b5e0c20` passed both full Node 24/26 x Linux/Windows CI runs: [42567422511](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567422511) and [42567415316](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42567415316). All 8/8 job executions succeeded.
 - The independent security review remains pending; CI and implementer-authored tests are not independent verification.
+
+### PR-head synchronization and verification - e236c27
+
+- Documentation synchronization commit: `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49`; implementation code is unchanged from `bcd5598`.
+- Fresh local Windows validation on this checkout: `npm test -- --test-concurrency=1` — 121 passed, 3 skipped, 0 failed (124 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine.
+- Both CI runs for exact PR head `e236c2785412a6b5a5d610c8b9a99dbf8ffb6d49` passed the full Node 24/26 x Linux/Windows matrix: [42569062230](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569062230) and [42569057493](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42569057493), 8/8 job executions successful.
+- Independent security review remains pending; local tests and CI do not constitute independent verification.
