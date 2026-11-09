@@ -433,3 +433,86 @@ test('participant and task listing applies validated filters and bounded paginat
   assert.throws(() => center.listParticipants({ limit: 101 }), error => error.code === 'validation_error');
   db.close();
 });
+test('revocation blocks every active lease across claimed, running, and cancellation-requested states', () => {
+  const { db, center, participant, token } = fixture();
+  const claimedTask = center.createTask({ type: 'demo.revoke.claimed' });
+  const runningTask = center.createTask({ type: 'demo.revoke.running' });
+  const cancellingTask = center.createTask({ type: 'demo.revoke.cancelling' });
+
+  const claimed = center.claimTask({ participantId: participant.id, token });
+  const running = center.claimTask({ participantId: participant.id, token });
+  const cancelling = center.claimTask({ participantId: participant.id, token });
+  assert.equal(claimed.task.id, claimedTask.id);
+  assert.equal(running.task.id, runningTask.id);
+  assert.equal(cancelling.task.id, cancellingTask.id);
+
+  center.startTask({ taskId: runningTask.id, participantId: participant.id, leaseToken: running.lease.token });
+  center.startTask({ taskId: cancellingTask.id, participantId: participant.id, leaseToken: cancelling.lease.token });
+  assert.equal(center.requestCancellation(cancellingTask.id).status, 'cancellation_requested');
+
+  center.revokeParticipant(participant.id);
+
+  for (const task of [claimedTask, runningTask, cancellingTask]) {
+    const current = center.getTask(task.id);
+    assert.equal(current.status, 'blocked');
+    assert.equal(current.leaseId, null);
+    assert.equal(current.assignedParticipantId, null);
+  }
+  for (const claim of [claimed, running, cancelling]) {
+    assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'revoked');
+  }
+
+  assert.throws(() => center.startTask({
+    taskId: claimedTask.id, participantId: participant.id, leaseToken: claimed.lease.token
+  }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.heartbeatLease({
+    taskId: runningTask.id, participantId: participant.id, leaseToken: running.lease.token
+  }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.completeTask({
+    taskId: runningTask.id, participantId: participant.id, leaseToken: running.lease.token
+  }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.acknowledgeCancellation({
+    taskId: cancellingTask.id, participantId: participant.id, leaseToken: cancelling.lease.token
+  }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.getLeasedTaskStatus({
+    taskId: cancellingTask.id, participantId: participant.id, leaseToken: cancelling.lease.token
+  }), error => error.code === 'lease_mismatch');
+
+  db.close();
+});
+
+test('capability changes preserve existing work but prevent incompatible future claims', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  const worker = center.registerParticipant({
+    displayName: 'capability-downgrade-worker',
+    scopes: ['tasks:claim'],
+    capabilities: ['worker:python']
+  });
+  const activeTask = center.createTask({
+    type: 'route.active-before-downgrade',
+    requiredCapabilities: ['worker:python']
+  });
+  const activeClaim = center.claimTask({ participantId: worker.participant.id, token: worker.token });
+  center.startTask({
+    taskId: activeTask.id,
+    participantId: worker.participant.id,
+    leaseToken: activeClaim.lease.token
+  });
+
+  center.updateParticipantCapabilities(worker.participant.id, ['worker:node']);
+  const futureTask = center.createTask({
+    type: 'route.future-after-downgrade',
+    requiredCapabilities: ['worker:python']
+  });
+
+  assert.equal(center.claimTask({ participantId: worker.participant.id, token: worker.token }), null);
+  assert.equal(center.getTask(futureTask.id).status, 'queued');
+  assert.equal(center.completeTask({
+    taskId: activeTask.id,
+    participantId: worker.participant.id,
+    leaseToken: activeClaim.lease.token,
+    result: { completedUnderExistingLease: true }
+  }).status, 'succeeded');
+  db.close();
+});
