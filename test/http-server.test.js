@@ -473,6 +473,9 @@ test('serves the Operator dashboard and controlled recovery UI with restrictive 
     assert.match(pageText, /Task inspection &amp; recovery/);
     assert.match(pageText, /id="participant-inspector"/);
     assert.match(pageText, /Participant audit history/);
+    assert.match(pageText, /participant-capability-editor/);
+    assert.match(pageText, /participant-capability-confirm/);
+    assert.match(pageText, /Apply capability changes/);
     assert.match(pageText, /confirm-worker-stopped/);
     assert.match(pageText, /confirm-side-effects/);
     assert.match(pageText, /requeue-task/);

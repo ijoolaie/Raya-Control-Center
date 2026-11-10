@@ -67,6 +67,18 @@
         <p><strong>Updated:</strong> <span id="participant-detail-updated"></span></p>
         <p><strong>Last seen:</strong> <span id="participant-detail-last-seen"></span></p>
       </div>
+      <section id="participant-capability-editor" class="capability-editor" hidden>
+        <h3>Manage capabilities</h3>
+        <p class="warning-text">Changes affect future task claims only. Existing active Leases are not changed. Capabilities are scheduling labels, not security permissions.</p>
+        <label for="participant-capability-input">Capabilities (one identifier per line)</label>
+        <textarea id="participant-capability-input" maxlength="5200" rows="4" spellcheck="false" placeholder="worker:python&#10;tool:browser"></textarea>
+        <div class="capability-diff">
+          <p><strong>Added:</strong> <span id="participant-capability-added">None</span></p>
+          <p><strong>Removed:</strong> <span id="participant-capability-removed">None</span></p>
+        </div>
+        <label class="check-row"><input id="participant-capability-confirm" type="checkbox"> I reviewed this exact change and understand it applies only to future claims.</label>
+        <div class="recovery-actions"><button id="participant-capability-save" type="button" disabled>Apply capability changes</button><span id="participant-capability-status" class="muted" role="status"></span></div>
+      </section>
       <h3>Participant audit history</h3>
       <p class="muted">Append-only events. Capability changes apply to future claims only; revocation details include tasks blocked by that action.</p>
       <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Details</th><th>Sequence</th></tr></thead><tbody id="participant-events"><tr><td colspan="4" class="empty">Select a participant to inspect its history.</td></tr></tbody></table></div>

@@ -5,6 +5,7 @@
   let activeRefresh = null;
   let inspectedTaskId = '';
   let inspectedParticipantId = '';
+  let inspectedParticipant = null;
   const BLOCK_EVENTS = new Set(['task.lease_expired_blocked', 'task.participant_revoked_blocked']);
   const $ = id => document.getElementById(id);
   const escapeText = value => String(value ?? '—');
@@ -51,9 +52,17 @@
   }
   function closeParticipantInspector() {
     inspectedParticipantId = '';
+    inspectedParticipant = null;
     $('participant-inspector').hidden = true;
     $('participant-events').replaceChildren();
     $('participant-inspector-error').textContent = '';
+    $('participant-capability-editor').hidden = true;
+    $('participant-capability-input').value = '';
+    $('participant-capability-confirm').checked = false;
+    $('participant-capability-save').disabled = true;
+    $('participant-capability-status').textContent = '';
+    $('participant-capability-added').textContent = 'None';
+    $('participant-capability-removed').textContent = 'None';
   }
   function participantEventDetails(event) {
     const data = event.data && typeof event.data === 'object' ? event.data : {};
@@ -77,6 +86,12 @@
     if (!operatorToken) return;
     const epoch = sessionEpoch, token = operatorToken;
     inspectedParticipantId = participantId;
+    inspectedParticipant = null;
+    $('participant-capability-editor').hidden = true;
+    $('participant-capability-input').value = '';
+    $('participant-capability-confirm').checked = false;
+    $('participant-capability-save').disabled = true;
+    $('participant-capability-status').textContent = 'Loading participant…';
     $('participant-inspector').hidden = false;
     $('participant-inspector-error').textContent = '';
     setText('participant-summary', 'Loading participant ' + participantId + '…');
@@ -89,6 +104,13 @@
       ]);
       if (epoch !== sessionEpoch || token !== operatorToken || inspectedParticipantId !== participantId) return;
       const person = participantData.participant;
+      inspectedParticipant = person;
+      $('participant-capability-editor').hidden = person.status !== 'active';
+      $('participant-capability-input').value = (person.capabilities || []).join('\n');
+      $('participant-capability-confirm').checked = false;
+      $('participant-capability-status').textContent = person.status === 'active'
+        ? 'Changes are audited and apply to future claims only.' : 'Capability editing is available only for active participants.';
+      updateCapabilityPreview(false);
       const events = eventData.events || [];
       setText('participant-summary', person.displayName + ' · ' + person.id);
       setText('participant-detail-status', person.status);
@@ -113,6 +135,58 @@
     } catch (error) {
       if (epoch !== sessionEpoch || token !== operatorToken || error.name === 'AbortError') return;
       setText('participant-inspector-error', 'Could not inspect participant: ' + error.message);
+    }
+  }
+  function capabilityDraft() {
+    const raw = $('participant-capability-input').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    if (raw.length > 64) return {error:'Maximum 64 capabilities are allowed.'};
+    if (raw.some(value => !/^[a-z][a-z0-9:._-]{0,79}$/.test(value)))
+      return {error:'Each capability must be a lowercase identifier (a-z, 0-9, :, ., _, -).'};
+    if (new Set(raw).size !== raw.length) return {error:'Duplicate capabilities are not allowed.'};
+    return {capabilities:raw.sort()};
+  }
+  function updateCapabilityPreview(resetConfirmation = true) {
+    if (resetConfirmation) $('participant-capability-confirm').checked = false;
+    const draft = capabilityDraft();
+    const current = inspectedParticipant?.capabilities || [];
+    const valid = !draft.error;
+    const next = valid ? draft.capabilities : [];
+    const added = next.filter(value => !current.includes(value));
+    const removed = current.filter(value => !next.includes(value));
+    $('participant-capability-added').textContent = valid ? (added.join(', ') || 'None') : 'Invalid input';
+    $('participant-capability-removed').textContent = valid ? (removed.join(', ') || 'None') : 'Invalid input';
+    $('participant-capability-status').textContent = draft.error || '';
+    const changed = valid && JSON.stringify(next) !== JSON.stringify([...current].sort());
+    $('participant-capability-save').disabled = !changed || !$('participant-capability-confirm').checked;
+    return {draft, changed, added, removed};
+  }
+  async function updateParticipantCapabilities() {
+    const participantId = inspectedParticipantId;
+    if (!participantId || !operatorToken || !inspectedParticipant || inspectedParticipant.status !== 'active') return;
+    const preview = updateCapabilityPreview(false);
+    if (!preview.changed || !$('participant-capability-confirm').checked) return;
+    const epoch = sessionEpoch, token = operatorToken;
+    const summary = 'Participant: ' + inspectedParticipant.displayName + ' (' + participantId + ')\n'
+      + 'Added: ' + (preview.added.join(', ') || 'None') + '\n'
+      + 'Removed: ' + (preview.removed.join(', ') || 'None') + '\n'
+      + 'Existing active Leases will remain unchanged. Apply this capability update?';
+    if (!confirm(summary)) return;
+    $('participant-capability-save').disabled = true;
+    $('participant-capability-status').textContent = 'Applying capability update…';
+    $('participant-inspector-error').textContent = '';
+    try {
+      await request('/control/v1/participants/' + encodeURIComponent(participantId) + '/capabilities', true, {
+        token, method:'POST', body:{capabilities:preview.draft.capabilities}
+      });
+      if (epoch !== sessionEpoch || token !== operatorToken || inspectedParticipantId !== participantId) return;
+      $('participant-capability-status').textContent = 'Updated and recorded in the append-only audit history.';
+      await refresh();
+      if (epoch === sessionEpoch && token === operatorToken && inspectedParticipantId === participantId)
+        await inspectParticipant(participantId);
+    } catch (error) {
+      if (epoch !== sessionEpoch || token !== operatorToken || inspectedParticipantId !== participantId) return;
+      $('participant-inspector-error').textContent = 'Capability update rejected: ' + error.message;
+      updateCapabilityPreview(false);
     }
   }
   function updateRequeueButton() {
@@ -286,6 +360,9 @@
   $('refresh').addEventListener('click', refresh);
   $('close-inspector').addEventListener('click', closeInspector);
   $('close-participant-inspector').addEventListener('click', closeParticipantInspector);
+  $('participant-capability-input').addEventListener('input', () => updateCapabilityPreview(true));
+  $('participant-capability-confirm').addEventListener('change', () => updateCapabilityPreview(false));
+  $('participant-capability-save').addEventListener('click', updateParticipantCapabilities);
   $('recovery-reason').addEventListener('input', updateRequeueButton);
   $('confirm-worker-stopped').addEventListener('change', updateRequeueButton);
   $('confirm-side-effects').addEventListener('change', updateRequeueButton);
