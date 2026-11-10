@@ -920,6 +920,51 @@ test('Expect: 100-continue rejects declared oversized bodies before inviting upl
   }
 });
 
+test('Expect: 100-continue chunked bodies remain subject to the streaming 16 KiB limit', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'expect-chunked-review-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      let data = '';
+      let bodySent = false;
+      const timer = setTimeout(() => { socket.destroy(); reject(new Error('chunked oversized request did not receive a response')); }, 2000);
+      const crlf = String.fromCharCode(13, 10);
+      socket.on('connect', () => socket.write([
+        'POST /control/v1/tasks HTTP/1.1',
+        'Host: 127.0.0.1:' + port,
+        'Authorization: Bearer ' + operatorToken,
+        'Content-Type: application/json',
+        'Transfer-Encoding: chunked',
+        'Expect: 100-continue',
+        'Connection: close',
+        '', ''
+      ].join(crlf)));
+      socket.on('data', chunk => {
+        data += chunk.toString('latin1');
+        if (!bodySent && data.includes('100 Continue')) {
+          bodySent = true;
+          const oversized = '{"type":"expect.chunked","payload":"' + 'x'.repeat(17_000) + '"}';
+          socket.write(oversized.length.toString(16) + crlf + oversized + crlf + '0' + crlf + crlf);
+        }
+      });
+      socket.on('end', () => { clearTimeout(timer); resolve(data); });
+      socket.on('error', error => { clearTimeout(timer); reject(error); });
+    });
+    assert.equal(response.startsWith('HTTP/1.1 100 Continue'), true);
+    assert.equal(response.includes('HTTP/1.1 413 Payload Too Large'), true);
+    assert.match(response.slice(response.indexOf('HTTP/1.1 413')), /Connection: close/i);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
 test('client disconnect during an incomplete request body cannot create a task or poison later requests', async () => {
   const db = openDatabase(':memory:');
   const operatorToken = 'disconnect-body-review-token-123456';
