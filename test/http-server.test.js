@@ -857,7 +857,12 @@ test('raw HTTP parser rejects ambiguous framing and non-origin request targets',
       `http://127.0.0.1:${port}/control/v1/health`,
       '//attacker.example/control/v1/health',
       '/control\\v1/health',
-      '/control/v1/health#fragment'
+      '/control/v1/health#fragment',
+      '/control/v1/participants/%2e%2e/health',
+      '/control/v1/participants/%2E%2E/health',
+      '/control/v1/participants/../health',
+      '/control/v1/participants/a%2fb',
+      '/control/v1/participants/a%5cb'
     ]) {
       assert.equal(await probe(request(target)), 'HTTP/1.1 400 Bad Request', `non-origin or ambiguous request target rejected: ${target}`);
     }

@@ -34,6 +34,18 @@ function decodePathPart(value) {
   catch { throw new ControlCenterError('validation_error', 'Malformed URL path encoding'); }
 }
 
+function validateCanonicalPath(encodedPath) {
+  for (const segment of encodedPath.split('/')) {
+    let decoded;
+    try { decoded = decodeURIComponent(segment); }
+    catch { throw new ControlCenterError('validation_error', 'Malformed URL path encoding'); }
+    // WHATWG URL parsing normalizes literal and percent-encoded dot segments.
+    // Encoded separators can also turn one segment into several after decoding.
+    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\'))
+      throw new ControlCenterError('validation_error', 'Request path contains a non-canonical segment');
+  }
+}
+
 function validateQuery(method, url) {
   const path = url.pathname;
   let allowed = null;
@@ -185,6 +197,7 @@ export function createControlServer({ db, operatorToken }) {
       const queryStart = requestTarget.indexOf('?');
       const encodedPath = queryStart === -1 ? requestTarget : requestTarget.slice(0, queryStart);
       const encodedQuery = queryStart === -1 ? '' : requestTarget.slice(queryStart + 1);
+      validateCanonicalPath(encodedPath);
       try { decodeURI(encodedPath); }
       catch { throw new ControlCenterError('validation_error', 'Malformed URL path encoding'); }
       try { decodeURI(encodedQuery); }
