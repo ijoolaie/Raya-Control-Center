@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -148,6 +150,75 @@ test('startup reconciliation blocks persisted expired leases for every in-flight
       assert.equal(recoveryEvents[0].data.leaseId, item.leaseId);
     }
   } finally {
+    inspectionDb?.close();
+    if (runtime?.server.listening) await runtime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('server process crash releases its runtime lock and startup recovers its active task lease', { timeout: 15000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-server-process-crash-'));
+  const databasePath = join(directory, 'crash.sqlite');
+  const operatorToken = 'server-process-crash-recovery-token-'.repeat(2);
+  let child;
+  let runtime;
+  let inspectionDb;
+  try {
+    const workerPath = fileURLToPath(new URL('../test-support/server-crash-recovery-worker.js', import.meta.url));
+    child = spawn(process.execPath, [workerPath, databasePath, operatorToken], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+
+    const ready = await new Promise((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error('crash worker did not become ready: ' + stderr)), 8000);
+      const onData = () => {
+        const line = stdout.split(String.fromCharCode(10)).find(value => value.startsWith('{'));
+        if (!line) return;
+        clearTimeout(deadline);
+        child.stdout.off('data', onData);
+        try { resolve(JSON.parse(line)); } catch (error) { reject(error); }
+      };
+      child.stdout.on('data', onData);
+      child.once('error', error => { clearTimeout(deadline); reject(error); });
+      child.once('exit', (code, signal) => {
+        clearTimeout(deadline);
+        reject(new Error('crash worker exited before readiness (' + code + ', ' + signal + '): ' + stderr));
+      });
+    });
+
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    const [exitCode, signal] = await exited;
+    assert.ok(signal !== null || exitCode !== 0, 'server process must terminate uncleanly');
+    child = undefined;
+    assert.equal(inspectDatabaseFileLock(databasePath + '.runtime.lock').active, false);
+
+    inspectionDb = openDatabase(databasePath);
+    inspectionDb.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(ready.leaseId);
+    inspectionDb.close();
+    inspectionDb = undefined;
+
+    runtime = await startControlCenter({ databasePath, port: 0, operatorToken });
+    inspectionDb = openDatabase(databasePath);
+    const recovered = new ControlCenter(inspectionDb);
+    const task = recovered.getTask(ready.taskId);
+    assert.equal(task.status, 'blocked');
+    assert.equal(task.leaseId, null);
+    assert.equal(inspectionDb.prepare('SELECT status FROM leases WHERE id = ?').get(ready.leaseId).status, 'expired');
+    const events = recovered.listEvents({ entityType: 'task', entityId: ready.taskId, limit: 10 });
+    const recoveryEvents = events.filter(event => event.eventType === 'task.lease_expired_blocked');
+    assert.equal(recoveryEvents.length, 1);
+    assert.equal(recoveryEvents[0].data.previousStatus, 'running');
+    assert.equal(recoveryEvents[0].data.leaseId, ready.leaseId);
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await once(child, 'exit');
+    }
     inspectionDb?.close();
     if (runtime?.server.listening) await runtime.shutdown();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
