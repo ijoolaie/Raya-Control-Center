@@ -206,3 +206,12 @@ This section supersedes all earlier statements in this document that describe `b
 - This result applies to newly changed code in PR #1 only. It does not establish that the default branch has no pre-existing open CodeQL alerts. The full branch alert inventory remains to be reviewed in GitHub Security > Code scanning.
 - Both CI runs [42608970562](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970562) and [42608964114](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964114) passed all four Node 24/26 x Linux/Windows jobs. Both Security Scans runs [42608970625](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608970625) and [42608964174](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42608964174) completed successfully with Gitleaks and CodeQL jobs successful.
 - Independent security review remains pending. The repository commit list currently shows only the project owner as a contributor; no independent reviewer is identified or requested. PR #1 remains Open, Draft, and Unmerged.
+
+### Current independent-review handoff status — 2026-11-11 — 298df35
+
+- Current PR head verified against GitHub, local `HEAD`, and `origin/bootstrap/project-foundation`: `298df35484e9657206ca79ba5b04a629eddaea62`.
+- Exact-head CI passed on both push [42897060373](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897060373) and pull_request [42897068342](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897068342), covering Node 24/26 × Linux/Windows (8/8 successful jobs total).
+- Exact-head Security Scans passed on both push [42897060257](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897060257) and pull_request [42897068519](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897068519); CodeQL and Gitleaks succeeded in both.
+- GitHub currently shows no submitted PR reviews or review comments and no independent reviewer identified. The handoff package is prepared, but no independent security review has been performed.
+- Reviewer must fetch PR #1 immediately before review, record its then-current head SHA, check out that exact SHA, and independently test the documented scope. Do not rely on the SHA in this note if the PR advances.
+- PR #1 remains Open, Draft, and Unmerged. API remains loopback-only. No live `.data`, ACLs, credentials, or API binding settings were changed.

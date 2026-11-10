@@ -582,3 +582,11 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Security Scans passed on push [42895848388](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895848388) and pull_request [42895860146](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895860146). CodeQL JavaScript analysis and Gitleaks succeeded in both runs.
 - The working tree is clean and local `HEAD` matches `origin/bootstrap/project-foundation` at this exact commit. PR #1 remains Open, Draft, and Unmerged; the API remains bound to loopback.
 - These are automated CI/security results, not an independent security review. No independent reviewer has submitted a report; the review gate remains pending. No live `.data`, ACLs, credentials, or API binding settings were changed.
+
+### Latest PR-head verification — 2026-11-11 — 298df35
+
+- Exact PR head: `298df35484e9657206ca79ba5b04a629eddaea62`. This documentation-only commit synchronized the security review register with the preceding verified head `cda54be`; application source and tests are unchanged.
+- Exact-head CI passed on push [42897060373](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897060373) and pull_request [42897068342](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897068342). Each passed Node 24/26 × Linux/Windows (4/4 jobs; 8/8 total).
+- Security Scans passed on push [42897060257](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897060257) and pull_request [42897068519](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42897068519). CodeQL JavaScript analysis and Gitleaks succeeded in both runs.
+- GitHub reports no submitted PR reviews or review comments; no independent reviewer is recorded. Independent security review remains pending and must begin against the exact then-current PR head.
+- PR #1 remains Open, Draft, and Unmerged. API remains loopback-only. No application source, tests, live `.data`, ACLs, credentials, or network binding settings were changed.
