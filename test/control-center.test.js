@@ -345,6 +345,32 @@ test('heartbeat validates lease duration and extends an active lease', () => {
   db.close();
 });
 
+test('lease reconciliation preserves a heartbeat-renewed task and rejects renewal after expiry reconciliation', () => {
+  const { db, center, participant, token } = fixture();
+  const task = center.createTask({ type: 'demo.heartbeat-reconcile-order' });
+  const claim = center.claimTask({ participantId: participant.id, token });
+  center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token });
+
+  db.prepare('UPDATE leases SET expires_at = ? WHERE id = ?')
+    .run(new Date(Date.now() + 1000).toISOString(), claim.lease.id);
+  const renewed = center.heartbeatLease({
+    taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token,
+    leaseDurationMs: 60_000
+  });
+  assert.deepEqual(center.reconcileExpiredLeases(), []);
+  assert.equal(center.getTask(task.id).status, 'running');
+  assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'active');
+  assert.equal(db.prepare('SELECT expires_at FROM leases WHERE id = ?').get(claim.lease.id).expires_at, renewed.expiresAt);
+
+  db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(claim.lease.id);
+  assert.deepEqual(center.reconcileExpiredLeases(), [task.id]);
+  assert.equal(center.getTask(task.id).status, 'blocked');
+  assert.throws(() => center.heartbeatLease({
+    taskId: task.id, participantId: participant.id, leaseToken: claim.lease.token
+  }), error => error.code === 'lease_mismatch');
+  db.close();
+});
+
 test('task progress is lease-bound, independent from heartbeat, and audited', () => {
   const { db, center, participant, token } = fixture();
   const task = center.createTask({ type: 'demo.progress' });
