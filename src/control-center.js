@@ -427,6 +427,35 @@ export class ControlCenter {
     });
   }
 
+  requeueBlockedTask({ taskId, reason, confirmWorkerStopped, confirmSideEffectsReviewed }) {
+    if (typeof reason !== 'string' || !reason.trim() || reason.trim().length > 500)
+      throw new ControlCenterError('validation_error', 'A recovery reason of 1..500 characters is required');
+    if (confirmWorkerStopped !== true || confirmSideEffectsReviewed !== true)
+      throw new ControlCenterError('validation_error', 'Explicit confirmation that the previous worker is stopped and external side effects were reviewed is required');
+    return transaction(this.db, () => {
+      const task = this.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId);
+      if (!task) throw new ControlCenterError('not_found', 'Task not found');
+      if (task.status !== 'blocked')
+        throw new ControlCenterError('invalid_transition', 'Only blocked tasks can be requeued');
+      const blockingEvent = this.db.prepare(`SELECT event_type, data_json FROM events
+        WHERE entity_type = 'task' AND entity_id = ? ORDER BY sequence DESC LIMIT 1`).get(taskId);
+      if (!blockingEvent || !['task.lease_expired_blocked', 'task.participant_revoked_blocked'].includes(blockingEvent.event_type))
+        throw new ControlCenterError('invalid_transition', 'Task does not have a recognized blocking event');
+      const activeLease = this.db.prepare("SELECT id FROM leases WHERE task_id = ? AND status = 'active'").get(taskId);
+      if (activeLease) throw new ControlCenterError('conflict', 'Task still has an active lease record; reconcile and investigate before recovery');
+      const previousBlock = parse(blockingEvent.data_json);
+      const timestamp = now();
+      this.db.prepare(`UPDATE tasks SET status = 'queued', assigned_participant_id = NULL, lease_id = NULL,
+        started_at = NULL, finished_at = NULL, progress_json = NULL, result_json = NULL, updated_at = ?
+        WHERE id = ? AND status = 'blocked'`).run(timestamp, taskId);
+      appendEvent(this.db, { entityType: 'task', entityId: taskId, eventType: 'task.requeued', data: {
+        actorType: 'operator', reason: reason.trim(), previousBlockEventType: blockingEvent.event_type,
+        previousLeaseId: previousBlock.leaseId || null, confirmWorkerStopped: true, confirmSideEffectsReviewed: true
+      } });
+      return this.getTask(taskId);
+    });
+  }
+
   listEvents({ entityType, entityId, limit = 100 } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
       throw new ControlCenterError('validation_error', 'Event limit must be 1..500');

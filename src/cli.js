@@ -65,6 +65,7 @@ function usage() {
     '  npm run cli -- task get TASK_ID',
     '  npm run cli -- task list [--status queued] [--type TASK.TYPE] [--limit 50] [--offset 0]',
     '  npm run cli -- task cancel TASK_ID',
+    '  npm run cli -- task requeue TASK_ID --reason TEXT --confirm-worker-stopped --confirm-side-effects-reviewed',
     '  npm run cli -- events [--entity-type TYPE] [--entity-id ID] [--limit N]',
     '  npm run cli -- reconcile',
     '  npm run cli -- operator rotate',
@@ -149,6 +150,18 @@ export async function main(args = process.argv.slice(2)) {
     for (const key of ['status','type','assigned-participant-id','limit','offset']) if (opts[key] !== undefined) query.set(key === 'assigned-participant-id' ? 'assignedParticipantId' : key, String(opts[key]));
     const data = await callApi('/tasks' + (query.size ? '?' + query.toString() : ''));
     process.stdout.write(JSON.stringify(data, null, 2) + '\n'); return;
+  }
+  if (group === 'task' && action === 'requeue') {
+    if (!rest[0]) throw new Error('Task ID is required');
+    const opts = parseOptions(rest.slice(1));
+    if (typeof opts.reason !== 'string' || !opts.reason.trim()) throw new Error('--reason is required');
+    if (opts['confirm-worker-stopped'] !== true) throw new Error('--confirm-worker-stopped is required');
+    if (opts['confirm-side-effects-reviewed'] !== true) throw new Error('--confirm-side-effects-reviewed is required');
+    const data = await callApi('/tasks/' + encodeURIComponent(rest[0]) + '/requeue', {
+      method: 'POST', body: { reason: opts.reason, confirmWorkerStopped: true, confirmSideEffectsReviewed: true }
+    });
+    process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+    return;
   }
   if (group === 'task' && action === 'cancel') {
     if (!rest[0]) throw new Error('Task ID is required');

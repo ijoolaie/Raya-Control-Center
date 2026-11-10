@@ -39,6 +39,7 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | POST | `/tasks/{id}/cancel-ack` | Participant + lease header | Acknowledge cancellation |
 | GET | `/tasks/{id}/lease-status` | Participant + lease header | Read own active task status and cancellation signal |
 | POST | `/tasks/{id}/cancel-request` | Operator | Request cooperative cancellation |
+| POST | `/tasks/{id}/requeue` | Operator | Requeue a blocked task after explicit recovery attestations; issues a new Lease on next claim |
 | GET | `/events` | Operator | Read bounded event history |
 | POST | `/maintenance/reconcile-expired-leases` | Operator | Reconcile expired leases |
 
@@ -54,6 +55,7 @@ All non-empty request bodies must be valid UTF-8 JSON objects and are limited to
 - Progress: `{ "percent": 50, "message": "Halfway", "details": {} }` (percent may be null; message max 240 chars; details max 2 KiB).
 - Complete: `{ "result": { "ok": true } }`
 - Fail: `{ "reason": "bounded diagnostic" }`
+- Requeue blocked task: `{ "reason": "verified external state", "confirmWorkerStopped": true, "confirmSideEffectsReviewed": true }` (reason is required, trimmed, and limited to 500 characters; both confirmations must be literal `true`).
 
 Worker routes use the authenticated participant identity and `X-Lease-Token`; clients must not send participant IDs in request bodies. A successful empty claim returns `{ "claim": null }`.
 
@@ -71,6 +73,7 @@ All successful responses use `application/json; charset=utf-8`, `Cache-Control: 
 | `POST /maintenance/reconcile-expired-leases` | `blockedTaskIds` |
 | `GET /tasks` | `tasks`, `page` (`limit`, `offset`, `count`) |
 | `POST /tasks` | `task`, `idempotentReplay` |
+| `POST /tasks/{id}/requeue` | `task` |
 | `POST /tasks/claim` | `claim` (`null` when no task is available; otherwise `task` and `lease`) |
 | `GET /tasks/{id}` and task lifecycle mutations other than heartbeat | `task` |
 | `POST /tasks/{id}/heartbeat` | `taskId`, `expiresAt` |
@@ -101,6 +104,10 @@ Query parameters are route-specific and strict:
 - Task state changes and their audit events commit atomically.
 - Heartbeat is not progress. Progress updates are accepted only for running tasks held by the current unexpired lease; they do not renew the lease.
 - Cancellation request is not cancellation acknowledgement.
+- Requeue is manual recovery, never automatic retry. It accepts only a task whose latest event is a recognized lease-expiry or participant-revocation block event, and rejects any task with an active Lease record.
+- Requeue requires an Operator credential, a non-empty reason, and explicit attestations that the prior Worker is stopped and external side effects were reviewed. These are operator attestations; the Control Center cannot independently prove process termination or external-system state.
+- Requeue atomically clears prior assignment, Lease reference, progress, result, and attempt timestamps; the old Lease record and append-only events remain. The next claim creates a distinct Lease. A repeated/replayed requeue request is rejected once the task is no longer blocked.
+- Do not requeue if an external side effect is uncertain. Prefer creating a separately idempotent replacement task only after checking the external system.
 - Repeating participant revocation returns the current revoked Participant without another state change or audit event; an unknown participant ID remains `404 not_found`.
 - A Participant may poll `GET /tasks/{id}/lease-status` with its Participant bearer and active lease token; the response contains status and cancellation signal only, never task payload.
 - API errors never expose stack traces or database details.

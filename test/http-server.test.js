@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
 import { openDatabase } from '../src/db.js';
+import { ControlCenter } from '../src/control-center.js';
 import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
 import { createControlServer } from '../src/http-server.js';
 
@@ -266,6 +267,16 @@ test('CLI can register participants and create/read tasks through the local API'
     assert.equal(fetched.code, 0, fetched.stderr);
     assert.equal(JSON.parse(fetched.stdout).task.payload.source, 'cli');
 
+    const center = new ControlCenter(db);
+    const firstClaim = center.claimTask({ participantId: participant.participant.id, token: participant.token });
+    center.startTask({ taskId: task.id, participantId: participant.participant.id, leaseToken: firstClaim.lease.token });
+    db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(firstClaim.lease.id);
+    assert.deepEqual(center.reconcileExpiredLeases(), [task.id]);
+    const requeued = await runCli(['task', 'requeue', task.id, '--reason', 'verified no external side effect', '--confirm-worker-stopped', '--confirm-side-effects-reviewed']);
+    assert.equal(requeued.code, 0, requeued.stderr);
+    assert.equal(JSON.parse(requeued.stdout).task.status, 'queued');
+    assert.throws(() => center.heartbeatLease({ taskId: task.id, participantId: participant.participant.id, leaseToken: firstClaim.lease.token }), error => error.code === 'lease_mismatch');
+
     const events = await runCli(['events', '--entity-type', 'task', '--limit', '10']);
     assert.equal(events.code, 0, events.stderr);
     assert.ok(JSON.parse(events.stdout).events.length >= 1);
@@ -390,6 +401,41 @@ test('operator list endpoints filter and paginate participants and tasks', async
     assert.equal(invalid.status, 400);
     const unauthenticated = await fetch(base + '/tasks');
     assert.equal(unauthenticated.status, 401);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
+test('HTTP task requeue is Operator-only, requires both recovery attestations, and audits the reason', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'requeue-operator-token-'.repeat(2);
+  const center = new ControlCenter(db);
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const headers = { authorization: 'Bearer ' + operatorToken, 'content-type': 'application/json' };
+  try {
+    const worker = center.registerParticipant({ displayName: 'requeue-worker', scopes: ['tasks:claim'] });
+    const task = center.createTask({ type: 'http.requeue' });
+    const claim = center.claimTask({ participantId: worker.participant.id, token: worker.token });
+    center.startTask({ taskId: task.id, participantId: worker.participant.id, leaseToken: claim.lease.token });
+    db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(claim.lease.id);
+    assert.deepEqual(center.reconcileExpiredLeases(), [task.id]);
+    const path = '/tasks/' + encodeURIComponent(task.id) + '/requeue';
+    const unauthenticated = await fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'reviewed', confirmWorkerStopped: true, confirmSideEffectsReviewed: true }) });
+    assert.equal(unauthenticated.status, 401);
+    const incomplete = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify({ reason: 'reviewed', confirmWorkerStopped: true }) });
+    assert.equal(incomplete.status, 400);
+    assert.equal(center.getTask(task.id).status, 'blocked');
+    const accepted = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify({ reason: 'Verified previous worker stopped and side effects checked', confirmWorkerStopped: true, confirmSideEffectsReviewed: true }) });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).task.status, 'queued');
+    const event = center.listEvents({ entityType: 'task', entityId: task.id, limit: 1 })[0];
+    assert.equal(event.eventType, 'task.requeued');
+    assert.equal(event.data.actorType, 'operator');
+    assert.match(event.data.reason, /side effects checked/);
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

@@ -35,6 +35,21 @@ Before the HTTP listener begins accepting requests, startup reconciliation check
 
 The server also repeats lease reconciliation every 15 seconds while running. This is a safety boundary, not an automatic retry mechanism: the Control Center cannot know whether an external side effect completed before a worker crashed or lost connectivity. Inspect the task and any external side effects before creating replacement work. Never automatically replay uncertain non-idempotent work.
 
+### Controlled manual recovery
+
+A blocked task can be returned to `queued` only through the Operator-only requeue action. This does not prove that a Worker process has stopped or that an external side effect did not happen; the two required confirmations are explicit operator attestations. Do not use them as a formality.
+
+1. Inspect the task (`npm run cli -- task get TASK_ID`) and its event history (`npm run cli -- events --entity-type task --entity-id TASK_ID`).
+2. Confirm through the process supervisor/OS that the previous Worker is stopped and cannot continue its work.
+3. Inspect the target external system using its own authoritative records. If the side effect may already have happened or its state is uncertain, do not requeue; resolve that uncertainty first.
+4. Only after both checks, run:
+
+   ```powershell
+   npm run cli -- task requeue TASK_ID --reason "what was checked and why replay is safe" --confirm-worker-stopped --confirm-side-effects-reviewed
+   ```
+
+The reason is stored in the append-only `task.requeued` audit event. Requeue clears the old assignment, Lease reference, progress, result, and attempt timestamps but preserves the old Lease record and event history. The next eligible Worker receives a new Lease; the previous Lease token cannot heartbeat or complete the task. Repeating the requeue after it has left `blocked` is rejected. This action is a controlled replay of the same task payload, so it is appropriate only when the external state has been verified safe or the operation is independently idempotent.
+
 ## Configuration
 
 - `RAYA_CC_PORT`: TCP port, default `4317`.
@@ -131,6 +146,7 @@ npm run cli -- participant register --name local-worker --scope tasks:claim
 npm run cli -- task create --type example.job
 npm run cli -- task get TASK_ID
 npm run cli -- task cancel TASK_ID
+npm run cli -- task requeue TASK_ID --reason "verified external state" --confirm-worker-stopped --confirm-side-effects-reviewed
 npm run cli -- events --limit 25
 npm run cli -- reconcile
 ```

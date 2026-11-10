@@ -51,7 +51,7 @@ function validateQuery(method, url) {
     path === BASE + '/maintenance/reconcile-expired-leases' ||
     path === BASE + '/tasks' ||
     path === BASE + '/tasks/claim' ||
-    new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').test(path)
+    new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request|requeue)$').test(path)
   )) allowed = [];
 
   if (allowed === null) return;
@@ -86,7 +86,7 @@ function allowedMethods(path) {
   if (new RegExp('^' + BASE + '/participants/[^/]+/(revoke|capabilities)$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) return ['GET'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) return ['GET'];
-  if (new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request)$').test(path)) return ['POST'];
+  if (new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request|requeue)$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) return ['GET'];
   return null;
 }
@@ -338,6 +338,19 @@ export function createControlServer({ db, operatorToken }) {
         requireOperator();
         const task = center.getTask(decodePathPart(taskPath[1]));
         if (!task) throw new ControlCenterError('not_found', 'Task not found');
+        send(res, 200, { task });
+        return;
+      }
+
+      const requeuePath = new RegExp('^' + BASE + '/tasks/([^/]+)/requeue$').exec(url.pathname);
+      if (req.method === 'POST' && requeuePath) {
+        const body = await readJson(req);
+        requireOperator();
+        const task = center.requeueBlockedTask({
+          taskId: decodePathPart(requeuePath[1]), reason: body.reason,
+          confirmWorkerStopped: body.confirmWorkerStopped,
+          confirmSideEffectsReviewed: body.confirmSideEffectsReviewed
+        });
         send(res, 200, { task });
         return;
       }

@@ -420,6 +420,60 @@ test('expired leases reconcile to blocked without automatic retry', () => {
   db.close();
 });
 
+test('blocked task recovery requires explicit operator attestations, preserves history, and issues a fresh lease', () => {
+  const { db, center, participant, token } = fixture();
+  const task = center.createTask({ type: 'demo.recovery' });
+  const firstClaim = center.claimTask({ participantId: participant.id, token });
+  center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: firstClaim.lease.token });
+  center.updateTaskProgress({ taskId: task.id, participantId: participant.id, leaseToken: firstClaim.lease.token, message: 'before crash', details: { phase: 'before-crash' } });
+  db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(firstClaim.lease.id);
+  assert.deepEqual(center.reconcileExpiredLeases(), [task.id]);
+  assert.throws(() => center.requeueBlockedTask({ taskId: task.id, reason: 'reviewed', confirmWorkerStopped: true }), error => error.code === 'validation_error');
+  assert.throws(() => center.requeueBlockedTask({ taskId: task.id, reason: ' ', confirmWorkerStopped: true, confirmSideEffectsReviewed: true }), error => error.code === 'validation_error');
+  const recovered = center.requeueBlockedTask({ taskId: task.id, reason: 'Previous worker terminated; external operation verified not applied', confirmWorkerStopped: true, confirmSideEffectsReviewed: true });
+  assert.equal(recovered.status, 'queued');
+  assert.equal(recovered.leaseId, null);
+  assert.equal(recovered.assignedParticipantId, null);
+  assert.equal(recovered.startedAt, null);
+  assert.equal(recovered.progress, null);
+  assert.equal(recovered.result, null);
+  assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(firstClaim.lease.id).status, 'expired');
+  assert.throws(() => center.heartbeatLease({ taskId: task.id, participantId: participant.id, leaseToken: firstClaim.lease.token }), error => error.code === 'lease_mismatch');
+  assert.throws(() => center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: firstClaim.lease.token, result: { stale: true } }), error => error.code === 'lease_mismatch');
+  const requeuedEvent = center.listEvents({ entityType: 'task', entityId: task.id, limit: 1 })[0];
+  assert.equal(requeuedEvent.eventType, 'task.requeued');
+  assert.equal(requeuedEvent.data.actorType, 'operator');
+  assert.match(requeuedEvent.data.reason, /external operation verified/);
+  assert.equal(requeuedEvent.data.previousLeaseId, firstClaim.lease.id);
+  assert.throws(() => center.requeueBlockedTask({ taskId: task.id, reason: 'replay', confirmWorkerStopped: true, confirmSideEffectsReviewed: true }), error => error.code === 'invalid_transition');
+  const nextClaim = center.claimTask({ participantId: participant.id, token });
+  assert.equal(nextClaim.task.id, task.id);
+  assert.notEqual(nextClaim.lease.id, firstClaim.lease.id);
+  center.startTask({ taskId: task.id, participantId: participant.id, leaseToken: nextClaim.lease.token });
+  center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: nextClaim.lease.token, result: { recovered: true } });
+  assert.equal(center.getTask(task.id).status, 'succeeded');
+  assert.deepEqual(center.getTask(task.id).result, { recovered: true });
+  assert.equal(center.listEvents({ entityType: 'task', entityId: task.id, limit: 10 }).filter(event => event.eventType === 'task.requeued').length, 1);
+  db.close();
+});
+
+test('participant-revocation blocked tasks can be manually recovered by an active replacement worker', () => {
+  const { db, center, participant, token } = fixture();
+  const task = center.createTask({ type: 'demo.revocation-recovery' });
+  const oldClaim = center.claimTask({ participantId: participant.id, token });
+  center.revokeParticipant(participant.id);
+  assert.equal(center.getTask(task.id).status, 'blocked');
+  const replacement = center.registerParticipant({ displayName: 'replacement-worker', scopes: ['tasks:claim'] });
+  const recovered = center.requeueBlockedTask({ taskId: task.id, reason: 'Revoked worker stopped; target system checked', confirmWorkerStopped: true, confirmSideEffectsReviewed: true });
+  assert.equal(recovered.status, 'queued');
+  const newClaim = center.claimTask({ participantId: replacement.participant.id, token: replacement.token });
+  assert.equal(newClaim.task.id, task.id);
+  assert.notEqual(newClaim.lease.id, oldClaim.lease.id);
+  assert.throws(() => center.completeTask({ taskId: task.id, participantId: participant.id, leaseToken: oldClaim.lease.token, result: { stale: true } }), error => error.code === 'authentication_required' || error.code === 'lease_mismatch');
+  assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(oldClaim.lease.id).status, 'revoked');
+  db.close();
+});
+
 test('revoking a participant also revokes its active lease', () => {
   const { db, center, participant, token } = fixture();
   const task = center.createTask({ type: 'demo.revoke' });

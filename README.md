@@ -61,7 +61,7 @@ Base URL: `http://127.0.0.1:4317/control/v1`
 - `POST /tasks` and `GET /tasks/{id}` — operator credential
 - `POST /tasks/claim` — participant credential with `tasks:claim` scope
 - `POST /tasks/{id}/start|heartbeat|complete|fail|cancel-ack` — participant bearer plus `X-Lease-Token`
-- `POST /tasks/{id}/cancel-request` and `GET /events` — operator credential
+- `POST /tasks/{id}/cancel-request`, `POST /tasks/{id}/requeue`, and `GET /events` — operator credential
 
 CLI examples (with the server running and RAYA_CC_OPERATOR_TOKEN set):
 
@@ -69,6 +69,7 @@ CLI examples (with the server running and RAYA_CC_OPERATOR_TOKEN set):
 - `npm run cli -- participant register --name local-worker --scope tasks:claim`
 - `npm run cli -- task create --type demo.example`
 - `npm run cli -- task get TASK_ID`
+- `npm run cli -- task requeue TASK_ID --reason "verified external state" --confirm-worker-stopped --confirm-side-effects-reviewed`
 - `npm run cli -- events --limit 25`
 - `npm run cli -- reconcile`
 
