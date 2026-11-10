@@ -907,3 +907,37 @@ test('client disconnect during an incomplete request body cannot create a task o
     db.close();
   }
 });
+
+test('HTTP keep-alive supports bounded pipelined requests and closes on client request', async () => {
+  const db = openDatabase(':memory:');
+  const server = createControlServer({ db, operatorToken: 'keep-alive-review-token-1234567890' });
+  assert.equal(server.headersTimeout, 10_000);
+  assert.equal(server.requestTimeout, 30_000);
+  assert.equal(server.keepAliveTimeout, 5_000);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      let data = '';
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error('keep-alive pipeline did not close after Connection: close'));
+      }, 2_000);
+      socket.on('connect', () => socket.write(
+        `GET /control/v1/health HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: keep-alive\r\n\r\n` +
+        `GET /control/v1/health HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`
+      ));
+      socket.on('data', chunk => { data += chunk.toString('latin1'); });
+      socket.on('end', () => { clearTimeout(timer); resolve(data); });
+      socket.on('error', error => { clearTimeout(timer); reject(error); });
+    });
+    assert.equal((response.match(/HTTP\/1\.1 200 OK/g) || []).length, 2, 'both pipelined requests must receive one response');
+    assert.match(response, /Connection: keep-alive/i);
+    assert.match(response, /Connection: close/i);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
