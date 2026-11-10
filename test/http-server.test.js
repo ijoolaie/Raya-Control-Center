@@ -877,3 +877,33 @@ test('raw HTTP parser rejects ambiguous framing and non-origin request targets',
     db.close();
   }
 });
+
+test('client disconnect during an incomplete request body cannot create a task or poison later requests', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'disconnect-body-review-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      socket.once('error', reject);
+      socket.once('connect', () => {
+        socket.write(`POST /control/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nAuthorization: Bearer ${operatorToken}\r\nContent-Type: application/json\r\nContent-Length: 128\r\nConnection: close\r\n\r\n{"type":"must.not.commit"}`, () => {
+          setTimeout(() => {
+            socket.destroy();
+            resolve();
+          }, 30);
+        });
+      });
+    });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 0);
+    const health = await fetch(`http://127.0.0.1:${port}/control/v1/health`);
+    assert.equal(health.status, 200, 'server must continue serving after the aborted body');
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
