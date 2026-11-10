@@ -104,7 +104,7 @@ A runnable Participant worker example is available in [examples/reference-worker
 
 ## Dashboard
 
-Start the server with `npm start`, then open [http://127.0.0.1:4317/](http://127.0.0.1:4317/). Enter the saved Operator token to inspect tasks, participants, and recent audit events. The dashboard is read-only; it does not create, cancel, or revoke anything. The token is held only in page memory and is not written to local or session storage. See `docs/OPERATIONS.md` for details. Internal bundle policy is documented in `docs/PACKAGING.md`.
+Start the server with `npm start`, then open [http://127.0.0.1:4317/](http://127.0.0.1:4317/). Enter the saved Operator token to inspect tasks, participants, routing capabilities, and recent audit events. The dashboard also supports explicitly confirmed Participant capability updates and controlled requeue of eligible blocked Tasks; these actions are revalidated by the API and recorded in the append-only audit history. It does not create Tasks, cancel Tasks, or revoke Participants. The token is held only in page memory and is not written to local or session storage. See `docs/OPERATIONS.md` for details. Internal bundle policy is documented in `docs/PACKAGING.md`.
 
 ## Development
 
