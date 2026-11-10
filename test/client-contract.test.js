@@ -180,6 +180,55 @@ test('independent HTTP client observes cooperative cancellation and acknowledges
   });
 });
 
+test('concurrent completion and cancellation acknowledgement cannot bypass a requested cancellation', async () => {
+  await createHarness(async ({ request, operator }) => {
+    const registration = await request('/participants/register', {
+      method: 'POST', headers: operator,
+      body: JSON.stringify({ displayName: 'cancel-race-client', scopes: ['tasks:claim'] })
+    });
+    const participantToken = registration.body.token;
+    const created = await request('/tasks', {
+      method: 'POST', headers: operator,
+      body: JSON.stringify({ type: 'contract.cancel-complete-race' })
+    });
+    const taskId = created.body.task.id;
+    const claim = await request('/tasks/claim', { method: 'POST', token: participantToken, body: '{}' });
+    const leaseToken = claim.body.claim.lease.token;
+    const started = await request('/tasks/' + taskId + '/start', {
+      method: 'POST', token: participantToken, leaseToken, body: '{}'
+    });
+    assert.equal(started.body.task.status, 'running');
+
+    const cancellation = await request('/tasks/' + taskId + '/cancel-request', {
+      method: 'POST', headers: operator, body: '{}'
+    });
+    assert.equal(cancellation.body.task.status, 'cancellation_requested');
+
+    const [completed, acknowledged] = await Promise.all([
+      request('/tasks/' + taskId + '/complete', {
+        method: 'POST', token: participantToken, leaseToken,
+        body: JSON.stringify({ result: { mustNotWin: true } })
+      }),
+      request('/tasks/' + taskId + '/cancel-ack', {
+        method: 'POST', token: participantToken, leaseToken, body: '{}'
+      })
+    ]);
+
+    assert.equal(acknowledged.status, 200);
+    assert.equal(acknowledged.body.task.status, 'cancelled');
+    assert.equal(completed.status, 409);
+    assert.equal(completed.body.error.code, 'invalid_transition');
+
+    const finalTask = await request('/tasks/' + taskId, { headers: operator });
+    assert.equal(finalTask.body.task.status, 'cancelled');
+    assert.equal(finalTask.body.task.result, null);
+    const events = await request('/events?entityType=task&entityId=' + taskId, { headers: operator });
+    const eventTypes = events.body.events.map(event => event.eventType);
+    assert.equal(eventTypes.filter(type => type === 'task.cancelled').length, 1);
+    assert.equal(eventTypes.includes('task.succeeded'), false);
+  });
+});
+
 test('revoking a participant invalidates its token and blocks its leased task', async () => {
   await createHarness(async ({ request, operator }) => {
     const registration = await request('/participants/register', {

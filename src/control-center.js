@@ -348,7 +348,7 @@ export class ControlCenter {
 
   #finishTask({ taskId, participantId, leaseToken, status, eventType, resultText = null }) {
     return this.#withLease({ taskId, participantId, leaseToken }, task => {
-      if (!['claimed', 'running', 'cancellation_requested'].includes(task.status))
+      if (!['claimed', 'running'].includes(task.status))
         throw new ControlCenterError('invalid_transition', 'Task is not in a finishable state');
       const timestamp = now();
       this.db.prepare('UPDATE tasks SET status = ?, result_json = ?, finished_at = ?, updated_at = ? WHERE id = ?')
