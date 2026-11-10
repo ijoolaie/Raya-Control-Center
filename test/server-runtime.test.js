@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { openDatabase } from '../src/db.js';
+import { ControlCenter } from '../src/control-center.js';
 import { startControlCenter } from '../src/server-runtime.js';
 import { inspectDatabaseFileLock } from '../src/database-runtime-lock.js';
 
@@ -100,6 +101,54 @@ test('server runtime drains HTTP and closes SQLite on graceful shutdown', async 
     assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 6);
     reopened.close();
   } finally {
+    if (runtime?.server.listening) await runtime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('startup reconciliation blocks persisted expired leases for every in-flight task state', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-startup-lease-recovery-'));
+  const databasePath = join(directory, 'recovery.sqlite');
+  const operatorToken = 'startup-recovery-test-operator-token-'.repeat(2);
+  let runtime;
+  let inspectionDb;
+  try {
+    const seedDb = openDatabase(databasePath);
+    const center = new ControlCenter(seedDb);
+    const worker = center.registerParticipant({ displayName: 'crash-recovery-worker', scopes: ['tasks:claim'] });
+    const cases = [];
+
+    for (const previousStatus of ['claimed', 'running', 'cancellation_requested']) {
+      const task = center.createTask({ type: 'recovery.' + previousStatus });
+      const claim = center.claimTask({ participantId: worker.participant.id, token: worker.token });
+      assert.equal(claim.task.id, task.id);
+      if (previousStatus !== 'claimed') {
+        center.startTask({ taskId: task.id, participantId: worker.participant.id, leaseToken: claim.lease.token });
+      }
+      if (previousStatus === 'cancellation_requested') center.requestCancellation(task.id);
+      seedDb.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(claim.lease.id);
+      cases.push({ taskId: task.id, leaseId: claim.lease.id, previousStatus });
+    }
+    seedDb.close();
+
+    runtime = await startControlCenter({ databasePath, port: 0, operatorToken });
+    inspectionDb = openDatabase(databasePath);
+    const recovered = new ControlCenter(inspectionDb);
+
+    for (const item of cases) {
+      const task = recovered.getTask(item.taskId);
+      assert.equal(task.status, 'blocked', item.previousStatus + ' task must be blocked during startup');
+      assert.equal(task.leaseId, null);
+      assert.equal(task.assignedParticipantId, null);
+      assert.equal(inspectionDb.prepare('SELECT status FROM leases WHERE id = ?').get(item.leaseId).status, 'expired');
+      const events = recovered.listEvents({ entityType: 'task', entityId: item.taskId, limit: 10 });
+      const recoveryEvents = events.filter(event => event.eventType === 'task.lease_expired_blocked');
+      assert.equal(recoveryEvents.length, 1, 'startup recovery must append exactly one audit event');
+      assert.equal(recoveryEvents[0].data.previousStatus, item.previousStatus);
+      assert.equal(recoveryEvents[0].data.leaseId, item.leaseId);
+    }
+  } finally {
+    inspectionDb?.close();
     if (runtime?.server.listening) await runtime.shutdown();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
