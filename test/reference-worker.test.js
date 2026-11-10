@@ -143,16 +143,22 @@ test('worker exits cleanly on SIGTERM while waiting for work', async () => {
 });
 
 test('worker safely abandons a task after its lease expires and reconciliation blocks it', async () => {
-  await harness(async ({ register, createTask, getTask, startWorker, db }) => {
+  await harness(async ({ register, createTask, getTask, startWorker, db, center }) => {
     const participant = await register();
     const task = await createTask('demo.delay', { durationMs: 5000 });
     const worker = startWorker(participant.token);
     try {
       await waitFor(() => getTask(task.id).status === 'running');
       db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE task_id = ? AND status = 'active'").run(task.id);
-      assert.deepEqual(new ControlCenter(db).reconcileExpiredLeases(), [task.id]);
+      assert.deepEqual(center.reconcileExpiredLeases(), [task.id]);
       await waitFor(() => getTask(task.id).status === 'blocked');
+      await waitFor(() => worker.child.exitCode !== null || worker.child.signalCode !== null);
       assert.equal(getTask(task.id).status, 'blocked');
+      assert.equal(getTask(task.id).result, null, 'expired worker must not store a task result');
+      const events = center.listEvents({ entityType: 'task', entityId: task.id, limit: 20 });
+      assert.equal(events.some(event => event.eventType === 'task.succeeded'), false);
+      assert.equal(events.some(event => event.eventType === 'task.failed'), false);
+      assert.equal(events.filter(event => event.eventType === 'task.lease_expired_blocked').length, 1);
     } finally { await stop(worker.child); }
   });
 });
