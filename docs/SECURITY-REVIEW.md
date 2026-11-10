@@ -548,3 +548,10 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Focused HTTP suite: 18/18 passed. Full local suite: 142 passed, 3 skipped, 0 failed (145 total). `npm run check` and `git diff --check` passed.
 - This commit's CI and Security Scans will be run on supported Node 24/26 and Linux/Windows after push. Previous commit `36b1770e9097b04aee0fdaf5634b3f211c3ee7bf` passed all four CI/Security push and pull_request workflows.
 - Implementer-run evidence only; independent human security review remains pending. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only. No live `.data`, ACLs, credentials, or API binding settings were changed.
+
+### Implementer HTTP Expect: 100-continue body-limit regression (2026-11-10)
+- A raw TCP probe confirmed Node's default HTTP behavior sent `100 Continue` for a request declaring a 20,000-byte body, before the API's existing 16 KiB streaming body limit could reject it.
+- Added an explicit `checkContinue` handler. Declared Content-Length values above 16 KiB now receive `413 Payload Too Large` with `Connection: close` before the server invites upload; accepted-size requests receive `100 Continue` and proceed through the existing request handler and streaming body limit.
+- Added an isolated in-memory SQLite raw-TCP regression proving early rejection, absence of a task side effect, and continued health of the listener.
+- Focused HTTP suite: 19/19 passed locally on Node 22.23.2 (below declared Node >=24.15.0); supported-runtime Node 24/26 Linux/Windows CI is required after push.
+- This is implementer-run evidence only. Independent human security review remains pending; PR #1 remains Open, Draft, and Unmerged; API remains loopback-only. No live `.data`, ACLs, credentials, or network binding settings were changed.

@@ -443,6 +443,15 @@ export function createControlServer({ db, operatorToken }) {
       else res.destroy();
     }
   });
+  server.on('checkContinue', (req, res) => {
+    const declaredLength = req.headers['content-length'];
+    if (declaredLength !== undefined && Number(declaredLength) > MAX_BODY_BYTES) {
+      send(res, 413, { error: { code: 'payload_too_large', message: 'Request body exceeds 16 KiB' } }, { connection: 'close' });
+      return;
+    }
+    res.writeContinue();
+    server.emit('request', req, res);
+  });
   server.maxRequestsPerSocket = 100;
   return server;
 }

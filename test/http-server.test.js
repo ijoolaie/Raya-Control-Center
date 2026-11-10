@@ -878,6 +878,47 @@ test('raw HTTP parser rejects ambiguous framing and non-origin request targets',
   }
 });
 
+test('Expect: 100-continue rejects declared oversized bodies before inviting upload', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'expect-continue-review-token-123456';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      let data = '';
+      const timer = setTimeout(() => { socket.destroy(); reject(new Error('early 413 response timed out')); }, 1500);
+      socket.on('connect', () => {
+        const crlf = String.fromCharCode(13, 10);
+        socket.write([
+          'POST /control/v1/tasks HTTP/1.1',
+          'Host: 127.0.0.1:' + port,
+          'Authorization: Bearer ' + operatorToken,
+          'Content-Type: application/json',
+          'Content-Length: 20000',
+          'Expect: 100-continue',
+          'Connection: close',
+          '', ''
+        ].join(crlf));
+      });
+      socket.on('data', chunk => { data += chunk.toString('latin1'); });
+      socket.on('end', () => { clearTimeout(timer); resolve(data); });
+      socket.on('error', error => { clearTimeout(timer); reject(error); });
+    });
+    assert.equal(response.startsWith('HTTP/1.1 413 Payload Too Large'), true);
+    assert.equal(response.includes('100 Continue'), false, 'server must reject before asking the client to upload');
+    assert.equal(response.toLowerCase().includes('connection: close'), true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 0);
+    const health = await fetch('http://127.0.0.1:' + port + '/control/v1/health');
+    assert.equal(health.status, 200, 'listener remains healthy after early rejection');
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
 test('client disconnect during an incomplete request body cannot create a task or poison later requests', async () => {
   const db = openDatabase(':memory:');
   const operatorToken = 'disconnect-body-review-token-123456';
