@@ -471,6 +471,8 @@ test('serves the Operator dashboard and controlled recovery UI with restrictive 
     const pageText = await page.text();
     assert.match(pageText, /Operator dashboard · loopback only/);
     assert.match(pageText, /Task inspection &amp; recovery/);
+    assert.match(pageText, /id="participant-inspector"/);
+    assert.match(pageText, /Participant audit history/);
     assert.match(pageText, /confirm-worker-stopped/);
     assert.match(pageText, /confirm-side-effects/);
     assert.match(pageText, /requeue-task/);
@@ -491,6 +493,10 @@ test('serves the Operator dashboard and controlled recovery UI with restrictive 
     assert.match(scriptText, /task.lease_expired_blocked/);
     assert.match(scriptText, /confirmSideEffectsReviewed/);
     assert.match(scriptText, /inspectedTaskId/);
+    assert.match(scriptText, /inspectParticipant/);
+    assert.match(scriptText, /participant\.capabilities_updated/);
+    assert.match(scriptText, /Blocked tasks/);
+    assert.doesNotMatch(scriptText, /participant\.(?:token|tokenHash)/);
     assert.doesNotMatch(scriptText, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
     assert.doesNotMatch(scriptText, /console\.(?:log|error|warn)/);
     assert.doesNotMatch(scriptText, /task\.(?:payload|result)/);
@@ -532,6 +538,16 @@ test('HTTP Operator capability management and capability-aware task claims', asy
     assert.deepEqual(registered.participant.capabilities, ['worker:python']);
     const participantList = await request('/participants', { headers: operator });
     assert.deepEqual((await participantList.json()).participants[0].capabilities, ['worker:python']);
+    const participantDetailDenied = await request('/participants/' + registered.participant.id);
+    assert.equal(participantDetailDenied.status, 401);
+    const participantDetailResponse = await request('/participants/' + registered.participant.id, { headers: operator });
+    assert.equal(participantDetailResponse.status, 200);
+    const participantDetail = await participantDetailResponse.json();
+    assert.equal(participantDetail.participant.id, registered.participant.id);
+    assert.deepEqual(participantDetail.participant.capabilities, ['worker:python']);
+    assert.equal(Object.hasOwn(participantDetail.participant, 'token'), false);
+    assert.equal(Object.hasOwn(participantDetail.participant, 'tokenHash'), false);
+    assert.equal(JSON.stringify(participantDetail).includes(registered.token), false);
     const taskResponse = await request('/tasks', { method: 'POST', headers: operator,
       body: JSON.stringify({ type: 'http.capability.task', requiredCapabilities: ['worker:python'] }) });
     assert.equal(taskResponse.status, 201);

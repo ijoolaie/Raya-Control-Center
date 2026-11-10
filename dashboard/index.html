@@ -54,7 +54,23 @@
     <section class="panel">
       <div class="section-head"><div><h2>Participants</h2><p class="muted">Latest 100 participants. Credentials are never returned by this view.</p></div></div>
       <div class="filters"><label>Status <select id="participant-status"><option value="">All</option><option>active</option><option>disabled</option><option>revoked</option></select></label><label>Kind <select id="participant-kind"><option value="">All</option><option>worker</option><option>adapter</option><option>operator_client</option></select></label></div>
-      <div class="table-wrap"><table><thead><tr><th>Participant</th><th>Kind</th><th>Status</th><th>Scopes</th><th>Capabilities</th><th>Last seen</th></tr></thead><tbody id="participants-body"><tr><td colspan="6" class="empty">Connect to load participants.</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Participant</th><th>Kind</th><th>Status</th><th>Scopes</th><th>Capabilities</th><th>Last seen</th><th>Actions</th></tr></thead><tbody id="participants-body"><tr><td colspan="7" class="empty">Connect to load participants.</td></tr></tbody></table></div>
+    </section>
+    <section id="participant-inspector" class="panel" hidden aria-live="polite">
+      <div class="section-head"><div><h2>Participant inspection</h2><p id="participant-summary" class="muted inspector-summary"></p></div><button id="close-participant-inspector" class="secondary" type="button">Close</button></div>
+      <div class="participant-details">
+        <p><strong>Status:</strong> <span id="participant-detail-status"></span></p>
+        <p><strong>Kind:</strong> <span id="participant-detail-kind"></span></p>
+        <p><strong>Scopes:</strong> <span id="participant-detail-scopes"></span></p>
+        <p><strong>Capabilities:</strong> <span id="participant-detail-capabilities"></span></p>
+        <p><strong>Created:</strong> <span id="participant-detail-created"></span></p>
+        <p><strong>Updated:</strong> <span id="participant-detail-updated"></span></p>
+        <p><strong>Last seen:</strong> <span id="participant-detail-last-seen"></span></p>
+      </div>
+      <h3>Participant audit history</h3>
+      <p class="muted">Append-only events. Capability changes apply to future claims only; revocation details include tasks blocked by that action.</p>
+      <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Details</th><th>Sequence</th></tr></thead><tbody id="participant-events"><tr><td colspan="4" class="empty">Select a participant to inspect its history.</td></tr></tbody></table></div>
+      <p id="participant-inspector-error" class="error" role="alert"></p>
     </section>
     <section class="panel">
       <div class="section-head"><div><h2>Audit events</h2><p class="muted">Latest 100 append-only events.</p></div></div>

@@ -4,6 +4,7 @@
   let sessionEpoch = 0;
   let activeRefresh = null;
   let inspectedTaskId = '';
+  let inspectedParticipantId = '';
   const BLOCK_EVENTS = new Set(['task.lease_expired_blocked', 'task.participant_revoked_blocked']);
   const $ = id => document.getElementById(id);
   const escapeText = value => String(value ?? '—');
@@ -47,6 +48,72 @@
     $('recovery-panel').hidden = true;
     $('inspector-error').textContent = '';
     $('recovery-status').textContent = '';
+  }
+  function closeParticipantInspector() {
+    inspectedParticipantId = '';
+    $('participant-inspector').hidden = true;
+    $('participant-events').replaceChildren();
+    $('participant-inspector-error').textContent = '';
+  }
+  function participantEventDetails(event) {
+    const data = event.data && typeof event.data === 'object' ? event.data : {};
+    if (event.eventType === 'participant.revoked') {
+      const ids = Array.isArray(data.blockedTaskIds) ? data.blockedTaskIds : [];
+      return ids.length ? 'Blocked tasks (' + ids.length + '): ' + ids.join(', ') : 'Revoked; no active tasks were blocked.';
+    }
+    if (event.eventType === 'participant.capabilities_updated') {
+      const previous = Array.isArray(data.previousCapabilities) ? data.previousCapabilities : [];
+      const current = Array.isArray(data.capabilities) ? data.capabilities : [];
+      return 'Previous: [' + previous.join(', ') + '] → Current: [' + current.join(', ') + ']; affects future claims only.';
+    }
+    if (event.eventType === 'participant.registered') {
+      const scopes = Array.isArray(data.scopes) ? data.scopes : [];
+      const capabilities = Array.isArray(data.capabilities) ? data.capabilities : [];
+      return 'Registered; scopes: [' + scopes.join(', ') + ']; capabilities: [' + capabilities.join(', ') + '].';
+    }
+    return 'No additional participant detail recorded.';
+  }
+  async function inspectParticipant(participantId) {
+    if (!operatorToken) return;
+    const epoch = sessionEpoch, token = operatorToken;
+    inspectedParticipantId = participantId;
+    $('participant-inspector').hidden = false;
+    $('participant-inspector-error').textContent = '';
+    setText('participant-summary', 'Loading participant ' + participantId + '…');
+    empty($('participant-events'), 4, 'Loading participant history…');
+    $('participant-inspector').scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    try {
+      const [participantData, eventData] = await Promise.all([
+        request('/control/v1/participants/' + encodeURIComponent(participantId), true, {token}),
+        request('/control/v1/events?' + new URLSearchParams({entityType:'participant', entityId:participantId, limit:'100'}), true, {token})
+      ]);
+      if (epoch !== sessionEpoch || token !== operatorToken || inspectedParticipantId !== participantId) return;
+      const person = participantData.participant;
+      const events = eventData.events || [];
+      setText('participant-summary', person.displayName + ' · ' + person.id);
+      setText('participant-detail-status', person.status);
+      setText('participant-detail-kind', person.kind);
+      setText('participant-detail-scopes', (person.scopes || []).join(', ') || 'None');
+      setText('participant-detail-capabilities', (person.capabilities || []).join(', ') || 'None');
+      setText('participant-detail-created', person.createdAt);
+      setText('participant-detail-updated', person.updatedAt);
+      setText('participant-detail-last-seen', person.lastSeenAt || 'Never');
+      const body = $('participant-events');
+      body.replaceChildren();
+      if (!events.length) empty(body, 4, 'No participant audit events found.');
+      events.forEach(event => {
+        const tr = document.createElement('tr');
+        cell(tr, event.occurredAt);
+        cell(tr, event.eventType);
+        const details = cell(tr, participantEventDetails(event));
+        details.className = 'participant-events-details';
+        cell(tr, event.sequence);
+        body.append(tr);
+      });
+    } catch (error) {
+      if (epoch !== sessionEpoch || token !== operatorToken || error.name === 'AbortError') return;
+      setText('participant-inspector-error', 'Could not inspect participant: ' + error.message);
+    }
   }
   function updateRequeueButton() {
     $('requeue-task').disabled = !$('recovery-reason').value.trim()
@@ -164,11 +231,15 @@
         tr.append(action); tb.append(tr);
       });
       const pb = $('participants-body'); pb.replaceChildren();
-      if (!participants.length) empty(pb, 6, 'No matching participants.');
+      if (!participants.length) empty(pb, 7, 'No matching participants.');
       participants.forEach(person => {
         const tr = document.createElement('tr'); cell(tr, person.displayName); cell(tr, person.kind);
         const status = cell(tr, ''); pill(status, person.status);
-        cell(tr, (person.scopes || []).join(', ') || '-'); cell(tr, (person.capabilities || []).join(', ') || '-'); cell(tr, person.lastSeenAt); pb.append(tr);
+        cell(tr, (person.scopes || []).join(', ') || '-'); cell(tr, (person.capabilities || []).join(', ') || '-'); cell(tr, person.lastSeenAt);
+        const action = document.createElement('td');
+        const inspect = document.createElement('button'); inspect.type = 'button'; inspect.className = 'secondary compact';
+        inspect.textContent = 'Inspect history'; inspect.addEventListener('click', () => inspectParticipant(person.id));
+        action.append(inspect); tr.append(action); pb.append(tr);
       });
       const eb = $('events-body'); eb.replaceChildren();
       if (!events.length) empty(eb, 5, 'No matching events.');
@@ -193,9 +264,10 @@
     $('operator-token').value = '';
     $('refresh').disabled = true;
     closeInspector();
+    closeParticipantInspector();
     setText('auth-status', message);
     empty($('tasks-body'), 7, 'Connect to load tasks.');
-    empty($('participants-body'), 6, 'Connect to load participants.');
+    empty($('participants-body'), 7, 'Connect to load participants.');
     empty($('events-body'), 5, 'Connect to load events.');
     $('error').textContent = '';
     ['metric-active','metric-queued','metric-blocked','metric-participants','metric-unmatched'].forEach(id => setText(id, '—'));
@@ -206,13 +278,14 @@
     if (token.length < 32 || token.length > 1024 || ![...token].every(character => /[A-Za-z0-9_-]/.test(character))) {
       disconnect('Token must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).'); return;
     }
-    sessionEpoch++; activeRefresh?.abort(); activeRefresh = null; closeInspector();
+    sessionEpoch++; activeRefresh?.abort(); activeRefresh = null; closeInspector(); closeParticipantInspector();
     operatorToken = token; $('operator-token').value = ''; $('refresh').disabled = false;
     setText('auth-status', 'Connecting…'); await refresh();
   });
   $('disconnect').addEventListener('click', () => disconnect());
   $('refresh').addEventListener('click', refresh);
   $('close-inspector').addEventListener('click', closeInspector);
+  $('close-participant-inspector').addEventListener('click', closeParticipantInspector);
   $('recovery-reason').addEventListener('input', updateRequeueButton);
   $('confirm-worker-stopped').addEventListener('change', updateRequeueButton);
   $('confirm-side-effects').addEventListener('change', updateRequeueButton);

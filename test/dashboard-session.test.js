@@ -22,7 +22,8 @@ async function createDashboard() {
     'health-dot','health-label','task-status','task-type','participant-status','participant-kind',
     'event-entity','event-id','error','refresh','tasks-body','participants-body','events-body',
     'metric-active','metric-queued','metric-blocked','metric-participants','metric-unmatched',
-    'auth-status','operator-token','auth-form','disconnect','task-inspector','close-inspector','inspector-summary','inspector-events','recovery-panel','recovery-block-event','recovery-reason','confirm-worker-stopped','confirm-side-effects','requeue-task','recovery-status','inspector-error'
+    'auth-status','operator-token','auth-form','disconnect','task-inspector','close-inspector','inspector-summary','inspector-events','recovery-panel','recovery-block-event','recovery-reason','confirm-worker-stopped','confirm-side-effects','requeue-task','recovery-status','inspector-error',
+    'participant-inspector','participant-summary','close-participant-inspector','participant-detail-status','participant-detail-kind','participant-detail-scopes','participant-detail-capabilities','participant-detail-created','participant-detail-updated','participant-detail-last-seen','participant-events','participant-inspector-error'
   ];
   const elements = new Map(ids.map(id => [id, new Element()]));
   const pending = [];
@@ -194,4 +195,62 @@ test('blocked-task inspector gates requeue on the latest recognized block event 
   post.resolve({ok:false,json:async()=>({error:{code:'test_rejected'}})});
   await submitting;
   assert.match(elements.get('inspector-error').textContent, /test_rejected/);
+});
+
+test('participant inspector displays metadata and whitelisted revocation/capability audit details without credentials', async () => {
+  const { elements, pending, connect, disconnect } = await createDashboard();
+  const connecting = connect('operator-participant-inspection-token-');
+  await new Promise(resolve => setImmediate(resolve));
+  for (const item of pending.splice(0)) {
+    if (item.path.includes('/participants?')) {
+      item.resolve({ok:true,json:async()=>({participants:[{
+        id:'participant-42',displayName:'worker-alpha',kind:'worker',status:'revoked',
+        scopes:['tasks:claim'],capabilities:['worker:python'],lastSeenAt:'2026-11-10T10:00:00Z'
+      }]})});
+    } else item.resolve(responseFor(item.path, 'participant-test'));
+  }
+  await connecting;
+  const row = elements.get('participants-body').children[0];
+  const inspectButton = row.children[6].children[0];
+  assert.equal(inspectButton.textContent, 'Inspect history');
+  const inspecting = inspectButton.listeners.get('click')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending.length, 2);
+  const detailRequest = pending.find(item => item.path === '/control/v1/participants/participant-42');
+  const historyRequest = pending.find(item => item.path.includes('/events?'));
+  assert.ok(detailRequest);
+  assert.match(historyRequest.path, /entityType=participant/);
+  detailRequest.resolve({ok:true,json:async()=>({participant:{
+    id:'participant-42',displayName:'worker-alpha',kind:'worker',status:'revoked',
+    scopes:['tasks:claim'],capabilities:['worker:python'],
+    createdAt:'2026-11-01T10:00:00Z',updatedAt:'2026-11-10T10:00:00Z',lastSeenAt:'2026-11-10T09:59:00Z'
+  }})});
+  historyRequest.resolve({ok:true,json:async()=>({events:[
+    {eventType:'participant.revoked',occurredAt:'2026-11-10T10:00:00Z',sequence:12,data:{blockedTaskIds:['task-a','task-b']}},
+    {eventType:'participant.capabilities_updated',occurredAt:'2026-11-09T10:00:00Z',sequence:11,data:{previousCapabilities:['worker:python'],capabilities:['worker:node'],affects:'future_claims_only'}},
+    {eventType:'participant.registered',occurredAt:'2026-11-01T10:00:00Z',sequence:1,data:{scopes:['tasks:claim'],capabilities:['worker:python'],token:'DO_NOT_RENDER_SECRET'}}
+  ]})});
+  await inspecting;
+  assert.equal(elements.get('participant-inspector').hidden, false);
+  assert.match(elements.get('participant-summary').textContent, /worker-alpha/);
+  assert.equal(elements.get('participant-detail-status').textContent, 'revoked');
+  assert.equal(elements.get('participant-detail-kind').textContent, 'worker');
+  assert.equal(elements.get('participant-detail-scopes').textContent, 'tasks:claim');
+  assert.equal(elements.get('participant-detail-capabilities').textContent, 'worker:python');
+  const rendered = elements.get('participant-events').children.flatMap(tr => tr.children).map(td => td.textContent).join(' ');
+  assert.match(rendered, /Blocked tasks \(2\): task-a, task-b/);
+  assert.match(rendered, /Previous: \[worker:python\] → Current: \[worker:node\]/);
+  assert.match(rendered, /future claims only/);
+  assert.doesNotMatch(rendered, /DO_NOT_RENDER_SECRET|token/i);
+  assert.doesNotMatch(JSON.stringify(elements.get('participant-events').children), /DO_NOT_RENDER_SECRET/);
+  elements.get('close-participant-inspector').listeners.get('click')();
+  assert.equal(elements.get('participant-inspector').hidden, true);
+  assert.equal(elements.get('participant-events').children.length, 0);
+
+  const reopening = inspectButton.listeners.get('click')();
+  await new Promise(resolve => setImmediate(resolve));
+  disconnect();
+  for (const item of pending.splice(0)) item.resolve({ok:true,json:async()=>({participant:{},events:[]})});
+  await reopening;
+  assert.equal(elements.get('participant-inspector').hidden, true, 'Disconnect must close participant inspector');
 });

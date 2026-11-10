@@ -82,6 +82,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 ## Phase 4 — Dashboard and operational hardening
 **Status: In progress**
 - [x] Operator-authenticated dashboard for task, participant, health, and audit inspection; blocked-task history inspection and explicitly confirmed, API-revalidated manual requeue. No payload/result rendering or automatic retry.
+- [x] Participant detail inspector with creation/update/last-seen metadata and append-only registration, capability-change, and revocation history; revocation history identifies tasks blocked by the action. Event details are rendered from explicit allowlisted fields only; credentials are never displayed.
 - [x] Manual Chrome acceptance on an isolated temporary database: valid/invalid Operator login, routing metrics, capability columns, task/participant filters, disconnect cleanup, and 390px responsive layout.
 - [x] Chrome 157 headless acceptance of blocked-task inspection and controlled requeue against an isolated in-memory SQLite database: login, event history, payload non-rendering, browser-storage check, both confirmations, requeue, and audit event. No live `.data` used.
 - [x] Audit/event explorer with entity filters.
