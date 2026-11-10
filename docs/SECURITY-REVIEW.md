@@ -574,3 +574,11 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Security Scans also passed on both events: Push [42854923220](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854923220) and Pull Request [42854942863](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854942863). Both CodeQL JavaScript analysis and Gitleaks succeeded in each run.
 - This verifies automated workflows for the exact implementation head, including the chunked streaming body-limit regression. It does not replace independent human security review, which remains pending.
 - PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
+
+### Latest PR-head verification — 2026-11-11 — cda54be
+
+- Exact PR head: `cda54be60baabd7e839246c2661010db3afe6a7e`. This documentation-only commit corrected the README and Operations guide so both accurately describe the Participant capability editor and controlled blocked-Task requeue; no application source or test code changed.
+- CI passed on both push [42895848466](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895848466) and pull_request [42895860177](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895860177). Each passed Node 24/26 × Linux/Windows (4/4 jobs; 8/8 total).
+- Security Scans passed on push [42895848388](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895848388) and pull_request [42895860146](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42895860146). CodeQL JavaScript analysis and Gitleaks succeeded in both runs.
+- The working tree is clean and local `HEAD` matches `origin/bootstrap/project-foundation` at this exact commit. PR #1 remains Open, Draft, and Unmerged; the API remains bound to loopback.
+- These are automated CI/security results, not an independent security review. No independent reviewer has submitted a report; the review gate remains pending. No live `.data`, ACLs, credentials, or API binding settings were changed.
