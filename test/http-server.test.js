@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
@@ -812,6 +813,60 @@ test('in-flight lease action is rejected when lease expires during body upload',
     assert.equal(task.result_json, null);
   } finally {
     inFlightRequest?.destroy();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
+test('raw HTTP parser rejects ambiguous framing and non-origin request targets', async () => {
+  const db = openDatabase(':memory:');
+  const server = createControlServer({ db, operatorToken: 'raw-http-review-token-123456789012' });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const probe = raw => new Promise(resolve => {
+    const socket = net.connect(port, '127.0.0.1');
+    let response = '';
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      socket.destroy();
+    };
+    socket.setTimeout(1500, () => finish('TIMEOUT'));
+    socket.on('connect', () => socket.write(raw));
+    socket.on('data', chunk => {
+      response += chunk.toString('latin1');
+      const lineEnd = response.indexOf('\r\n');
+      if (lineEnd !== -1) finish(response.slice(0, lineEnd));
+    });
+    socket.on('end', () => finish(response.split('\r\n')[0] || 'EMPTY'));
+    socket.on('close', () => finish(response.split('\r\n')[0] || 'CLOSED'));
+    socket.on('error', () => finish(response.split('\r\n')[0] || 'RESET'));
+  });
+  const request = (target, headers = '') => `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n${headers}Connection: close\r\n\r\n`;
+  try {
+    assert.equal(await probe(request('/control/v1/health')), 'HTTP/1.1 200 OK');
+    assert.equal(await probe(request('/control/v1/health', `Host: attacker.example\r\n`)), 'HTTP/1.1 400 Bad Request', 'duplicate Host must be rejected by the HTTP parser');
+    assert.equal(await probe(`GET /control/v1/health HTTP/1.1\r\nHost: user@127.0.0.1:${port}\r\nConnection: close\r\n\r\n`), 'HTTP/1.1 421 Misdirected Request');
+    for (const host of ['2130706433', '0x7f000001', '0177.0.0.1', '127.0.0.1.', 'localhost.', '127.0.0.1:99999']) {
+      assert.equal(await probe(`GET /control/v1/health HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`), 'HTTP/1.1 421 Misdirected Request', `non-canonical or invalid loopback authority rejected: ${host}`);
+    }
+    for (const target of [
+      `http://127.0.0.1:${port}/control/v1/health`,
+      '//attacker.example/control/v1/health',
+      '/control\\v1/health',
+      '/control/v1/health#fragment'
+    ]) {
+      assert.equal(await probe(request(target)), 'HTTP/1.1 400 Bad Request', `non-origin or ambiguous request target rejected: ${target}`);
+    }
+    const ambiguousFraming = `POST /control/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nTransfer-Encoding: chunked\r\nContent-Length: 0\r\nConnection: close\r\n\r\n0\r\n\r\n`;
+    assert.equal(await probe(ambiguousFraming), 'HTTP/1.1 400 Bad Request', 'Transfer-Encoding plus Content-Length must be rejected');
+    const duplicateLength = `POST /control/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`;
+    assert.equal(await probe(duplicateLength), 'HTTP/1.1 400 Bad Request', 'duplicate Content-Length must be rejected');
+    assert.equal(await probe(request('/control/v1/health', ' X-Fold: value\r\n')), 'HTTP/1.1 400 Bad Request', 'obsolete folded headers must be rejected');
+  } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     db.close();

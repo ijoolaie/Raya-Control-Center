@@ -525,3 +525,9 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Verified both localStorage and sessionStorage remained empty and that closing the inspector/disconnecting hid the editor and cleared its textarea and Operator-token input.
 - Assertions passed. The temporary acceptance script and isolated Chrome profile were removed. No live `.data`, ACLs, credentials, or network binding settings were accessed or modified.
 - This is implementer-run acceptance evidence, not independent security review. PR #1 remains Open, Draft, and Unmerged; the API remains loopback-only pending independent review.
+
+### Implementer raw HTTP parser regression sweep (2026-11-10)
+- Added a raw-TCP regression test for duplicate Host headers, userinfo Host authorities, integer/hex/octal IPv4 spellings, trailing-dot hostnames, invalid ports, absolute-form and network-path request targets, backslashes, fragments, Transfer-Encoding plus Content-Length ambiguity, duplicate Content-Length, and obsolete folded headers.
+- The focused HTTP suite passed 16/16 tests. Full local suite passed 140, skipped 3, failed 0 (143 total); `npm run check` and `git diff --check` passed.
+- The sweep ran on local Node 22.23.2, below the declared Node >=24.15.0 engine. Supported-runtime CI must verify the added test on Node 24/26 and Linux/Windows.
+- No runtime code change was justified by this test sweep; observed parser/authority cases were rejected as expected. This is implementer-run regression evidence only, not completion of the broader adversarial review and not independent security review. The review gate remains open; API remains loopback-only.
