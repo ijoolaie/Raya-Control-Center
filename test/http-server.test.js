@@ -387,7 +387,7 @@ test('operator list endpoints filter and paginate participants and tasks', async
   try {
     const registered = await call('/participants/register', { method: 'POST', body: JSON.stringify({ displayName: 'list-worker', scopes: ['tasks:claim'] }) });
     assert.equal(registered.status, 201);
-    await call('/tasks', { method: 'POST', body: JSON.stringify({ type: 'list.alpha' }) });
+    await call('/tasks', { method: 'POST', body: JSON.stringify({ type: 'list.alpha', payload: { privateValue: 'must-not-leak' } }) });
     await call('/tasks', { method: 'POST', body: JSON.stringify({ type: 'list.beta' }) });
     const participants = await call('/participants?status=active&kind=worker&limit=10');
     assert.equal(participants.status, 200);
@@ -397,6 +397,20 @@ test('operator list endpoints filter and paginate participants and tasks', async
     const taskData = await tasks.json();
     assert.equal(taskData.tasks.length, 1);
     assert.equal(taskData.tasks[0].type, 'list.alpha');
+    const summaryList = await call('/tasks/summary?type=list.alpha&limit=1');
+    assert.equal(summaryList.status, 200);
+    const summaryListTask = (await summaryList.json()).tasks[0];
+    assert.equal(summaryListTask.id, taskData.tasks[0].id);
+    assert.equal(Object.hasOwn(summaryListTask, 'payload'), false);
+    assert.equal(Object.hasOwn(summaryListTask, 'result'), false);
+    const summary = await call('/tasks/' + encodeURIComponent(taskData.tasks[0].id) + '/summary');
+    assert.equal(summary.status, 200);
+    const summaryTask = (await summary.json()).task;
+    assert.equal(summaryTask.id, taskData.tasks[0].id);
+    assert.equal(Object.hasOwn(summaryTask, 'payload'), false);
+    assert.equal(Object.hasOwn(summaryTask, 'result'), false);
+    const unauthenticatedSummary = await fetch(base + '/tasks/' + encodeURIComponent(taskData.tasks[0].id) + '/summary');
+    assert.equal(unauthenticatedSummary.status, 401);
     const invalid = await call('/tasks?status=not-a-state');
     assert.equal(invalid.status, 400);
     const unauthenticated = await fetch(base + '/tasks');
@@ -443,7 +457,7 @@ test('HTTP task requeue is Operator-only, requires both recovery attestations, a
   }
 });
 
-test('serves the read-only dashboard and static assets with restrictive security headers', async () => {
+test('serves the Operator dashboard and controlled recovery UI with restrictive security headers', async () => {
   const db = openDatabase(':memory:');
   const server = createControlServer({ db, operatorToken: 'dashboard-test-operator-token-'.repeat(2) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -455,7 +469,11 @@ test('serves the read-only dashboard and static assets with restrictive security
     assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
     assert.equal(page.headers.get('x-frame-options'), 'DENY');
     const pageText = await page.text();
-    assert.match(pageText, /Read-only operational overview/);
+    assert.match(pageText, /Operator dashboard · loopback only/);
+    assert.match(pageText, /Task inspection &amp; recovery/);
+    assert.match(pageText, /confirm-worker-stopped/);
+    assert.match(pageText, /confirm-side-effects/);
+    assert.match(pageText, /requeue-task/);
     assert.match(pageText, /Required capabilities/);
     assert.match(pageText, /Capabilities/);
     assert.match(pageText, /id="metric-unmatched"/);
@@ -470,6 +488,9 @@ test('serves the read-only dashboard and static assets with restrictive security
     assert.match(scriptText, /textContent/);
     assert.match(scriptText, /routing\/summary/);
     assert.match(scriptText, /metric-unmatched/);
+    assert.match(scriptText, /task.lease_expired_blocked/);
+    assert.match(scriptText, /confirmSideEffectsReviewed/);
+    assert.match(scriptText, /inspectedTaskId/);
     assert.doesNotMatch(scriptText, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
     assert.doesNotMatch(scriptText, /console\.(?:log|error|warn)/);
     assert.doesNotMatch(scriptText, /task\.(?:payload|result)/);

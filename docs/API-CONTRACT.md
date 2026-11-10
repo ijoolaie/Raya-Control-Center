@@ -28,8 +28,10 @@ For the complete consumer lifecycle, recovery rules, and independent client veri
 | GET | `/participants/{id}` | Operator | Read participant metadata |
 | POST | `/participants/{id}/revoke` | Operator | Revoke participant and block its active tasks; safe to repeat |
 | POST | `/tasks` | Operator | Create task |
-| GET | `/tasks` | Operator | List tasks with bounded filters and pagination |
-| GET | `/tasks/{id}` | Operator | Read task |
+| GET | `/tasks` | Operator | List full task records (includes payload/result) |
+| GET | `/tasks/summary` | Operator | List bounded task metadata without payload or result |
+| GET | `/tasks/{id}` | Operator | Read full task (includes payload/result; do not expose in dashboard) |
+| GET | `/tasks/{id}/summary` | Operator | Read bounded task metadata without payload or result |
 | POST | `/tasks/claim` | Participant + `tasks:claim` scope | Claim next eligible task |
 | POST | `/tasks/{id}/start` | Participant + lease header | Start claimed task |
 | POST | `/tasks/{id}/heartbeat` | Participant + lease header | Renew lease |
@@ -72,6 +74,8 @@ All successful responses use `application/json; charset=utf-8`, `Cache-Control: 
 | `GET /participants/{id}` and `POST /participants/{id}/revoke` | `participant` |
 | `POST /maintenance/reconcile-expired-leases` | `blockedTaskIds` |
 | `GET /tasks` | `tasks`, `page` (`limit`, `offset`, `count`) |
+| `GET /tasks/summary` | `tasks` (metadata only), `page` (`limit`, `offset`, `count`) |
+| `GET /tasks/{id}/summary` | `task` (metadata only; excludes `payload` and `result`) |
 | `POST /tasks` | `task`, `idempotentReplay` |
 | `POST /tasks/{id}/requeue` | `task` |
 | `POST /tasks/claim` | `claim` (`null` when no task is available; otherwise `task` and `lease`) |
@@ -86,7 +90,7 @@ All successful responses use `application/json; charset=utf-8`, `Cache-Control: 
 Query parameters are route-specific and strict:
 
 - `GET /participants`: `status`, `kind`, `limit`, `offset`.
-- `GET /tasks`: `status`, `type`, `assignedParticipantId`, `limit`, `offset`.
+- `GET /tasks` and `GET /tasks/summary`: `status`, `type`, `assignedParticipantId`, `limit`, `offset`.
 - `GET /events`: `entityType`, `entityId`, `limit`.
 - Other implemented routes do not accept query parameters.
 - Unknown or repeated parameter names, empty values, and non-decimal `limit`/`offset` values return `400 validation_error`.

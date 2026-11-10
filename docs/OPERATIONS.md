@@ -180,7 +180,7 @@ The restore validates SQLite integrity, foreign-key consistency, and the schema 
 
 Backups contain credential verifier hashes, participant metadata, task payloads, and event history. Store them as sensitive application data and restrict access accordingly.
 
-## Read-only dashboard
+## Local operator dashboard
 
 With the Control Center server running, open:
 
@@ -190,8 +190,10 @@ http://127.0.0.1:4317/
 
 Paste the saved Operator token into the dashboard's session field and select **Connect**. The dashboard reads the latest 100 Tasks, Participants, and Events using the existing Operator-authenticated read endpoints. Status/type/entity filters are available; use **Refresh** to reload data.
 
-The dashboard is deliberately read-only. It does not create or cancel Tasks, register or revoke Participants, or run lease reconciliation. It does not display Task payloads, Task results, Participant tokens, lease tokens, or credential hashes.
+The dashboard does not create or cancel Tasks, register or revoke Participants, or run lease reconciliation. It now provides one narrowly scoped mutation: **controlled requeue of a blocked Task**. Select **Inspect / recover** on a blocked Task to load its current Task metadata and up to 50 events for that Task. Payloads, results, Participant tokens, Lease tokens, and credential hashes are never rendered.
 
-The Operator token is kept only in the page's JavaScript memory. It is not persisted in localStorage, sessionStorage, cookies, or URL parameters. Reloading the page or selecting **Disconnect** clears the session. Use the dashboard only on the local machine; the server continues to bind to loopback only.
+The recovery form is shown only when the Task is still `blocked` and its newest event is exactly `task.lease_expired_blocked` or `task.participant_revoked_blocked`. Before enabling **Confirm requeue**, the Operator must enter a reason and separately attest that (1) the previous Worker has stopped and (2) external side effects have been reviewed. The API revalidates the Task state and history; the dashboard's eligibility check is not an authorization or safety boundary. A rejection requires refreshing and inspecting the current Task before another attempt. Requeue is never automatic. Do not requeue when an external operation may already have succeeded or its outcome is unknown.
 
-Static dashboard assets are served with a restrictive Content Security Policy, no-store caching, no-referrer policy, frame denial, and MIME sniffing protection. Dashboard HTML/assets are not an authentication boundary; all operational data remains protected by the Operator-authenticated API.
+The Operator token is kept only in the page's JavaScript memory. It is not persisted in localStorage, sessionStorage, cookies, or URL parameters. Reloading the page or selecting **Disconnect** clears the session and closes the inspector. Use the dashboard only on the local machine; the server continues to bind to loopback only.
+
+Static dashboard assets are served with a restrictive Content Security Policy, no-store caching, no-referrer policy, frame denial, and MIME sniffing protection. Dashboard HTML/assets are not an authentication boundary; all operational reads and mutations remain protected by the Operator-authenticated API.

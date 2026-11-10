@@ -81,8 +81,9 @@ This phase does not authorize development in either external repository. Raya-Ag
 
 ## Phase 4 — Dashboard and operational hardening
 **Status: In progress**
-- [x] Read-oriented dashboard for task, participant, and health inspection (Operator-authenticated data reads; no mutations exposed).
+- [x] Operator-authenticated dashboard for task, participant, health, and audit inspection; blocked-task history inspection and explicitly confirmed, API-revalidated manual requeue. No payload/result rendering or automatic retry.
 - [x] Manual Chrome acceptance on an isolated temporary database: valid/invalid Operator login, routing metrics, capability columns, task/participant filters, disconnect cleanup, and 390px responsive layout.
+- [ ] Manual Chrome acceptance of the new blocked-task inspection and controlled requeue flow on an isolated temporary database; do not use live `.data`.
 - [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.

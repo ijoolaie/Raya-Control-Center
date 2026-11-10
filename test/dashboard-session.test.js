@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 class Element {
-  constructor() { this.value = ''; this.textContent = ''; this.disabled = false; this.children = []; this.listeners = new Map(); }
+  constructor() { this.value = ''; this.textContent = ''; this.disabled = false; this.checked = false; this.hidden = false; this.type = ''; this.className = ''; this.children = []; this.listeners = new Map(); }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   append(child) { this.children.push(child); }
   replaceChildren(...children) { this.children = children; }
@@ -22,7 +22,7 @@ async function createDashboard() {
     'health-dot','health-label','task-status','task-type','participant-status','participant-kind',
     'event-entity','event-id','error','refresh','tasks-body','participants-body','events-body',
     'metric-active','metric-queued','metric-blocked','metric-participants','metric-unmatched',
-    'auth-status','operator-token','auth-form','disconnect'
+    'auth-status','operator-token','auth-form','disconnect','task-inspector','close-inspector','inspector-summary','inspector-events','recovery-panel','recovery-block-event','recovery-reason','confirm-worker-stopped','confirm-side-effects','requeue-task','recovery-status','inspector-error'
   ];
   const elements = new Map(ids.map(id => [id, new Element()]));
   const pending = [];
@@ -51,7 +51,7 @@ async function createDashboard() {
 }
 
 function responseFor(path, suffix) {
-  const body = path.includes('/tasks?') ? { tasks: [{ id: `${suffix}-task`, type: 'test', status: 'queued' }] }
+  const body = (path.includes('/tasks?') || path.includes('/tasks/summary?')) ? { tasks: [{ id: `${suffix}-task`, type: 'test', status: 'queued' }] }
     : path.includes('/participants?') ? { participants: [{ displayName: `${suffix} participant` }] }
       : path.includes('/events?') ? { events: [{ eventType: `${suffix} event` }] }
         : { routing: { activeClaimParticipants: suffix === 'new' ? 2 : 99, unmatchedQueuedTasks: suffix === 'new' ? 3 : 99 } };
@@ -135,4 +135,63 @@ test('dashboard rejects Operator tokens outside the exact server length and alph
     assert.match(elements.get('auth-status').textContent, /between 32 and 1024 URL-safe ASCII characters/);
     assert.equal(elements.get('operator-token').value, '', 'invalid token is cleared from the input');
   }
+});
+
+test('blocked-task inspector gates requeue on the latest recognized block event and both operator confirmations', async () => {
+  const { elements, pending, connect } = await createDashboard();
+  const connecting = connect('operator-recovery-token-');
+  await new Promise(resolve => setImmediate(resolve));
+  for (const item of pending.splice(0)) {
+    if (item.path.includes('/tasks/summary?')) item.resolve({ ok:true, json:async()=>({tasks:[{id:'blocked-task-1',type:'integration.test',status:'blocked'}]}) });
+    else item.resolve(responseFor(item.path, 'inspect'));
+  }
+  await connecting;
+
+  const row = elements.get('tasks-body').children[0];
+  const inspectButton = row.children[6].children[0];
+  assert.equal(inspectButton.textContent, 'Inspect / recover');
+  const inspecting = inspectButton.listeners.get('click')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending.length, 2);
+  for (const item of pending.splice(0)) {
+    if (item.path.includes('/tasks/blocked-task-1')) {
+      item.resolve({ok:true,json:async()=>({task:{id:'blocked-task-1',type:'integration.test',status:'blocked',payload:{secret:'DO_NOT_RENDER'},result:{secret:'DO_NOT_RENDER'}}})});
+    } else {
+      item.resolve({ok:true,json:async()=>({events:[
+        {eventType:'task.lease_expired_blocked',occurredAt:'2026-11-10T10:00:00Z',sequence:9,actorParticipantId:null},
+        {eventType:'task.started',occurredAt:'2026-11-10T09:00:00Z',sequence:8,actorParticipantId:'worker-1'}
+      ]})});
+    }
+  }
+  await inspecting;
+  assert.equal(elements.get('task-inspector').hidden, false);
+  assert.equal(elements.get('recovery-panel').hidden, false);
+  assert.match(elements.get('recovery-block-event').textContent, /task.lease_expired_blocked/);
+  assert.equal(elements.get('requeue-task').disabled, true);
+  assert.equal(elements.get('inspector-summary').textContent.includes('DO_NOT_RENDER'), false);
+  assert.equal(elements.get('inspector-events').children.some(row => row.children.some(cell => String(cell.textContent).includes('DO_NOT_RENDER'))), false);
+
+  elements.get('recovery-reason').value = 'Verified worker stopped; external state checked';
+  elements.get('recovery-reason').listeners.get('input')();
+  assert.equal(elements.get('requeue-task').disabled, true, 'both confirmations are required');
+  elements.get('confirm-worker-stopped').checked = true;
+  elements.get('confirm-worker-stopped').listeners.get('change')();
+  assert.equal(elements.get('requeue-task').disabled, true, 'side-effect review is independently required');
+  elements.get('confirm-side-effects').checked = true;
+  elements.get('confirm-side-effects').listeners.get('change')();
+  assert.equal(elements.get('requeue-task').disabled, false);
+
+  const submitting = elements.get('requeue-task').listeners.get('click')();
+  await new Promise(resolve => setImmediate(resolve));
+  const post = pending.shift();
+  assert.match(post.path, /\/tasks\/blocked-task-1\/requeue$/);
+  assert.equal(post.options.method, 'POST');
+  assert.deepEqual(JSON.parse(post.options.body), {
+    reason:'Verified worker stopped; external state checked',
+    confirmWorkerStopped:true,
+    confirmSideEffectsReviewed:true
+  });
+  post.resolve({ok:false,json:async()=>({error:{code:'test_rejected'}})});
+  await submitting;
+  assert.match(elements.get('inspector-error').textContent, /test_rejected/);
 });

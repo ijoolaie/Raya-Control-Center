@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div><p class="eyebrow">LOCAL OPERATIONS</p><h1>Raya Control Center</h1><p class="muted">Read-only operational overview</p></div>
+    <div><p class="eyebrow">LOCAL OPERATIONS</p><h1>Raya Control Center</h1><p class="muted">Operator dashboard · loopback only</p></div>
     <div class="health"><span id="health-dot" class="dot"></span><span id="health-label">Checking API…</span></div>
   </header>
   <main>
@@ -32,7 +32,24 @@
     <section class="panel">
       <div class="section-head"><div><h2>Tasks</h2><p class="muted">Latest 100 tasks. Payloads and results are intentionally omitted.</p></div><button id="refresh" type="button" class="secondary" disabled>Refresh</button></div>
       <div class="filters"><label>Status <select id="task-status"><option value="">All</option><option>queued</option><option>claimed</option><option>running</option><option>waiting_approval</option><option>blocked</option><option>cancellation_requested</option><option>succeeded</option><option>failed</option><option>cancelled</option></select></label><label>Type <input id="task-type" maxlength="160" placeholder="Filter by task type"></label></div>
-      <div class="table-wrap"><table><thead><tr><th>Task</th><th>Type</th><th>Required capabilities</th><th>Status</th><th>Progress</th><th>Updated</th></tr></thead><tbody id="tasks-body"><tr><td colspan="6" class="empty">Connect to load tasks.</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Task</th><th>Type</th><th>Required capabilities</th><th>Status</th><th>Progress</th><th>Updated</th><th>Operator</th></tr></thead><tbody id="tasks-body"><tr><td colspan="7" class="empty">Connect to load tasks.</td></tr></tbody></table></div>
+    </section>
+    <section class="panel inspector" id="task-inspector" hidden aria-live="polite">
+      <div class="section-head"><div><h2>Task inspection &amp; recovery</h2><p class="muted">Only bounded task metadata and append-only event history are shown. Payloads and results are never rendered.</p></div><button id="close-inspector" type="button" class="secondary">Close</button></div>
+      <p id="inspector-summary" class="inspector-summary"></p>
+      <h3>Recent task events</h3>
+      <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Sequence</th></tr></thead><tbody id="inspector-events"><tr><td colspan="4" class="empty">Select a task to inspect.</td></tr></tbody></table></div>
+      <div id="recovery-panel" class="recovery-panel" hidden>
+        <h3>Controlled requeue</h3>
+        <p class="warning-text">This may repeat external work. Continue only after independently verifying the previous Worker has stopped and reviewing whether its external side effects already occurred.</p>
+        <p id="recovery-block-event" class="muted"></p>
+        <label for="recovery-reason">Reason for recovery (required)</label>
+        <textarea id="recovery-reason" maxlength="500" rows="3" placeholder="Describe what you verified before requeueing"></textarea>
+        <label class="check-row"><input id="confirm-worker-stopped" type="checkbox"> I verified that the previous Worker has stopped.</label>
+        <label class="check-row"><input id="confirm-side-effects" type="checkbox"> I reviewed external side effects and determined re-execution is safe.</label>
+        <div class="recovery-actions"><button id="requeue-task" type="button" disabled>Confirm requeue</button><span id="recovery-status" class="muted" role="status"></span></div>
+      </div>
+      <p id="inspector-error" class="error" role="alert"></p>
     </section>
     <section class="panel">
       <div class="section-head"><div><h2>Participants</h2><p class="muted">Latest 100 participants. Credentials are never returned by this view.</p></div></div>
@@ -45,7 +62,7 @@
       <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Entity</th><th>Actor</th><th>Sequence</th></tr></thead><tbody id="events-body"><tr><td colspan="5" class="empty">Connect to load events.</td></tr></tbody></table></div>
     </section>
     <p id="error" class="error" role="alert"></p>
-    <footer>Raya Control Center · Local-only · Read-only dashboard · No credentials persisted</footer>
+    <footer>Raya Control Center · Local-only · Operator-authenticated · No credentials persisted</footer>
   </main>
 </body>
 </html>

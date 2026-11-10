@@ -39,10 +39,11 @@ function validateQuery(method, url) {
   let allowed = null;
   if (method === 'GET' && path === BASE + '/health') allowed = [];
   else if (method === 'GET' && path === BASE + '/participants') allowed = ['status', 'kind', 'limit', 'offset'];
-  else if (method === 'GET' && path === BASE + '/tasks') allowed = ['status', 'type', 'assignedParticipantId', 'limit', 'offset'];
+  else if (method === 'GET' && (path === BASE + '/tasks' || path === BASE + '/tasks/summary')) allowed = ['status', 'type', 'assignedParticipantId', 'limit', 'offset'];
   else if (method === 'GET' && path === BASE + '/events') allowed = ['entityType', 'entityId', 'limit'];
   else if (method === 'GET' && new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) allowed = [];
   else if (method === 'POST' && new RegExp('^' + BASE + '/participants/[^/]+/(revoke|capabilities)$').test(path)) allowed = [];
+  else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+/summary$').test(path)) allowed = [];
   else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) allowed = [];
   else if (method === 'GET' && new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) allowed = [];
   else if (method === 'POST' && (
@@ -83,9 +84,10 @@ function allowedMethods(path) {
   if (path === BASE + '/health' || path === BASE + '/routing/summary' || path === BASE + '/participants' || path === BASE + '/events') return ['GET'];
   if (path === BASE + '/participants/register' || path === BASE + '/operator/rotate-token' || path === BASE + '/maintenance/reconcile-expired-leases' || path === BASE + '/tasks/claim') return ['POST'];
   if (path === BASE + '/tasks') return ['GET', 'POST'];
+  if (path === BASE + '/tasks/summary') return ['GET'];
   if (new RegExp('^' + BASE + '/participants/[^/]+/(revoke|capabilities)$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/participants/[^/]+$').test(path)) return ['GET'];
-  if (new RegExp('^' + BASE + '/tasks/[^/]+/lease-status$').test(path)) return ['GET'];
+  if (new RegExp('^' + BASE + '/tasks/[^/]+/(lease-status|summary)$').test(path)) return ['GET'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+/(start|heartbeat|progress|complete|fail|cancel-ack|cancel-request|requeue)$').test(path)) return ['POST'];
   if (new RegExp('^' + BASE + '/tasks/[^/]+$').test(path)) return ['GET'];
   return null;
@@ -296,6 +298,21 @@ export function createControlServer({ db, operatorToken }) {
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === BASE + '/tasks/summary') {
+        requireOperator();
+        const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
+        const offset = url.searchParams.has('offset') ? Number(url.searchParams.get('offset')) : 0;
+        const tasks = center.listTasks({ status: url.searchParams.get('status') || undefined, type: url.searchParams.get('type') || undefined, assignedParticipantId: url.searchParams.get('assignedParticipantId') || undefined, limit, offset });
+        const summaries = tasks.map(task => ({
+          id: task.id, type: task.type, status: task.status, priority: task.priority,
+          requiredCapabilities: task.requiredCapabilities, assignedParticipantId: task.assignedParticipantId,
+          createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.startedAt,
+          finishedAt: task.finishedAt, progress: task.progress
+        }));
+        send(res, 200, { tasks: summaries, page: { limit, offset, count: summaries.length } });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === BASE + '/tasks') {
         requireOperator();
         const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
@@ -333,6 +350,20 @@ export function createControlServer({ db, operatorToken }) {
         send(res, 200, { status });
         return;
       }
+      const taskSummaryPath = new RegExp('^' + BASE + '/tasks/([^/]+)/summary$').exec(url.pathname);
+      if (req.method === 'GET' && taskSummaryPath) {
+        requireOperator();
+        const task = center.getTask(decodePathPart(taskSummaryPath[1]));
+        if (!task) throw new ControlCenterError('not_found', 'Task not found');
+        send(res, 200, { task: {
+          id: task.id, type: task.type, status: task.status, priority: task.priority,
+          requiredCapabilities: task.requiredCapabilities, assignedParticipantId: task.assignedParticipantId,
+          createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.startedAt,
+          finishedAt: task.finishedAt, progress: task.progress
+        } });
+        return;
+      }
+
       const taskPath = new RegExp('^' + BASE + '/tasks/([^/]+)$').exec(url.pathname);
       if (req.method === 'GET' && taskPath) {
         requireOperator();

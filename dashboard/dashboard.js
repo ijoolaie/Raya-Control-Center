@@ -3,16 +3,19 @@
   let operatorToken = '';
   let sessionEpoch = 0;
   let activeRefresh = null;
+  let inspectedTaskId = '';
+  const BLOCK_EVENTS = new Set(['task.lease_expired_blocked', 'task.participant_revoked_blocked']);
   const $ = id => document.getElementById(id);
   const escapeText = value => String(value ?? '—');
   const setText = (id, value) => { $(id).textContent = escapeText(value); };
   const cell = (tr, value) => { const td = document.createElement('td'); td.textContent = escapeText(value); tr.append(td); return td; };
   const pill = (td, value) => { const span = document.createElement('span'); span.className = 'pill ' + String(value).replace(/[^a-z_]/g, ''); span.textContent = value; td.replaceChildren(span); };
   const empty = (tbody, columns, message) => { tbody.replaceChildren(); const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = columns; td.className = 'empty'; td.textContent = message; tr.append(td); tbody.append(tr); };
-  async function request(path, auth = true, { token = operatorToken, signal } = {}) {
+  async function request(path, auth = true, { token = operatorToken, signal, method = 'GET', body } = {}) {
     const headers = {};
     if (auth) headers.authorization = 'Bearer ' + token;
-    const response = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin', signal });
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', credentials: 'same-origin', signal });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.code || 'http_' + response.status);
     return data;
@@ -33,6 +36,91 @@
     if ($('event-id').value.trim()) events.set('entityId', $('event-id').value.trim());
     return {task, participant, events};
   }
+  function closeInspector() {
+    inspectedTaskId = '';
+    $('task-inspector').hidden = true;
+    $('recovery-reason').value = '';
+    $('confirm-worker-stopped').checked = false;
+    $('confirm-side-effects').checked = false;
+    $('requeue-task').disabled = true;
+    $('inspector-events').replaceChildren();
+    $('recovery-panel').hidden = true;
+    $('inspector-error').textContent = '';
+    $('recovery-status').textContent = '';
+  }
+  function updateRequeueButton() {
+    $('requeue-task').disabled = !$('recovery-reason').value.trim()
+      || !$('confirm-worker-stopped').checked || !$('confirm-side-effects').checked;
+  }
+  async function inspectTask(taskId) {
+    if (!operatorToken) return;
+    const epoch = sessionEpoch, token = operatorToken;
+    inspectedTaskId = taskId;
+    $('task-inspector').hidden = false;
+    $('recovery-panel').hidden = true;
+    $('inspector-error').textContent = '';
+    setText('inspector-summary', 'Loading task ' + taskId + '…');
+    empty($('inspector-events'), 4, 'Loading event history…');
+    $('task-inspector').scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    try {
+      const [taskData, eventData] = await Promise.all([
+        request('/control/v1/tasks/' + encodeURIComponent(taskId) + '/summary', true, {token}),
+        request('/control/v1/events?' + new URLSearchParams({entityType:'task', entityId:taskId, limit:'50'}), true, {token})
+      ]);
+      if (epoch !== sessionEpoch || token !== operatorToken || inspectedTaskId !== taskId) return;
+      const task = taskData.task;
+      const events = eventData.events || [];
+      setText('inspector-summary', 'Task ' + task.id + ' · ' + task.type + ' · status: ' + task.status);
+      const body = $('inspector-events'); body.replaceChildren();
+      if (!events.length) empty(body, 4, 'No task events found.');
+      events.forEach(event => {
+        const tr = document.createElement('tr');
+        cell(tr, event.occurredAt); cell(tr, event.eventType); cell(tr, event.actorParticipantId || 'system'); cell(tr, event.sequence);
+        body.append(tr);
+      });
+      const latest = events[0];
+      if (task.status === 'blocked' && latest && BLOCK_EVENTS.has(latest.eventType)) {
+        $('recovery-panel').hidden = false;
+        setText('recovery-block-event', 'Latest blocking event: ' + latest.eventType + ' · ' + latest.occurredAt + ' · sequence ' + latest.sequence);
+        $('recovery-reason').value = '';
+        $('confirm-worker-stopped').checked = false;
+        $('confirm-side-effects').checked = false;
+        updateRequeueButton();
+      } else {
+        $('recovery-panel').hidden = true;
+        setText('inspector-error', task.status !== 'blocked'
+          ? 'Recovery is available only while the task is blocked.'
+          : 'No recognized latest blocking event. Requeue is unavailable for this history.');
+      }
+    } catch (error) {
+      if (epoch !== sessionEpoch || token !== operatorToken || error.name === 'AbortError') return;
+      setText('inspector-error', 'Could not inspect task: ' + error.message);
+    }
+  }
+  async function requeueTask() {
+    const taskId = inspectedTaskId;
+    if (!taskId || !operatorToken || $('requeue-task').disabled) return;
+    const epoch = sessionEpoch, token = operatorToken;
+    const reason = $('recovery-reason').value.trim();
+    $('requeue-task').disabled = true;
+    setText('recovery-status', 'Submitting operator recovery…');
+    $('inspector-error').textContent = '';
+    try {
+      const result = await request('/control/v1/tasks/' + encodeURIComponent(taskId) + '/requeue', true, {
+        token, method:'POST',
+        body: { reason, confirmWorkerStopped:$('confirm-worker-stopped').checked, confirmSideEffectsReviewed:$('confirm-side-effects').checked }
+      });
+      if (epoch !== sessionEpoch || token !== operatorToken || inspectedTaskId !== taskId) return;
+      setText('recovery-status', 'Requeued. New status: ' + result.task.status);
+      $('recovery-panel').hidden = true;
+      await refresh();
+      if (epoch === sessionEpoch && token === operatorToken) await inspectTask(taskId);
+    } catch (error) {
+      if (epoch !== sessionEpoch || token !== operatorToken) return;
+      setText('inspector-error', 'Requeue rejected: ' + error.message + '. Refresh and inspect the task before trying again.');
+      updateRequeueButton();
+    }
+  }
   async function refresh() {
     if (!operatorToken) return;
     const requestEpoch = sessionEpoch;
@@ -47,7 +135,7 @@
       const q = filters();
       const requestOptions = { token: requestToken, signal: controller.signal };
       const [tasksData, participantsData, eventsData, routingData] = await Promise.all([
-        request('/control/v1/tasks?' + q.task, true, requestOptions),
+        request('/control/v1/tasks/summary?' + q.task, true, requestOptions),
         request('/control/v1/participants?' + q.participant, true, requestOptions),
         request('/control/v1/events?' + q.events, true, requestOptions),
         request('/control/v1/routing/summary', true, requestOptions)
@@ -62,22 +150,31 @@
       setText('metric-participants', routing.activeClaimParticipants ?? '-');
       setText('metric-unmatched', routing.unmatchedQueuedTasks ?? '-');
       const tb = $('tasks-body'); tb.replaceChildren();
-      if (!tasks.length) empty(tb, 6, 'No matching tasks.');
+      if (!tasks.length) empty(tb, 7, 'No matching tasks.');
       tasks.forEach(task => {
-        const tr = document.createElement('tr'); cell(tr, task.id); cell(tr, task.type); cell(tr, (task.requiredCapabilities || []).join(', ') || 'Any claim-capable participant'); const status = cell(tr, ''); pill(status, task.status);
-        cell(tr, task.progress?.percent == null ? '—' : task.progress.percent + '%'); cell(tr, task.updatedAt); tb.append(tr);
+        const tr = document.createElement('tr');
+        cell(tr, task.id); cell(tr, task.type); cell(tr, (task.requiredCapabilities || []).join(', ') || 'Any claim-capable participant');
+        const status = cell(tr, ''); pill(status, task.status);
+        cell(tr, task.progress?.percent == null ? '—' : task.progress.percent + '%'); cell(tr, task.updatedAt);
+        const action = document.createElement('td');
+        if (task.status === 'blocked') {
+          const inspect = document.createElement('button'); inspect.type = 'button'; inspect.className = 'secondary compact';
+          inspect.textContent = 'Inspect / recover'; inspect.addEventListener('click', () => inspectTask(task.id)); action.append(inspect);
+        } else action.textContent = '—';
+        tr.append(action); tb.append(tr);
       });
       const pb = $('participants-body'); pb.replaceChildren();
       if (!participants.length) empty(pb, 6, 'No matching participants.');
       participants.forEach(person => {
-        const tr = document.createElement('tr'); cell(tr, person.displayName); cell(tr, person.kind); const status = cell(tr, ''); pill(status, person.status);
+        const tr = document.createElement('tr'); cell(tr, person.displayName); cell(tr, person.kind);
+        const status = cell(tr, ''); pill(status, person.status);
         cell(tr, (person.scopes || []).join(', ') || '-'); cell(tr, (person.capabilities || []).join(', ') || '-'); cell(tr, person.lastSeenAt); pb.append(tr);
       });
       const eb = $('events-body'); eb.replaceChildren();
       if (!events.length) empty(eb, 5, 'No matching events.');
       events.forEach(event => {
-        const tr = document.createElement('tr'); cell(tr, event.occurredAt); cell(tr, event.eventType); cell(tr, event.entityType + ':' + event.entityId);
-        cell(tr, event.actorParticipantId); cell(tr, event.sequence); eb.append(tr);
+        const tr = document.createElement('tr'); cell(tr, event.occurredAt); cell(tr, event.eventType);
+        cell(tr, event.entityType + ':' + event.entityId); cell(tr, event.actorParticipantId); cell(tr, event.sequence); eb.append(tr);
       });
       setText('auth-status', 'Connected · data refreshed ' + new Date().toLocaleTimeString());
     } catch (error) {
@@ -85,19 +182,19 @@
       $('error').textContent = 'Could not load dashboard data: ' + error.message;
       if (error.message === 'authentication_required') disconnect('Authentication failed. Check the operator token.');
     } finally {
-      if (isCurrent()) {
-        activeRefresh = null;
-        $('refresh').disabled = false;
-      }
+      if (isCurrent()) { activeRefresh = null; $('refresh').disabled = false; }
     }
   }
   function disconnect(message = 'Disconnected') {
     sessionEpoch++;
     activeRefresh?.abort();
     activeRefresh = null;
-    operatorToken = ''; $('operator-token').value = ''; $('refresh').disabled = true;
+    operatorToken = '';
+    $('operator-token').value = '';
+    $('refresh').disabled = true;
+    closeInspector();
     setText('auth-status', message);
-    empty($('tasks-body'), 6, 'Connect to load tasks.');
+    empty($('tasks-body'), 7, 'Connect to load tasks.');
     empty($('participants-body'), 6, 'Connect to load participants.');
     empty($('events-body'), 5, 'Connect to load events.');
     $('error').textContent = '';
@@ -106,15 +203,20 @@
   $('auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const token = $('operator-token').value;
-    if (token.length < 32 || token.length > 1024 || ![...token].every(character => /[A-Za-z0-9_-]/.test(character))) { disconnect('Token must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).'); return; }
-    sessionEpoch++;
-    activeRefresh?.abort();
-    activeRefresh = null;
-    operatorToken = token;
-    $('operator-token').value = ''; $('refresh').disabled = false; setText('auth-status', 'Connecting…'); await refresh();
+    if (token.length < 32 || token.length > 1024 || ![...token].every(character => /[A-Za-z0-9_-]/.test(character))) {
+      disconnect('Token must contain between 32 and 1024 URL-safe ASCII characters (letters, digits, underscore, or hyphen).'); return;
+    }
+    sessionEpoch++; activeRefresh?.abort(); activeRefresh = null; closeInspector();
+    operatorToken = token; $('operator-token').value = ''; $('refresh').disabled = false;
+    setText('auth-status', 'Connecting…'); await refresh();
   });
   $('disconnect').addEventListener('click', () => disconnect());
   $('refresh').addEventListener('click', refresh);
+  $('close-inspector').addEventListener('click', closeInspector);
+  $('recovery-reason').addEventListener('input', updateRequeueButton);
+  $('confirm-worker-stopped').addEventListener('change', updateRequeueButton);
+  $('confirm-side-effects').addEventListener('change', updateRequeueButton);
+  $('requeue-task').addEventListener('click', requeueTask);
   ['task-status','participant-status','participant-kind','event-entity'].forEach(id => $(id).addEventListener('change', refresh));
   ['task-type','event-id'].forEach(id => $(id).addEventListener('change', refresh));
   loadHealth();

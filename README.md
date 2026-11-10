@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 4 - local API, CLI, Reference Worker, and read-only dashboard implemented; verification in progress.
+**Status:** Phase 4 - local API, CLI, Reference Worker, and Operator dashboard with controlled blocked-task recovery implemented; verification in progress.
 
 ## Ownership and scope
 
@@ -25,7 +25,7 @@ This repository is the sole implementation home for Raya Control Center. It owns
 - Separate operator and participant bearer credentials; lease tokens are supplied separately in `X-Lease-Token`.
 - One-time operator-token bootstrap and explicit token rotation command.
 - Request-size limits, JSON validation, Host-header allowlist, and safe API errors.
-- Local read-only dashboard for task, participant, and audit-event inspection.
+- Local Operator dashboard for task, participant, and audit-event inspection, including confirmed manual recovery for eligible blocked Tasks.
 
 ## Runtime requirements
 
