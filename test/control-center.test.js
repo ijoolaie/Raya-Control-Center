@@ -596,3 +596,17 @@ test('capability changes preserve existing work but prevent incompatible future 
   }).status, 'succeeded');
   db.close();
 });
+
+test('revoked participants cannot have capabilities updated', () => {
+  const db = openDatabase(':memory:');
+  const center = new ControlCenter(db);
+  const worker = center.registerParticipant({ displayName: 'revoked-cap-worker', scopes: ['tasks:claim'], capabilities: ['worker:python'] });
+  center.revokeParticipant(worker.participant.id);
+  const before = db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(worker.participant.id).capabilities_json;
+  const auditCount = db.prepare("SELECT COUNT(*) AS count FROM events WHERE entity_id = ? AND event_type = 'participant.capabilities_updated'").get(worker.participant.id).count;
+  assert.throws(() => center.updateParticipantCapabilities(worker.participant.id, ['worker:admin']),
+    error => error.code === 'invalid_transition');
+  assert.equal(db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(worker.participant.id).capabilities_json, before);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM events WHERE entity_id = ? AND event_type = 'participant.capabilities_updated'").get(worker.participant.id).count, auditCount);
+  db.close();
+});

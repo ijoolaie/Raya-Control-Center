@@ -574,6 +574,12 @@ test('HTTP Operator capability management and capability-aware task claims', asy
     assert.deepEqual(db.prepare('SELECT id, status, expires_at FROM leases WHERE id = ?').get(claimed.lease.id), leaseBefore);
     const audit = db.prepare("SELECT event_type FROM events WHERE entity_id = ? AND event_type = 'participant.capabilities_updated'").get(registered.participant.id);
     assert.equal(audit.event_type, 'participant.capabilities_updated');
+    const revoked = await request('/participants/' + registered.participant.id + '/revoke', { method:'POST', headers:operator, body:'{}' });
+    assert.equal(revoked.status, 200);
+    const updateRevoked = await request('/participants/' + registered.participant.id + '/capabilities', { method:'POST', headers:operator,
+      body:JSON.stringify({capabilities:['worker:admin']}) });
+    assert.equal(updateRevoked.status, 409, 'revoked participants cannot be capability-edited');
+    assert.deepEqual(JSON.parse(db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(registered.participant.id).capabilities_json), ['worker:node']);
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

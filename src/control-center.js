@@ -128,8 +128,10 @@ export class ControlCenter {
   updateParticipantCapabilities(id, capabilities) {
     const normalized = validateCapabilities(capabilities, 'capabilities (maximum 64)', 64);
     return transaction(this.db, () => {
-      const existing = this.db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(id);
+      const existing = this.db.prepare('SELECT status, capabilities_json FROM participants WHERE id = ?').get(id);
       if (!existing) throw new ControlCenterError('not_found', 'Participant not found');
+      if (existing.status !== 'active')
+        throw new ControlCenterError('invalid_transition', 'Only active participants can have capabilities updated');
       const previous = parse(existing.capabilities_json);
       if (JSON.stringify(previous) === JSON.stringify(normalized)) return this.getParticipant(id);
       this.db.prepare('UPDATE participants SET capabilities_json = ?, updated_at = ? WHERE id = ?')
