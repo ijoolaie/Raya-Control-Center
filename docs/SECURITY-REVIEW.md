@@ -568,3 +568,9 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Confirmed the server sends `100 Continue`, then enforces the existing streaming 16 KiB limit and returns `413 Payload Too Large` when the chunked JSON body exceeds it; the in-memory task table remains unchanged.
 - Focused HTTP suite: 21/21 passed. Full local suite: 145 passed, 3 skipped, 0 failed (148 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 remains below the declared Node >=24.15.0 engine; supported-runtime CI is required.
 - This is implementer-run evidence only. Independent human security review remains pending. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
+
+### Supported-runtime CI and Security Scans — e0ed184
+- Exact implementation head `e0ed184e4ea7dfd66f17ec5a30cf8a14465b3ca9` passed both CI events: Push [42854922674](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854922674) and Pull Request [42854943126](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854943126). Each completed all four Node 24/26 × Linux/Windows jobs successfully.
+- Security Scans also passed on both events: Push [42854923220](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854923220) and Pull Request [42854942863](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42854942863). Both CodeQL JavaScript analysis and Gitleaks succeeded in each run.
+- This verifies automated workflows for the exact implementation head, including the chunked streaming body-limit regression. It does not replace independent human security review, which remains pending.
+- PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
