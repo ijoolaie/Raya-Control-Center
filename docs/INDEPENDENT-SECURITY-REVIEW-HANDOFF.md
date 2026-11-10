@@ -1,6 +1,6 @@
-﻿# Independent Security Review Handoff
+# Optional Third-Party Security Review Handoff
 
-Status: **Prepared; independent review not yet performed**
+Status: **Optional handoff; no third-party review requested by the project owner**
 Review target: the latest PR head at the time the independent review begins. The reviewer must fetch the current head SHA from PR #1 immediately before checkout and record that exact SHA in the report; do not rely on a SHA copied from this document.
 Capability-routing implementation commit: `1eaa1c04bb3bb3e3e6737f1ead3dcaf01b98bf03`
 The review target is the exact PR-head SHA recorded by the reviewer before testing; it includes all changes present on the branch at that time.
@@ -11,7 +11,7 @@ Deployment constraint: loopback-only. No remote ingress, tunnel, reverse proxy, 
 
 ## Purpose
 
-This is a handoff for a reviewer independent of the implementation. Internal code inspection, regression tests, browser acceptance, and CI are supporting evidence only. They are not an independent security review, penetration test, certification, or proof that no vulnerabilities exist. The reviewer must inspect the exact target commit, challenge the threat model, reproduce important claims, and issue their own report.
+This document is retained only as an optional handoff if the project owner later chooses to request third-party review. The current project process is owner-led AI-assisted review. Internal code inspection, regression tests, browser acceptance, and CI are supporting evidence only; they are not a penetration test, certification, or proof that no vulnerabilities exist. The owner may use this scope as a checklist, but no external reviewer is required.
 
 ## Scope
 

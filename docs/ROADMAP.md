@@ -77,7 +77,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Filter atomic claims by exact capability-set inclusion; leave unmatched Tasks queued.
 - [x] Add backward-compatibility, core routing, HTTP, audit, and active-Lease preservation tests.
 - [x] Add an Operator-only exact routing summary and expose required/available capabilities in the read-only Dashboard.
-- [ ] Complete independent security review before treating the routing change as independently reviewed.
+- [ ] Complete owner-led AI-assisted security review of capability routing; record tested cases, findings, and owner decisions.
 
 ## Phase 4 — Dashboard and operational hardening
 **Status: In progress**
@@ -90,7 +90,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.
-- [ ] Independent security review before any remote exposure.
+- [ ] Remote exposure remains disabled and out of scope; do not enable it under the current loopback-only project constraints.
 
 ## Phase 5 — Optional remote/multi-machine operation
 **Status: Deferred**
@@ -105,5 +105,5 @@ Never report completion based only on file creation.
 - [x] Make Operator token rotation immediate in the running server; reject offline rotation that could desynchronize server and database credentials.
 - [x] Redact echoed Operator credentials from CLI API error output.
 - [x] Implement and test offline Operator token recovery under an exclusive per-database runtime lock.
-- [ ] Complete independent security review by a reviewer who did not implement the controls.
-- [ ] Keep the API loopback-only until the independent review gate is complete.
+- [ ] Complete the owner-led, AI-assisted review across HTTP/authentication, task/lease authorization, persistence/recovery, dashboard, CLI, and Worker boundaries.
+- [ ] Keep the API loopback-only. Owner-led review does not authorize remote binding, tunnels, proxies, or port forwarding.

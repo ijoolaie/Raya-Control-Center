@@ -67,7 +67,7 @@ For operational use, token rotation, database maintenance, dashboard access, and
 - Keep secrets, `.data`, SQLite files, backups, environment files, and generated artifacts out of commits.
 - Do not modify actual `.data` permissions or apply the ACL helper without explicit operator approval.
 - Report each result as documented, implemented, tested, or operational. CI evidence and local test evidence must be stated separately.
-- The independent security review remains a release gate. Internal tests or implementation review do not satisfy that independent-review requirement.
+- The project uses an owner-led AI-assisted security review. Internal tests and CI are supporting evidence, not proof of security. Third-party review is optional. The API remains loopback-only; this review decision does not authorize remote exposure.
 
 ## Internal bundle check
 
