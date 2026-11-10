@@ -229,6 +229,45 @@ test('HTTP API separates operator and participant credentials and enforces lease
 });
 
 
+test('browser cross-origin requests cannot access the Operator API without explicit bearer authorization', async () => {
+  const db = openDatabase(':memory:');
+  const operatorToken = 'cross-origin-operator-token-123456789';
+  const server = createControlServer({ db, operatorToken });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + server.address().port + '/control/v1';
+  const origin = 'https://attacker.example';
+  try {
+    const preflight = await fetch(base + '/tasks', {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type'
+      }
+    });
+    assert.equal(preflight.status, 405, 'the API does not allow OPTIONS preflight requests');
+    assert.equal(preflight.headers.get('allow'), 'GET, POST');
+    assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+    assert.equal(preflight.headers.get('access-control-allow-headers'), null);
+
+    const crossOriginRead = await fetch(base + '/tasks', { headers: { origin } });
+    assert.equal(crossOriginRead.status, 401, 'an Origin header does not authenticate a browser request');
+    assert.equal(crossOriginRead.headers.get('access-control-allow-origin'), null);
+
+    const crossOriginMutation = await fetch(base + '/tasks', {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'cross-origin.csrf.probe' })
+    });
+    assert.equal(crossOriginMutation.status, 401, 'a cross-origin JSON mutation still requires an explicit bearer token');
+    assert.equal(crossOriginMutation.headers.get('access-control-allow-origin'), null);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE type = 'cross-origin.csrf.probe'").get().count, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
 test('CLI can register participants and create/read tasks through the local API', async () => {
   const db = openDatabase(':memory:');
   const operatorToken = 'cli-operator-token-'.repeat(3);

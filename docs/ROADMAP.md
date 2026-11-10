@@ -107,3 +107,8 @@ Never report completion based only on file creation.
 - [x] Implement and test offline Operator token recovery under an exclusive per-database runtime lock.
 - [ ] Complete the owner-led, AI-assisted review across HTTP/authentication, task/lease authorization, persistence/recovery, dashboard, CLI, and Worker boundaries.
 - [ ] Keep the API loopback-only. Owner-led review does not authorize remote binding, tunnels, proxies, or port forwarding.
+
+### Owner-led security review progress — 2026-11-11
+
+- [x] Review Backup/Restore locking, WAL snapshots, validation, journals, rollback, crash boundaries, and platform durability limitations.
+- [x] Review loopback HTTP Host/request-target handling, Bearer-only authorization, browser CORS/preflight behavior, and dashboard security headers; add a cross-origin regression test.
