@@ -555,3 +555,10 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Added an isolated in-memory SQLite raw-TCP regression proving early rejection, absence of a task side effect, and continued health of the listener.
 - Focused HTTP suite: 19/19 passed locally on Node 22.23.2 (below declared Node >=24.15.0); supported-runtime Node 24/26 Linux/Windows CI is required after push.
 - This is implementer-run evidence only. Independent human security review remains pending; PR #1 remains Open, Draft, and Unmerged; API remains loopback-only. No live `.data`, ACLs, credentials, or network binding settings were changed.
+
+### Implementer HTTP resource-limit verification (2026-11-10)
+- Verified the existing Node HTTP parser rejects a request header exceeding the configured 8 KiB `maxHeaderSize` with `431 Request Header Fields Too Large`; the raw-TCP regression now covers this boundary.
+- Verified `maxRequestsPerSocket = 100` is enforced in practice: 100 pipelined health requests receive `200 OK`, and request 101 receives `503 Service Unavailable` with `Connection: close`. Added a raw-TCP regression and explicit assertions for the configured header-size and per-socket request limits.
+- Existing time bounds remain `headersTimeout = 10s`, `requestTimeout = 30s`, and `keepAliveTimeout = 5s`. No arbitrary concurrent-connection cap was added: this service binds only to `127.0.0.1`, and no evidence justified a new compatibility-impacting limit.
+- Full local suite: 144 passed, 3 skipped, 0 failed (147 total); HTTP suite: 20/20 passed; `npm run check` and `git diff --check` passed. Local Node is 22.23.2, below declared Node >=24.15.0; supported-runtime CI is required after push.
+- Implementer-run evidence only; independent human security review remains pending. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only. No live `.data`, ACLs, credentials, or remote binding settings were changed.

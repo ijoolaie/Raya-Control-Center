@@ -871,6 +871,7 @@ test('raw HTTP parser rejects ambiguous framing and non-origin request targets',
     const duplicateLength = `POST /control/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`;
     assert.equal(await probe(duplicateLength), 'HTTP/1.1 400 Bad Request', 'duplicate Content-Length must be rejected');
     assert.equal(await probe(request('/control/v1/health', ' X-Fold: value\r\n')), 'HTTP/1.1 400 Bad Request', 'obsolete folded headers must be rejected');
+    assert.equal(await probe(request('/control/v1/health', 'X-Fill: ' + 'a'.repeat(9000) + String.fromCharCode(13, 10))), 'HTTP/1.1 431 Request Header Fields Too Large', 'headers beyond the configured 8 KiB limit must be rejected');
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
@@ -949,12 +950,48 @@ test('client disconnect during an incomplete request body cannot create a task o
   }
 });
 
+test('HTTP keep-alive enforces the 100-request per-socket cap', async () => {
+  const db = openDatabase(':memory:');
+  const server = createControlServer({ db, operatorToken: 'request-cap-review-token-1234567890' });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      let data = '';
+      const timer = setTimeout(() => { socket.destroy(); reject(new Error('request cap did not close the socket')); }, 3000);
+      const crlf = String.fromCharCode(13, 10);
+      const requests = Array.from({ length: 101 }, (_, index) => [
+        'GET /control/v1/health HTTP/1.1',
+        'Host: 127.0.0.1:' + port,
+        'Connection: ' + (index === 100 ? 'close' : 'keep-alive'),
+        '', ''
+      ].join(crlf)).join('');
+      socket.on('connect', () => socket.write(requests));
+      socket.on('data', chunk => { data += chunk.toString('latin1'); });
+      socket.on('end', () => { clearTimeout(timer); resolve(data); });
+      socket.on('error', error => { clearTimeout(timer); reject(error); });
+    });
+    const statuses = response.split('HTTP/1.1 ').slice(1).map(part => 'HTTP/1.1 ' + part.split(String.fromCharCode(13, 10))[0]);
+    assert.equal(statuses.length, 101, 'all 100 allowed requests and the rejected request receive responses');
+    assert.equal(statuses.filter(status => status.startsWith('HTTP/1.1 200')).length, 100);
+    assert.equal(statuses[100], 'HTTP/1.1 503 Service Unavailable');
+    assert.match(response.slice(response.lastIndexOf('HTTP/1.1 503')), /Connection: close/i);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    db.close();
+  }
+});
+
 test('HTTP keep-alive supports bounded pipelined requests and closes on client request', async () => {
   const db = openDatabase(':memory:');
   const server = createControlServer({ db, operatorToken: 'keep-alive-review-token-1234567890' });
   assert.equal(server.headersTimeout, 10_000);
   assert.equal(server.requestTimeout, 30_000);
   assert.equal(server.keepAliveTimeout, 5_000);
+  assert.equal(server.maxHeaderSize, 8 * 1024);
+  assert.equal(server.maxRequestsPerSocket, 100);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
