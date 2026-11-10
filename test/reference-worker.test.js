@@ -163,6 +163,34 @@ test('worker safely abandons a task after its lease expires and reconciliation b
   });
 });
 
+test('a reconnected worker with the same participant identity can process new work but cannot reclaim a crashed worker task', async () => {
+  await harness(async ({ register, createTask, getTask, startWorker, db, center }) => {
+    const participant = await register();
+    const abandoned = await createTask('demo.delay', { durationMs: 5000 });
+    const first = startWorker(participant.token);
+    try {
+      await waitFor(() => getTask(abandoned.id).status === 'running');
+      first.child.kill('SIGKILL');
+      await waitFor(() => first.child.exitCode !== null || first.child.signalCode !== null);
+      db.prepare("UPDATE leases SET expires_at = '2000-01-01T00:00:00.000Z' WHERE task_id = ? AND status = 'active'").run(abandoned.id);
+      assert.deepEqual(center.reconcileExpiredLeases(), [abandoned.id]);
+      assert.equal(getTask(abandoned.id).status, 'blocked');
+
+      const second = startWorker(participant.token);
+      try {
+        const fresh = await createTask('demo.echo', { value: 'reconnected-worker' });
+        await waitFor(() => getTask(fresh.id).status === 'succeeded');
+        assert.equal(getTask(fresh.id).result.echo, 'reconnected-worker');
+        assert.equal(getTask(abandoned.id).status, 'blocked');
+        assert.equal(getTask(abandoned.id).result, null);
+        const events = center.listEvents({ entityType: 'task', entityId: abandoned.id, limit: 20 });
+        assert.equal(events.some(event => event.eventType === 'task.succeeded'), false);
+        assert.equal(events.filter(event => event.eventType === 'task.lease_expired_blocked').length, 1);
+      } finally { await stop(second.child); }
+    } finally { await stop(first.child); }
+  });
+});
+
 test('worker waits safely on an empty queue and later claims newly queued work', async () => {
   await harness(async ({ register, createTask, getTask, startWorker }) => {
     const participant = await register();
