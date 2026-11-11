@@ -218,6 +218,7 @@ test('SQLite backup captures committed WAL data and restores a validated databas
   const restored = join(directory, 'restored.sqlite');
   const staleBackupTemp = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000000.tmp');
   const unexpectedBackupTemp = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000001.tmp');
+  const unexpectedBackupFile = join(directory, '.backup.sqlite.00000000-0000-4000-8000-000000000002.tmp');
   const staleRestoreTemp = join(directory, '.restored.sqlite.00000000-0000-4000-8000-000000000000.restore');
   let db;
   try {
@@ -228,9 +229,12 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     writeFileSync(join(staleBackupTemp, 'snapshot.sqlite'), 'stale partial backup');
     mkdirSync(unexpectedBackupTemp);
     writeFileSync(join(unexpectedBackupTemp, 'unexpected.bin'), 'preserve for operator review');
+    writeFileSync(unexpectedBackupFile, 'unexpected regular-file artifact');
     const backupResult = createDatabaseBackup(database, backup);
     assert.equal(existsSync(staleBackupTemp), false, 'a stale staging directory with only the known snapshot is cleaned');
     assert.equal(existsSync(join(unexpectedBackupTemp, 'unexpected.bin')), true, 'unexpected staging contents are preserved');
+    assert.equal(existsSync(unexpectedBackupFile), true, 'unexpected regular-file artifacts are preserved');
+    assert.equal(readFileSync(unexpectedBackupFile, 'utf8'), 'unexpected regular-file artifact');
     assert.equal(backupResult.schemaVersion, LATEST_SCHEMA_VERSION);
     if (process.platform !== 'win32') assert.equal(statSync(backup).mode & 0o777, 0o600, 'published backup must be owner-readable/writable only');
     if (process.platform !== 'win32') chmodSync(backup, 0o644); // Simulate an externally supplied backup with permissive mode.
