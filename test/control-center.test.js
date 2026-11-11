@@ -18,6 +18,41 @@ function fixture(options) {
 }
 
 
+async function runConcurrentOperation(filename, operation, data, startAt = null) {
+  const worker = new Worker(new URL('../test-support/task-race-worker.js', import.meta.url), {
+    workerData: { filename, operation, ...data, startAt }
+  });
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+  const exited = new Promise(resolve => worker.once('exit', resolve));
+  const result = new Promise((resolve, reject) => {
+    worker.on('message', message => {
+      if (message.type === 'ready') readyResolve();
+      if (message.type === 'result') resolve(message);
+    });
+    worker.once('error', error => { readyReject(error); reject(error); });
+    worker.once('exit', code => {
+      if (code !== 0) {
+        const error = new Error('task race worker exited ' + code);
+        readyReject(error);
+        reject(error);
+      }
+    });
+  });
+  await ready;
+  return { worker, result, exited };
+}
+
+async function raceOperations(filename, operations, startAt = null) {
+  const workers = await Promise.all(operations.map(([operation, data]) =>
+    runConcurrentOperation(filename, operation, data, startAt)));
+  try {
+    return await Promise.all(workers.map(item => item.result));
+  } finally {
+    await Promise.all(workers.map(item => item.exited));
+  }
+}
 test('capability routing skips incompatible high-priority tasks and preserves legacy empty requirements', () => {
   const db = openDatabase(':memory:');
   const center = new ControlCenter(db);
@@ -609,4 +644,113 @@ test('revoked participants cannot have capabilities updated', () => {
   assert.equal(db.prepare('SELECT capabilities_json FROM participants WHERE id = ?').get(worker.participant.id).capabilities_json, before);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM events WHERE entity_id = ? AND event_type = 'participant.capabilities_updated'").get(worker.participant.id).count, auditCount);
   db.close();
+});
+test('concurrent completion and cancellation serialize to exactly one winning transition', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-task-cancel-race-'));
+  const filename = join(dir, 'race.sqlite');
+  let db = openDatabase(filename);
+  const center = new ControlCenter(db);
+  const registered = center.registerParticipant({ displayName: 'cancel-race-worker', scopes: ['tasks:claim'] });
+  const task = center.createTask({ type: 'race.complete-cancel' });
+  const claim = center.claimTask({ participantId: registered.participant.id, token: registered.token });
+  center.startTask({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token });
+  db.close();
+  db = null;
+  try {
+    const outcomes = await raceOperations(filename, [
+      ['complete', { taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token }],
+      ['cancel', { taskId: task.id }]
+    ]);
+    assert.equal(outcomes.filter(item => item.value).length, 1);
+    assert.equal(outcomes.filter(item => item.error).length, 1);
+    assert.equal(outcomes.find(item => item.error)?.error.code, 'invalid_transition');
+    db = openDatabase(filename);
+    const currentCenter = new ControlCenter(db);
+    const current = currentCenter.getTask(task.id);
+    if (current.status === 'cancellation_requested') {
+      currentCenter.acknowledgeCancellation({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token });
+      assert.equal(currentCenter.getTask(task.id).status, 'cancelled');
+    } else {
+      assert.equal(current.status, 'succeeded');
+    }
+    const terminalEvents = db.prepare("SELECT COUNT(*) AS count FROM events WHERE entity_id = ? AND event_type IN ('task.succeeded', 'task.cancellation_requested')").get(task.id).count;
+    assert.equal(terminalEvents, 1);
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('concurrent completion and participant revocation cannot leave a live lease or resurrect blocked work', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-task-revoke-race-'));
+  const filename = join(dir, 'race.sqlite');
+  let db = openDatabase(filename);
+  const center = new ControlCenter(db);
+  const registered = center.registerParticipant({ displayName: 'revoke-race-worker', scopes: ['tasks:claim'] });
+  const task = center.createTask({ type: 'race.complete-revoke' });
+  const claim = center.claimTask({ participantId: registered.participant.id, token: registered.token });
+  center.startTask({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token });
+  db.close();
+  db = null;
+  try {
+    const outcomes = await raceOperations(filename, [
+      ['complete', { taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token }],
+      ['revoke', { participantId: registered.participant.id }]
+    ]);
+    assert.ok(outcomes[1].value, 'participant revocation must commit');
+    db = openDatabase(filename);
+    const currentCenter = new ControlCenter(db);
+    assert.equal(currentCenter.getParticipant(registered.participant.id).status, 'revoked');
+    const current = currentCenter.getTask(task.id);
+    assert.ok(['succeeded', 'blocked'].includes(current.status));
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM leases WHERE task_id = ? AND status = 'active'").get(task.id).count, 0);
+    if (current.status === 'blocked') {
+      assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'revoked');
+      assert.throws(() => currentCenter.completeTask({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token }), error => error.code === 'lease_mismatch' || error.code === 'authentication_required');
+    } else {
+      assert.equal(db.prepare('SELECT status FROM leases WHERE id = ?').get(claim.lease.id).status, 'released');
+    }
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('heartbeat racing lease expiry reconciliation has only the two safe serialized outcomes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'raya-task-heartbeat-race-'));
+  const filename = join(dir, 'race.sqlite');
+  let db = openDatabase(filename);
+  const center = new ControlCenter(db);
+  const registered = center.registerParticipant({ displayName: 'heartbeat-race-worker', scopes: ['tasks:claim'] });
+  const task = center.createTask({ type: 'race.heartbeat-expiry' });
+  const claim = center.claimTask({ participantId: registered.participant.id, token: registered.token });
+  center.startTask({ taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token });
+  const startAt = Date.now() + 1500;
+  db.prepare('UPDATE leases SET expires_at = ? WHERE id = ?').run(new Date(startAt).toISOString(), claim.lease.id);
+  db.close();
+  db = null;
+  try {
+    const outcomes = await raceOperations(filename, [
+      ['heartbeat', { taskId: task.id, participantId: registered.participant.id, leaseToken: claim.lease.token }],
+      ['reconcile', {}]
+    ], startAt);
+    db = openDatabase(filename);
+    const currentCenter = new ControlCenter(db);
+    const current = currentCenter.getTask(task.id);
+    const leaseStatus = db.prepare('SELECT status, expires_at FROM leases WHERE id = ?').get(claim.lease.id);
+    if (outcomes.find(item => item.value && !Array.isArray(item.value))) {
+      assert.equal(current.status, 'running');
+      assert.equal(leaseStatus.status, 'active');
+      assert.ok(Date.parse(leaseStatus.expires_at) > Date.now());
+      assert.deepEqual(outcomes.find(item => Array.isArray(item.value)).value, []);
+    } else {
+      assert.equal(current.status, 'blocked');
+      assert.equal(leaseStatus.status, 'expired');
+      assert.equal(outcomes.find(item => item.error)?.error.code, 'lease_mismatch');
+      assert.deepEqual(outcomes.find(item => Array.isArray(item.value)).value, [task.id]);
+    }
+  } finally {
+    if (db) db.close();
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
