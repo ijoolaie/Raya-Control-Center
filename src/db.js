@@ -134,8 +134,10 @@ export function openDatabase(filename = '.data/control-center.sqlite') {
     if (path !== ':memory:') restrictPrivateDatabaseFile(path);
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA busy_timeout = 5000');
-    if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+    // Validate/migrate the schema before changing the database journal mode.
+    // In particular, an older build must not alter a future-version database.
     migrate(db);
+    if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
     if (path !== ':memory:') {
       restrictPrivateDatabaseFile(path + '-wal', { optional: true });
       restrictPrivateDatabaseFile(path + '-shm', { optional: true });
