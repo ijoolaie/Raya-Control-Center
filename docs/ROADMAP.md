@@ -125,3 +125,5 @@ Never report completion based only on file creation.
 
 - [x] SEC-016: make Restore inspection fail closed on symlinked/junction database parents so recovery journals are not read through path aliases (2026-11-11).
 - [x] Reject unsupported SQLite schema versions before changing file permissions or journal mode; centralize the latest supported schema version across migration and Backup/Restore validation (2026-11-11).
+
+- [x] SEC-018: restrict Backup/Restore temporary cleanup to artifacts created by the current operation; preserve UUID-shaped regular files and unexpected staging contents; add collision/race regressions (2026-11-11).
