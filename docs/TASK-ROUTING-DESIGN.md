@@ -1,6 +1,6 @@
 # Task Routing and Worker Capabilities - Approved Design
 
-Status: approved and implemented in the local working tree on 2026-11-08. Syntax checks, serial full test suite (118 passed, 3 skipped), and manual Chrome 157 Dashboard acceptance on an isolated temporary database pass. Changes remain uncommitted and unpushed; independent security review is pending.
+Status: approved, implemented, and committed on `bootstrap/project-foundation`. Capability routing, the Operator editor, active-Lease preservation, and isolated Chrome acceptance are recorded in `docs/ROADMAP.md` and `docs/SECURITY-REVIEW.md`. A focused owner-led AI-assisted security review checkpoint is recorded in the security register (2026-11-11).
 Scope: Raya Control Center repository only. This design does not authorize changes to Raya-Agent or Raya-MCP.
 
 ## 1. Problem statement
