@@ -1073,3 +1073,13 @@ Verification:
 - This is a static hard-link preflight, not protection against a hostile same-user/administrator race that can mutate directory entries; trusted parent-directory ACLs remain required.
 - Classification: bounded owner-led hardening; not an independent audit, penetration test, or certification.
 - Exact implementation commit 76988997512cdbf2687f2f108152a5ad70ca3a7d passed all 13 recorded check runs: Node 24/26 on Linux/Windows, CodeQL (both recorded runs), and Gitleaks (both recorded runs). Local Windows PowerShell disposable-tree regression also passed as recorded above.
+## Separate Windows backup-directory ACL scope regression - 2026-11-11
+
+- Extended `test-support/test-data-acl.ps1` with a second disposable fixture representing a separately configured backup directory outside the data tree.
+- The test applies the existing ACL helper only to that backup directory and its contents, then verifies protected DACLs and the exact allowed principals (current user, SYSTEM, and local Administrators).
+- It snapshots and compares the parent directory and sibling data-directory DACLs, confirming that securing the separate backup tree does not modify either one.
+- The fixture is disposable and removed in `finally`; no live `.data`, backup directory, or backup content was read or modified.
+- Windows PowerShell 5.1 execution passed. Existing locked-file, external-hard-link, `-WhatIf`, recursive-tree, and allowed-principal assertions also passed; seven items in the original fixture plus the separate backup directory and file were verified.
+- Full local Windows suite: 169 passed, 4 skipped, 0 failed (173 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 remains below the declared Node >=24.15.0 engine; supported-runtime CI is authoritative.
+- This verifies helper behavior on disposable NTFS test trees; it does not verify an actual operator-created backup directory or its parent ACLs. Any real backup destination must still be secured before real backups are stored.
+- Classification: bounded regression hardening; not an independent audit, penetration test, or certification.
