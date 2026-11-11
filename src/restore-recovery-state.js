@@ -30,7 +30,7 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
     };
     return {
       state: 'no-pending-restore', severity: 'info', automaticAction: 'none', observations,
-      guidance: 'No pending Restore journal or lock was found. This is not a database integrity check.'
+      guidance: 'No pending Restore journal, recovery artifact, or lock was found. This is not a database integrity check.'
     };
   }
   if (journalStatus !== 'valid' || journalValid !== true) return {
