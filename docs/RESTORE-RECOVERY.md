@@ -85,7 +85,7 @@ $env:RAYA_CC_DATABASE = $Database
 npm run db:restore -- $Rollback
 ```
 
-Because the destination is absent, Restore installs the selected rollback database without replacing another live database. If the command reports a lock, path, or validation error, stop and preserve the files; do not work around the error by deleting additional files.
+Because the destination is absent, Restore installs the selected rollback database without replacing another live database. If the command reports a lock, path, or validation error, stop and preserve the files; do not work around the error by deleting additional files. Before installation, Restore validates the selected backup and records its filesystem identity (device, inode, size, modification time, and change time). Immediately after copying it to the private staging path, Restore compares that identity again and refuses installation if the source path was replaced or its metadata changed during staging. The staged copy is independently checked with SQLite integrity, foreign-key, and schema-version checks. This closes ordinary source-path replacement races; it is not a defense against a hostile same-user process that can concurrently manipulate and restore filesystem metadata.
 
 ## 5. If a live database already exists
 
