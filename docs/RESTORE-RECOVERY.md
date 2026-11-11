@@ -93,7 +93,7 @@ Do not restore over it as part of crash cleanup. The presence of a live database
 
 ## 6. Orphaned temporary files
 
-A `.restore` temporary file is not a substitute for a rollback database. Leave it in place until the live database has been recovered, validated, and backed up. Only then may an operator remove a specifically identified orphaned `.restore` file after confirming no maintenance process is active.
+A `.restore` temporary file is not a substitute for a rollback database. Leave it in place until the live database has been recovered, validated, and backed up. Only then may an operator remove a specifically identified orphaned `.restore` file after confirming no maintenance process is active. A new Restore refuses to proceed while such a file remains; it does not silently delete staged recovery evidence.
 
 
 ## Unpublished Restore journal temporary files
