@@ -46,13 +46,48 @@ while ($pending.Count -gt 0) {
     }
 }
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class RayaControlCenterDaclNative {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ByHandleFileInformation {
+        public uint FileAttributes;
+        public uint CreationTimeLow;
+        public uint CreationTimeHigh;
+        public uint LastAccessTimeLow;
+        public uint LastAccessTimeHigh;
+        public uint LastWriteTimeLow;
+        public uint LastWriteTimeHigh;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "SetFileSecurityW")]
+    public static extern bool SetFileSecurity(string path, uint securityInformation, byte[] securityDescriptor);
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileInformationByHandle")]
+    public static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out ByHandleFileInformation information);
+}
+'@
 # An exclusive read open catches files currently held open by a process before changing any ACL.
 foreach ($file in $files) {
     $stream = $null
     try {
         $stream = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        $fileInformation = [RayaControlCenterDaclNative+ByHandleFileInformation]::new()
+        if (-not [RayaControlCenterDaclNative]::GetFileInformationByHandle($stream.SafeFileHandle, [ref]$fileInformation)) {
+            $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw (New-Object ComponentModel.Win32Exception($code))
+        }
+        if ($fileInformation.NumberOfLinks -ne 1) {
+            throw ('Refusing a file with multiple hard links; remove the external link or choose a dedicated data directory: ' + $file.FullName)
+        }
     } catch {
-        throw ('Cannot obtain an exclusive read handle; stop the server/workers and close this file first: ' + $file.FullName)
+        if ($_.Exception.Message -match 'multiple hard links') { throw }
+        throw ('Cannot obtain an exclusive read handle or inspect it safely; stop the server/workers and close this file first: ' + $file.FullName + '. ' + $_.Exception.Message)
     } finally {
         if ($null -ne $stream) { $stream.Dispose() }
     }
@@ -66,15 +101,6 @@ $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
 $administratorsSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
 $principals = @($userSid, $systemSid, $administratorsSid)
-
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class RayaControlCenterDaclNative {
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "SetFileSecurityW")]
-    public static extern bool SetFileSecurity(string path, uint securityInformation, byte[] securityDescriptor);
-}
-'@
 
 function Set-DaclOnlySecurityDescriptor {
     param(

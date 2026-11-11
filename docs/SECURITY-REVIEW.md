@@ -128,9 +128,9 @@ Residual risks: the one-time replacement token is transmitted over loopback HTTP
 
 A local Windows inspection of the repository current .data directory found inherited Authenticated Users: Modify and Users: Read & Execute access. This is an observation about this machine current NTFS ACL, not a claim about all Windows installations. The existing data directory and its files were not modified.
 
-An opt-in PowerShell helper, scripts/secure-data-acl.ps1, now hardens a dedicated data directory and its descendants to explicit Full Control for only the invoking user, SYSTEM, and local Administrators. It rejects reparse points, checks for open files before changing anything, supports -WhatIf, disables inherited ACLs on each item, and attempts in-memory ACL rollback if an update fails. A disposable-tree test verifies the allowed principals, WhatIf behavior, and refusal when a file is open. The test is included in Windows CI.
+An opt-in PowerShell helper, scripts/secure-data-acl.ps1, now hardens a dedicated data directory and its descendants to explicit Full Control for only the invoking user, SYSTEM, and local Administrators. It rejects reparse points, checks for open files and obtains the file link count from the same exclusive handle before changing anything, and refuses files with multiple hard links. It supports -WhatIf, disables inherited ACLs on each item, and attempts in-memory ACL rollback if an update fails. The disposable-tree test verifies the allowed principals, WhatIf behavior, refusal when a file is open, and refusal of a file hard-linked outside the selected tree before either ACL changes. The test is included in Windows CI.
 
-Residual risks: this helper is not automatically applied; operators must run it separately for data and backup directories after stopping processes. It does not protect against local Administrators, SYSTEM, malware running as the same user, or offline disk access. The helper test does not establish protection against every NTFS reparse/hard-link race or validate ACL behavior on non-NTFS filesystems.
+Residual risks: this helper is not automatically applied; operators must run it separately for data and backup directories after stopping processes. It does not protect against local Administrators, SYSTEM, malware running as the same user, or offline disk access. The hard-link check is a preflight on an exclusive handle; it does not eliminate a hostile same-user or administrator race involving directory-entry replacement, nor validate ACL behavior on non-NTFS filesystems.
 
 ## WAL recovery and process termination
 
@@ -1064,3 +1064,11 @@ Verification:
 - Existing local Windows implementation/test evidence remains: 169 passed, 4 skipped, 0 failed (173 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine; supported-runtime CI remains authoritative.
 - PR #1 remains Open, Draft, and Unmerged. API remains loopback-only; Phase 5 remote/multi-machine operation remains deferred.
 - Classification: documentation synchronization and automated CI evidence only; not an independent audit, penetration test, or certification.
+## Windows ACL helper hard-link preflight - 2026-11-11
+
+- Bounded review found that the ACL helper rejected reparse points and open files but did not inspect NTFS hard-link counts. Applying a DACL to a file entry with another name outside the selected tree could therefore also affect that external name.
+- The helper now obtains BY_HANDLE_FILE_INFORMATION from the same exclusive file handle used by preflight and requires NumberOfLinks == 1. Failure to obtain the file identity fails closed before any ACL mutation.
+- The Windows disposable-tree regression creates an external hard link, verifies the helper refuses the selected tree, and verifies neither the selected directory nor the outside target ACL changed. Existing open-file, WhatIf, recursive ACL, and allowed-principal assertions remain.
+- Local Windows PowerShell validation: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./test-support/test-data-acl.ps1 passed; 7 secured test-tree items were verified. The disposable hard-link fixture was removed by the test. No live .data or backup directory was touched.
+- This is a static hard-link preflight, not protection against a hostile same-user/administrator race that can mutate directory entries; trusted parent-directory ACLs remain required. Windows CI verification for the resulting commit is pending.
+- Classification: bounded owner-led hardening; not an independent audit, penetration test, or certification.
