@@ -124,3 +124,4 @@ Never report completion based only on file creation.
 - [x] SEC-015: suppress native URL-parser diagnostics that could echo malformed Worker API URL userinfo; add a child-process regression (2026-11-11).
 
 - [x] SEC-016: make Restore inspection fail closed on symlinked/junction database parents so recovery journals are not read through path aliases (2026-11-11).
+- [x] Reject unsupported SQLite schema versions before mutation; validate/migrate before enabling WAL; centralize the latest supported schema version across migration and Backup/Restore validation (2026-11-11).
