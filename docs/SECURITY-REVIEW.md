@@ -165,7 +165,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [ ] Apply and verify restrictive ACLs on the actual configured data and backup directories after the operator stops all processes; no live ACL has been changed.
 - [x] Make Operator token rotation immediate in the running server and redact echoed credentials from CLI API errors.
 - [x] Add offline token recovery guarded by a per-database exclusive runtime lock.
-- [ ] Independently review token handling under local filesystem and backup threat scenarios.
+- [x] Complete the owner-led AI-assisted review of token handling, local filesystem boundaries, and backup/restore credential rollback; findings and residual risks are recorded in the 2026-11-11 review checkpoints. This is not an independent audit.
 - [x] Add regression coverage for credential redaction in HTTP errors, audit events, CLI failures, and dashboard output/source sinks.
 - [ ] **Deferred / optional, not a project gate:** obtain an independent adversarial review of credential handling and interactive browser behavior.
 - [ ] **Deferred / optional, not a project gate:** obtain a third-party security review from a reviewer who did not implement the controls.
@@ -675,7 +675,7 @@ Verification:
 - **Platform durability:** Windows parent-directory fsync is not available through the portable Node API used here. The project does not claim universal power-loss durability.
 - **External side effects:** the Control Center cannot prove a prior Worker stopped or that an external action did not occur before a Task is requeued. The Operator attestations are explicit human decisions, not machine verification.
 - **Remote exposure:** remote binding, tunnels, reverse proxies, and port forwarding remain disabled and out of scope.
-- **Remaining review work:** continue focused review of dashboard DOM/XSS sinks, CLI/Worker secret lifecycle under adversarial inputs, and additional authorization/state-transition edges. Do not treat the current bounded review as complete.
+- **Review status at this checkpoint:** the owner-led AI-assisted passes for dashboard DOM/client-secret handling, CLI/Worker credential lifecycle, HTTP authorization revalidation, capability routing, and task/lease concurrency are recorded in the dated checkpoints below. These are bounded source-and-regression reviews, not exhaustive audits. Remaining operator-specific work is applying and verifying NTFS ACLs on the actual data and backup directories; forced termination during the HTTP shutdown drain window also remains untested.
 
 ### Verification and owner decision
 
