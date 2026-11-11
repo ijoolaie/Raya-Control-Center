@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { dirname } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 
 const [mode, database, backup, uuidList] = process.argv.slice(2);
@@ -8,6 +9,14 @@ crypto.randomUUID = () => {
   if (!uuids.length) throw new Error('test-uuid-sequence-exhausted');
   return uuids.shift();
 };
+if (mode === 'backup-unexpected-temp-entry') {
+  const originalLink = fs.linkSync;
+  fs.linkSync = (source, target) => {
+    const result = originalLink(source, target);
+    if (target === backup) fs.writeFileSync(dirname(source) + '/unexpected.bin', 'preserve-unexpected-entry');
+    return result;
+  };
+}
 if (mode === 'restore-stage-collision') {
   const originalCopyFile = fs.copyFileSync;
   fs.copyFileSync = (source, target, flags) => {
