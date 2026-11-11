@@ -7,7 +7,7 @@ import { createDatabaseBackup } from '../src/database-maintenance.js';
 const [database, destination, mode, marker] = process.argv.slice(2);
 const originalExec = DatabaseSync.prototype.exec;
 const originalLink = fs.linkSync;
-const originalRm = fs.rmSync;
+const originalUnlink = fs.unlinkSync;
 DatabaseSync.prototype.exec = function (sql) {
   if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
@@ -31,11 +31,11 @@ if (mode === 'destination-race') {
   };
 }
 if (mode === 'cleanup-failure' || mode === 'vacuum-cleanup-failure') {
-  fs.rmSync = (target, options) => {
-    if (typeof target === 'string' && (target.endsWith('.tmp') || target.endsWith('snapshot.sqlite'))) {
+  fs.unlinkSync = target => {
+    if (typeof target === 'string' && target.endsWith('snapshot.sqlite')) {
       throw Object.assign(new Error('injected-backup-temp-cleanup-failure'), { code: 'EBUSY' });
     }
-    return originalRm(target, options);
+    return originalUnlink(target);
   };
 }
 if (mode === 'sync-failure') {
