@@ -834,3 +834,36 @@ Verification:
 - CI run [42977592907](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42977592907): Node 24/26 on Linux/Windows passed (4/4).
 - Security Scans run [42977592853](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42977592853): CodeQL and Gitleaks passed.
 - No local or manual acceptance is claimed.
+
+
+## SEC-017 — Restore inspection omitted recovery artifacts after journal cleanup
+
+Severity: **Medium**
+
+Status: **Remediated in implementation; exact-head supported-runtime CI and Security Scans pending**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `src/restore-recovery-state.js`
+- `test/database-maintenance.test.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- The crash-boundary suite deliberately terminates a Restore immediately after the published journal is removed. At that point the newly installed live database and the original `.pre-restore-<uuid>` rollback file both remain, while the journal is absent and SQLite lock reservations have been released.
+- Recovery inspection previously classified that state as `no-pending-restore`. It did not enumerate rollback or staged Restore files when the journal was absent, despite the runbook requiring the original rollback to be preserved until the live database is verified and a separate backup is created.
+- The same absent-journal branch used a falsy check on `journal.exists`; an inspection result of `null` (for example, an unreadable path) could therefore be treated as journal absence instead of an unreadable journal.
+
+Impact:
+- The inspector could present an incomplete recovery picture after the final Restore cleanup crash window. It did not delete or alter the rollback file, but the misleading state could encourage an operator to overlook recovery evidence. An unreadable journal path could also be reported through the absent-journal path.
+
+Remediation:
+- When the published journal is absent, inspection now enumerates exact UUID-shaped rollback files, staged `.restore` files, and unpublished journal `.tmp` files. It preserves the existing string-path shape of `orphanedTemporaryFiles` and reports the other artifact inventories with their observed file metadata.
+- Added `no-journal-recovery-artifacts-present` when any such artifact remains and `no-pending-restore-artifact-state-unknown` when enumeration is incomplete. A missing parent directory is treated as an empty inventory; other enumeration failures remain unknown.
+- Journal absence is now accepted only when `exists === false`; unknown or non-regular journal paths are classified as unreadable.
+- Added read-only inventory coverage for all three orphan classes, updated the real child-process crash-boundary expectation after journal cleanup, and added a POSIX unreadable-path regression (skipped on Windows and when running as root).
+
+Verification:
+- Implementation head: `3893ce935be7a6638713857077aeba8ebe921d58`.
+- Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are queued for the implementation head. Do not mark this finding CI-verified until the exact current PR head passes.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
