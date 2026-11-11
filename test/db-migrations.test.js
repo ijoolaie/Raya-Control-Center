@@ -61,6 +61,8 @@ test('a failed migration rolls back its schema changes and does not advance user
     migrate(db);
     db.exec(`
       DROP TABLE settings;
+      DROP TRIGGER events_no_update;
+      DROP TRIGGER events_no_delete;
       PRAGMA user_version = 1;
       CREATE TRIGGER events_no_delete
       BEFORE DELETE ON events
