@@ -869,3 +869,39 @@ Verification:
 - Pull Request Security Scans run [42978979875](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42978979875) passed CodeQL JavaScript analysis and Gitleaks.
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+
+## SEC-018 — Maintenance cleanup could remove artifacts it did not own
+
+Severity: **Medium**
+
+Status: **Remediated; exact-head CI and Security Scans passed**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test/database-maintenance.test.js`
+- `test-support/maintenance-temp-collision-worker.js`
+- `test-support/backup-fault-worker.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- Backup stale-temp cleanup previously unlinked any regular file whose name matched the UUID-shaped `.tmp` pattern, although the expected Backup staging artifact is a directory containing the known `snapshot.sqlite` file.
+- Backup post-operation cleanup recursively removed its staging directory, including unexpected entries that might have appeared after staging creation.
+- Failure cleanup for Backup, Restore Journal staging, and Restore snapshot staging did not consistently prove that the current operation had successfully created the path before attempting deletion. An `EEXIST` collision or a path appearing between preflight and exclusive creation could therefore cause cleanup to remove an artifact belonging to another actor.
+
+Impact:
+- An unexpected regular file or unexpected content in a matching staging path could be deleted during routine Backup cleanup. In a path-collision/race, cleanup could also remove a pre-existing file or directory that the current operation had failed to create.
+
+Remediation:
+- Stale Backup cleanup now recognizes only a non-symlink staging directory with either no contents or exactly one regular, non-symlink `snapshot.sqlite`. UUID-shaped regular files and unexpected directory contents are preserved.
+- Backup cleanup now removes only the known snapshot link and then the empty staging directory. Unexpected contents are retained and surfaced as a cleanup warning rather than recursively deleted.
+- Backup directory, Restore Journal temporary file, and Restore staged snapshot cleanup now track successful creation and only remove paths after ownership has been established. A collision or failed exclusive copy is preserved rather than unlinked.
+- Added deterministic child-process regressions for a pre-existing Backup staging-directory collision, a pre-existing Restore Journal temporary collision, and a staged Restore file appearing after preflight. Added regressions for unexpected UUID-shaped regular files and unexpected entries inserted into a Backup staging directory. Existing injected cleanup-failure tests were updated to exercise the exact unlink boundary.
+
+Verification:
+- Implementation and regression-test head: `85730bab6e5bad05f02369d5a67693afc8def6ae`.
+- Push CI run [42980054036](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980054036) and Pull Request CI run [42980061816](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980061816) passed Node 24/26 on Linux/Windows (4/4 jobs each).
+- Linux: 167 passed, 0 failed for each Node version. Windows: 163 passed, 4 platform-specific skips, 0 failed for each Node version.
+- Push Security Scans run [42980054018](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980054018) and Pull Request Security Scans run [42980061837](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980061837) passed CodeQL JavaScript analysis and Gitleaks.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
