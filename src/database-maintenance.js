@@ -4,6 +4,7 @@ import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkd
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
+import { LATEST_SCHEMA_VERSION } from './db.js';
 import { syncDirectory } from './file-system-durability.js';
 
 function pathEntryExists(filename) {
@@ -151,7 +152,7 @@ function validateSnapshot(filename) {
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     if (violations.length) throw new Error('SQLite foreign_key_check found violations');
     const version = db.prepare('PRAGMA user_version').get().user_version;
-    if (!Number.isInteger(version) || version < 1 || version > 6)
+    if (!Number.isInteger(version) || version < 1 || version > LATEST_SCHEMA_VERSION)
       throw new Error('Unsupported database schema version: ' + version);
     return { schemaVersion: version };
   } finally {
