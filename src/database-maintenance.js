@@ -135,6 +135,7 @@ export function inspectDatabaseRestore(databasePath) {
       .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
         && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
       .map(name => resolve(directory, name));
+    report.journal.artifactInventoryComplete = true;
     if (report.journal.orphanedTemporaryFiles.length) {
       report.journal.warnings.push('Restore journal temporary hard links remain beside the published journal. Preserve them for operator review; they may contain the same published journal record.');
     }
