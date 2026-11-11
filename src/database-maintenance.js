@@ -36,26 +36,59 @@ export function inspectDatabaseRestore(databasePath) {
       : inspectPath(destination),
     locks: inspectDatabaseRuntimeLocks(destination),
     journal: unsafeParentError
-      ? { path: journalPath, exists: null, kind: null, size: null, error: 'unsafe-database-path', status: 'unreadable', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: ['Database parent path traverses a symbolic link or junction. Journal and artifacts were not inspected; no files or locks were changed.'] }
-      : { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: [] }
+      ? { path: journalPath, exists: null, kind: null, size: null, error: 'unsafe-database-path', status: 'unreadable', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: false, warnings: ['Database parent path traverses a symbolic link or junction. Journal and artifacts were not inspected; no files or locks were changed.'] }
+      : { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: null, warnings: [] }
   };
   if (unsafeParentError) {
     report.recovery = classifyRestoreRecoveryState({ journalStatus: 'unreadable', locks: report.locks });
     return report;
   }  if (!report.journal.exists) {
+    const directory = dirname(journalPath);
     try {
-      const prefix = basename(journalPath) + '.';
-      report.journal.orphanedTemporaryFiles = readdirSync(dirname(journalPath))
-        .filter(name => name.startsWith(prefix) && name.endsWith('.tmp')
-          && /^[0-9a-f-]{36}$/i.test(name.slice(prefix.length, -'.tmp'.length)))
-        .map(name => resolve(dirname(journalPath), name));
+      const entries = readdirSync(directory);
+      const journalPrefix = basename(journalPath) + '.';
+      const rollbackPrefix = basename(destination) + '.pre-restore-';
+      const restoreTemporaryPrefix = '.' + basename(destination) + '.';
+      report.journal.orphanedTemporaryFiles = entries
+        .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
+          && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
+        .map(name => inspectPath(resolve(directory, name)));
+      report.journal.orphanedRollbackFiles = entries
+        .filter(name => name.startsWith(rollbackPrefix)
+          && /^[0-9a-f-]{36}$/i.test(name.slice(rollbackPrefix.length)))
+        .map(name => inspectPath(resolve(directory, name)));
+      report.journal.orphanedRestoreTemporaryFiles = entries
+        .filter(name => name.startsWith(restoreTemporaryPrefix) && name.endsWith('.restore')
+          && /^[0-9a-f-]{36}$/i.test(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)))
+        .map(name => inspectPath(resolve(directory, name)));
+      report.journal.artifactInventoryComplete = [
+        ...report.journal.orphanedTemporaryFiles,
+        ...report.journal.orphanedRollbackFiles,
+        ...report.journal.orphanedRestoreTemporaryFiles
+      ].every(artifact => artifact.exists === true);
       if (report.journal.orphanedTemporaryFiles.length) {
         report.journal.warnings.push('Unpublished Restore journal temporary files were found. Preserve them for operator review; their presence does not establish whether Restore began.');
       }
+      if (report.journal.orphanedRollbackFiles.length) {
+        report.journal.warnings.push('Restore rollback candidates remain without a published journal. Preserve them until the live database has been verified and a separate backup has been created.');
+      }
+      if (report.journal.orphanedRestoreTemporaryFiles.length) {
+        report.journal.warnings.push('Staged Restore files remain without a published journal. Preserve them for operator review; they are not verified backups.');
+      }
     } catch (error) {
-      report.journal.warnings.push('Restore journal temporary files could not be enumerated (' + (error.code || error.name) + ').');
+      report.journal.artifactInventoryComplete = false;
+      report.journal.warnings.push('Restore recovery artifacts could not be fully enumerated (' + (error.code || error.name) + ').');
     }
-    report.recovery = classifyRestoreRecoveryState({ journalStatus: 'absent', locks: report.locks, artifacts: { destination: report.database } });
+    report.recovery = classifyRestoreRecoveryState({
+      journalStatus: 'absent', locks: report.locks,
+      artifacts: {
+        destination: report.database,
+        rollback: { exists: report.journal.orphanedRollbackFiles.length ? true : false },
+        temporary: { exists: report.journal.orphanedRestoreTemporaryFiles.length ? true : false },
+        journalTemporary: { exists: report.journal.orphanedTemporaryFiles.length ? true : false },
+        inventoryComplete: report.journal.artifactInventoryComplete
+      }
+    });
     return report;
   }
   if (report.journal.exists !== true || report.journal.kind !== 'file') {
