@@ -7,7 +7,7 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openDatabase } from '../src/db.js';
+import { LATEST_SCHEMA_VERSION, openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
@@ -179,13 +179,13 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     const backupResult = createDatabaseBackup(database, backup);
     assert.equal(existsSync(staleBackupTemp), false, 'a stale staging directory with only the known snapshot is cleaned');
     assert.equal(existsSync(join(unexpectedBackupTemp, 'unexpected.bin')), true, 'unexpected staging contents are preserved');
-    assert.equal(backupResult.schemaVersion, 6);
+    assert.equal(backupResult.schemaVersion, LATEST_SCHEMA_VERSION);
     if (process.platform !== 'win32') assert.equal(statSync(backup).mode & 0o777, 0o600, 'published backup must be owner-readable/writable only');
     if (process.platform !== 'win32') chmodSync(backup, 0o644); // Simulate an externally supplied backup with permissive mode.
     writeFileSync(staleRestoreTemp, 'stale partial restore');
     const restoreResult = restoreDatabaseBackup(backup, restored);
     assert.equal(existsSync(staleRestoreTemp), false);
-    assert.equal(restoreResult.schemaVersion, 6);
+    assert.equal(restoreResult.schemaVersion, LATEST_SCHEMA_VERSION);
     if (process.platform !== 'win32') assert.equal(statSync(restored).mode & 0o777, 0o600, 'restored database must retain private file permissions');
     assert.equal(existsSync(restored + '.restore-journal.json'), false, 'successful Restore removes its completed journal');
     const restoredDb = openDatabase(restored);
@@ -690,7 +690,7 @@ test('restore reports successful installation when journal cleanup fails', () =>
     assert.equal(result.status, 0, result.stderr);
     const outcome = JSON.parse(result.stdout);
     assert.equal(outcome.ok, true);
-    assert.equal(outcome.result.schemaVersion, 6);
+    assert.equal(outcome.result.schemaVersion, LATEST_SCHEMA_VERSION);
     assert.equal(outcome.result.cleanupWarnings.length, 2);
     assert.deepEqual(outcome.result.cleanupWarnings.map(({ artifact, error }) => ({ artifact, error })), [
       { artifact: 'temporary', error: 'EBUSY' },
@@ -737,7 +737,7 @@ test('backup is allowed during runtime; restore is locked out until graceful shu
     writer = null;
 
     const result = createDatabaseBackup(database, backup);
-    assert.equal(result.schemaVersion, 6);
+    assert.equal(result.schemaVersion, LATEST_SCHEMA_VERSION);
     assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
     assert.throws(() => restoreDatabaseBackup(backup, database), /runtime lock prevents access/);
     assert.equal(existsSync(database + '.runtime.lock'), true);
@@ -748,7 +748,7 @@ test('backup is allowed during runtime; restore is locked out until graceful shu
     assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
 
     const restored = restoreDatabaseBackup(backup, database);
-    assert.equal(restored.schemaVersion, 6);
+    assert.equal(restored.schemaVersion, LATEST_SCHEMA_VERSION);
     checkDb = openDatabase(database);
     assert.deepEqual(new ControlCenter(checkDb).getTask(task.id).payload, { from: 'runtime' });
     checkDb.close();
@@ -1037,7 +1037,7 @@ test('backup crash releases its SQLite reservation and leaves the orphaned temp 
     assert.equal(existsSync(marker), true);
 
     const backup = createDatabaseBackup(database, destination);
-    assert.equal(backup.schemaVersion, 6);
+    assert.equal(backup.schemaVersion, LATEST_SCHEMA_VERSION);
     assert.equal(existsSync(destination), true);
     assert.equal(existsSync(marker), false, 'normal maintenance cleanup may remove the orphaned temporary after acquiring the lock');
   } finally {
