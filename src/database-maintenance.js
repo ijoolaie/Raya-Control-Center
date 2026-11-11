@@ -197,6 +197,13 @@ function assertRegularFile(filename, label) {
   return path;
 }
 
+function snapshotFileObjectIdentity(filename, label) {
+  const stat = lstatSync(filename, { bigint: true });
+  if (!stat.isFile() || stat.isSymbolicLink())
+    throw new Error(label + ' must remain a regular non-symbolic-link file: ' + filename);
+  return { device: stat.dev, inode: stat.ino };
+}
+
 function snapshotFileIdentity(filename) {
   const stat = lstatSync(filename, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink())
@@ -205,6 +212,10 @@ function snapshotFileIdentity(filename) {
     device: stat.dev, inode: stat.ino, size: stat.size,
     modified: stat.mtimeNs, changed: stat.ctimeNs
   };
+}
+
+function sameFileObjectIdentity(left, right) {
+  return left.device === right.device && left.inode === right.inode;
 }
 
 function sameSnapshotFileIdentity(left, right) {
@@ -299,6 +310,7 @@ function sqlString(value) {
 
 function createDatabaseBackupUnlocked(databasePath, backupPath) {
   const source = assertRegularFile(databasePath, 'Database source');
+  const sourceIdentity = snapshotFileObjectIdentity(source, 'Backup source');
   const destination = resolve(backupPath);
   if (source.toLowerCase() === destination.toLowerCase())
     throw new Error('Backup destination must differ from the live database');
@@ -323,11 +335,20 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     }
     const db = new DatabaseSync(source);
     try {
+      // Detect an ordinary path replacement between preflight and SQLite open.
+      if (!sameFileObjectIdentity(sourceIdentity, snapshotFileObjectIdentity(source, 'Backup source'))) {
+        throw new Error('Backup source changed while opening; refusing to snapshot a different database');
+      }
       // Make VACUUM INTO's output durability requirement explicit.
       db.exec('PRAGMA synchronous = FULL');
       if (db.prepare('PRAGMA synchronous').get().synchronous !== 2) throw new Error('SQLite FULL synchronous mode could not be enabled for backup');
       // VACUUM INTO creates a consistent snapshot that includes committed WAL content.
       db.exec('VACUUM INTO ' + sqlString(temporary));
+      // Refuse to publish if the selected source path was replaced while the
+      // snapshot was being generated. Live writes preserve the same file object.
+      if (!sameFileObjectIdentity(sourceIdentity, snapshotFileObjectIdentity(source, 'Backup source'))) {
+        throw new Error('Backup source changed while snapshotting; refusing to publish the snapshot');
+      }
     } finally {
       db.close();
     }
