@@ -90,7 +90,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Audit/event explorer with entity filters.
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.
-- [ ] Remote exposure remains disabled and out of scope; do not enable it under the current loopback-only project constraints.
+- [x] Remote exposure remains disabled and out of scope; retain the loopback-only boundary under the current project constraints.
 
 ## Phase 5 — Optional remote/multi-machine operation
 **Status: Deferred**
@@ -105,8 +105,8 @@ Never report completion based only on file creation.
 - [x] Make Operator token rotation immediate in the running server; reject offline rotation that could desynchronize server and database credentials.
 - [x] Redact echoed Operator credentials from CLI API error output.
 - [x] Implement and test offline Operator token recovery under an exclusive per-database runtime lock.
-- [ ] Complete the owner-led, AI-assisted review across HTTP/authentication, task/lease authorization, persistence/recovery, dashboard, CLI, and Worker boundaries.
-- [ ] Keep the API loopback-only. Owner-led review does not authorize remote binding, tunnels, proxies, or port forwarding.
+- [x] Complete the bounded owner-led, AI-assisted review across HTTP/authentication, task/lease authorization, persistence/recovery, dashboard, CLI, and Worker boundaries; findings and residual risks are recorded in `docs/SECURITY-REVIEW.md` (2026-11-11). This is not an independent audit or certification.
+- [x] Keep the API loopback-only. Owner-led review does not authorize remote binding, tunnels, proxies, or port forwarding.
 
 ### Owner-led security review progress — 2026-11-11
 
