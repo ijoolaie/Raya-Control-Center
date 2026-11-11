@@ -97,6 +97,26 @@ This phase does not authorize development in either external repository. Raya-Ag
 **Status: Deferred**
 Requires an explicit product decision, threat-model review, authenticated transport, credential rotation, replay protection, and a defined consistency model. The current API must remain loopback-only.
 
+## Phase 6 — Deferred capability closure
+**Status: Planned — not started**
+This phase is the planned closure phase for every capability currently marked Deferred in this roadmap or the architecture's Deferred section. Phase 6 is not authorization to begin Phase 5 or to relax the current local-first/loopback-only boundary early. Phase 5 remains deferred and must not start before explicit operator authorization. The intent is that **no item in the current Deferred inventory remains deferred when Phase 6 exits**.
+
+### Workstreams and implementation approach
+- [ ] **Structured operational logs (carried from Phase 2):** define a versioned, bounded event schema; use an explicit event/field allowlist; redact credentials, tokens, task payloads/results, and sensitive identifiers; bound message size and cardinality; document retention and failure behavior; add tests proving forbidden fields cannot be emitted. Do not add arbitrary request/body dumps or an unrestricted logging framework.
+- [ ] **Automatic Restore Recovery (carried from Phase 2):** specify a deterministic recovery state machine for every published journal and artifact combination; distinguish safe-to-resume states from ambiguous states; make every automated transition atomic and no-replace; preserve unrecognized files and legacy artifacts; fail closed to operator inspection whenever ownership, journal integrity, or crash outcome is uncertain. Verify Windows crash-state behavior and supported filesystem/platform assumptions before enabling automation. Add child-process crash-injection tests at every transition and prove idempotent repeated startup. Do not enable automatic file/lock actions until these criteria pass.
+- [ ] **Remote/multi-machine operation (Phase 5 carry-over):** only after explicit product authorization, complete a fresh threat model, authenticated transport and identity lifecycle, credential rotation, replay protection, bounded request/resource controls, and a documented consistency/partition model. Add cross-machine integration and adversarial tests. Preserve loopback-only operation until this workstream is explicitly authorized and its exit criteria are met; this entry does not authorize tunnels, proxies, port forwarding, or remote binding now.
+- [ ] **Plugin marketplace:** define a narrow extension trust model, signing/provenance and version policy, capability sandbox and permission model, install/update/rollback lifecycle, and audit trail. Do not execute arbitrary third-party code in the Control Center process; require isolation and explicit operator approval.
+- [ ] **Autonomous scheduling:** define scheduling ownership, bounded policies, idempotency, concurrency/lease interactions, cancellation, auditability, and operator kill-switch. Prove that uncertain or non-idempotent external work is never blindly replayed.
+- [ ] **Dashboard analytics:** define a small set of operationally actionable metrics, privacy-safe aggregation, bounded query cost, freshness semantics, and access controls. Keep analytics read-only and separate from authorization or task-state decisions.
+- [ ] **Automatic retries for arbitrary external work:** do not implement generic blind retries. Establish explicit per-task retry contracts with idempotency guarantees, retry budgets/backoff, side-effect reconciliation, and opt-in policy; tasks without a proven safe contract remain blocked for operator review.
+
+### Phase 6 exit criteria
+- [ ] Every workstream above has an approved design, implementation, regression and failure-mode tests, and operator documentation.
+- [ ] Restore recovery is deterministic and crash-safe across the supported platform matrix; ambiguous states remain fail-closed and inspectable.
+- [ ] Operational logs are bounded, allowlisted, and demonstrably redacted.
+- [ ] Any remote capability remains disabled unless separately authorized and all remote security/consistency gates pass.
+- [ ] No item in the Deferred inventory at the time this phase was added remains Deferred at Phase 6 completion; each is implemented and verified, not merely re-labelled.
+
 ## Progress reporting rule
 Distinguish **Documented**, **Implemented**, **Tested**, and **Operational**.
 Never report completion based only on file creation.

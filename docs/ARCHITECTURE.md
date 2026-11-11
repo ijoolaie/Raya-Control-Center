@@ -53,6 +53,6 @@ The Control Center cannot inspect arbitrary ChatGPT sessions, hidden reasoning, 
 - Events are committed in the same transaction as the state change they describe.
 
 ## Deferred
-Not MVP: multi-machine coordination, remote ingress, plugin marketplace, autonomous scheduling, dashboard analytics, and automatic retries for arbitrary external work.
+The current deferred-capability inventory is tracked for closure in Phase 6 of `docs/ROADMAP.md`: structured operational logs, automatic Restore recovery, multi-machine coordination/remote ingress (currently Phase 5 and still unauthorized), plugin marketplace, autonomous scheduling, dashboard analytics, and safe per-task retry contracts for external work. These are not MVP capabilities. Their inclusion in Phase 6 is planning only; it does not authorize remote binding, tunnels, proxies, port forwarding, or arbitrary code execution. The current API remains loopback-only until the required explicit authorization and security gates are satisfied.
 
 The Operator-only GET /control/v1/routing/summary endpoint reports exact queued and unmatched-queued counts using the same capability inclusion rule as Claim; it is not limited to the Dashboard latest-100 task/participant tables.
