@@ -116,3 +116,5 @@ Never report completion based only on file creation.
 - [x] Reject HTTP redirects in CLI, Worker, and Dashboard API clients to prevent forwarding request bodies and lease credentials to another origin; add redirect regression tests (SEC-014).
 
 - [x] Consolidate owner-facing confirmed findings, remediation evidence, residual risks, and review boundaries in the security register (2026-11-11).
+
+- [x] Inspect dashboard DOM sinks and CLI/Worker credential lifecycles; record bounded evidence and remaining same-process trust boundaries (2026-11-11).
