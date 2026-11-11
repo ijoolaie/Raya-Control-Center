@@ -118,3 +118,5 @@ Never report completion based only on file creation.
 - [x] Consolidate owner-facing confirmed findings, remediation evidence, residual risks, and review boundaries in the security register (2026-11-11).
 
 - [x] Inspect dashboard DOM sinks and CLI/Worker credential lifecycles; record bounded evidence and remaining same-process trust boundaries (2026-11-11).
+
+- [x] Recheck post-body Operator authorization and transactional Participant/Lease validation, including revocation during a delayed request body (2026-11-11).
