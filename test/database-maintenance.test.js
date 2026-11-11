@@ -271,9 +271,8 @@ test('maintenance temp collisions never delete artifacts not created by this ope
     new ControlCenter(db).createTask({ type: 'temp.collision.staged.target' });
     db.close();
     db = null;
-    writeFileSync(stagedCollision, 'preserve-staged-temp');
     result = spawnSync(process.execPath, [
-      fileURLToPath(worker), 'restore', stagedTarget, restoreBackup,
+      fileURLToPath(worker), 'restore-stage-collision', stagedTarget, restoreBackup,
       JSON.stringify([stagedUuid, '66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777'])
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
