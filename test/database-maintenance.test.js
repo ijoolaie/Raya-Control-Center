@@ -235,6 +235,12 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     if (process.platform !== 'win32') assert.equal(statSync(backup).mode & 0o777, 0o600, 'published backup must be owner-readable/writable only');
     if (process.platform !== 'win32') chmodSync(backup, 0o644); // Simulate an externally supplied backup with permissive mode.
     writeFileSync(staleRestoreTemp, 'stale partial restore');
+    assert.throws(() => restoreDatabaseBackup(backup, restored), /Orphaned Restore temporary files exist/);
+    const orphanReport = inspectDatabaseRestore(restored);
+    assert.equal(orphanReport.recovery.state, 'no-journal-recovery-artifacts-present');
+    assert.equal(orphanReport.journal.orphanedRestoreTemporaryFiles.length, 1);
+    assert.equal(existsSync(staleRestoreTemp), true, 'Restore must preserve an orphaned staged file until explicit operator review');
+    unlinkSync(staleRestoreTemp); // Exact-path cleanup after reviewing the reported artifact.
     const restoreResult = restoreDatabaseBackup(backup, restored);
     assert.equal(existsSync(staleRestoreTemp), false);
     assert.equal(restoreResult.schemaVersion, LATEST_SCHEMA_VERSION);
