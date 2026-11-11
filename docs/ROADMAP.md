@@ -76,7 +76,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Add migration, Operator-managed Participant capabilities, and Task required-capability metadata.
 - [x] Filter atomic claims by exact capability-set inclusion; leave unmatched Tasks queued.
 - [x] Add backward-compatibility, core routing, HTTP, audit, and active-Lease preservation tests.
-- [x] Add an Operator-only exact routing summary and expose required/available capabilities in the read-only Dashboard.
+- [x] Add an Operator-only exact routing summary and expose required/available capabilities in the Dashboard inspection views.
 - [x] Complete focused owner-led AI-assisted security review of capability routing; record tested cases, findings, and owner decisions in `docs/SECURITY-REVIEW.md` (2026-11-11).
 
 ## Phase 4 — Dashboard and operational hardening

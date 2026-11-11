@@ -22,7 +22,7 @@ In scope:
 - Operator, Participant, and Lease credentials, rotation, revocation, scopes, and stale-authorization behavior.
 - Task state transitions, atomic claim/Lease creation, cancellation, reconciliation, and capability-aware routing.
 - SQLite migrations/transactions, audit immutability, runtime and maintenance locks, crash recovery, backup, and restore.
-- Dashboard authentication, browser storage, DOM rendering, security headers, and read-only behavior.
+- Dashboard authentication, browser storage, DOM rendering, security headers, and explicit Operator state-changing controls.
 - CLI credential handling, URL validation, reference Worker environment isolation, packaging, and operational documentation.
 - Capability routing introduced in `1eaa1c04`: Operator-only capability assignment, exact subset matching, legacy empty-requirement behavior, routing summary, and future-claims-only semantics.
 

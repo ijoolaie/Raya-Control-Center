@@ -65,7 +65,7 @@ Implementation uses SQLite json_each for exact subset matching inside the existi
 
 ## 7. Unmatched work behavior
 
-If no queued Task matches, return the existing empty-claim result (`claim: null`). Do not fail, block, or rewrite unmatched Tasks. They remain queued until a compatible Participant appears or an Operator changes/cancels them. The read-only Dashboard now displays the exact global unmatched-queued count and active claim-capable Participant count through an Operator-only summary endpoint. It also displays Task requirements and Participant capabilities. A per-Task explanation of which capability is missing remains deferred.
+If no queued Task matches, return the existing empty-claim result (`claim: null`). Do not fail, block, or rewrite unmatched Tasks. They remain queued until a compatible Participant appears or an Operator changes/cancels them. The Dashboard displays the exact global unmatched-queued count and active claim-capable Participant count through an Operator-only summary endpoint. It also displays Task requirements and Participant capabilities. A per-Task explanation of which capability is missing remains deferred.
 
 ## 8. Audit and operational behavior
 

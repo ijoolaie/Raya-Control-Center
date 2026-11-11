@@ -21,7 +21,7 @@ External clients do not own authoritative state:
 | Event journal | Append-only state-change and security events |
 | Persistence | SQLite schema, transactions, migrations |
 | CLI | Local operator workflows |
-| Dashboard | Operator-authenticated, read-only task, participant, routing, and audit-event inspection |
+| Dashboard | Operator-authenticated task, participant, routing, and audit-event inspection; audited capability updates and guarded Task requeue actions |
 
 Business rules belong in services, not HTTP handlers or CLI commands.
 
