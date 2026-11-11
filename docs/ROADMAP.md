@@ -9,7 +9,7 @@ A phase is complete only when repeatable tests or operational evidence satisfy i
 - [x] Architecture, data model, security principles, API contract, and ADR documented.
 - [x] GitHub Actions CI workflow added.
 - [x] Development instructions and operator runbook (`docs/DEVELOPMENT.md`, `docs/OPERATIONS.md`).
-- [ ] Review and merge the foundation PR.
+- [ ] Review and merge the foundation PR. Intentionally pending: the operator requires PR #1 to remain Open, Draft, and Unmerged; do not mark it ready or merge it without an explicit change to that instruction.
 
 ## Phase 1 — Durable coordination core
 **Status: Implemented and tested**
