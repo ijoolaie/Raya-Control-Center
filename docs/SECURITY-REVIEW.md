@@ -1032,6 +1032,6 @@ Verification:
 - Production change: `ec966aa8023286520c0a3fd876dd37ac176649bf`.
 - Fault worker: `1fba55558095f13b58b7c454b4b7deb747b356d0`.
 - Regression: `3d72cd0b4e31a901dce942f04091a71ff9262817`.
-- Exact-head Node 24/26 Linux/Windows CI, CodeQL, and Gitleaks are pending.
+- Exact PR head `88194b5813d46f076db14bbb9043baee92788721` passed all four Node 24/26 × Linux/Windows CI jobs in workflow [43018965267](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/43018965267); CodeQL and Gitleaks both passed in Security Scans workflow [43018965313](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/43018965313).
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
