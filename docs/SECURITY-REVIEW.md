@@ -629,7 +629,7 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 
 Severity: **Medium**
 
-Status: **Remediated locally; supported-runtime CI pending**
+Status: **Remediated; supported-runtime CI and Security Scans verified on exact PR head `749a40896e13022e1256cece201e7ef90efc74a7`**
 
 Affected paths:
 - src/cli.js — callApi()
@@ -653,6 +653,34 @@ Remediation:
 - Added CLI and real Worker regressions using separate loopback redirect and target listeners. Dashboard session tests also assert that every API request refuses redirects. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token. A separate Worker regression rejects loopback API URLs containing embedded userinfo.
 
 Verification:
-- Targeted local tests passed for both CLI and Worker redirect rejection on Node v22.23.2.
-- Full supported-runtime CI and security scans must pass against the exact commit before this remediation is marked CI-verified.
-- Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.
+- Targeted CLI and Worker redirect regressions passed locally; dashboard session tests also verify `redirect: error`.
+- Full local Windows suite on Node v22.23.2: 152 passed, 3 skipped, 0 failed (155 total); `npm run check`, race-worker syntax check, and `git diff --check` passed. Local Node 22 is below the declared Node >=24.15.0 engine, so this is supplemental diagnostic evidence.
+- Exact-head CI Push [42961710555](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42961710555) and Pull Request [42961716766](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42961716766) each passed all four Node 24/26 x Linux/Windows jobs. Security Scans Push [42961710507](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42961710507) and Pull Request [42961716779](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42961716779) both completed successfully with CodeQL and Gitleaks.
+
+## Owner-facing review consolidation — 2026-11-11
+
+### Confirmed findings and disposition
+
+- SEC-001 through SEC-014 are recorded in this register. The findings marked remediated have corresponding code or documentation changes and regression evidence; SEC-014 is now supported-runtime CI and Security-Scans verified on exact PR head `749a40896e13022e1256cece201e7ef90efc74a7`.
+- SEC-011 is an inherent point-in-time backup behavior rather than a live authorization bypass: restoring an older snapshot can revive credentials and leases. The mandatory restore runbook requires offline Operator recovery, revocation/re-registration of restored Participants, and reconnecting clients only after cleanup.
+- SEC-014 was a concrete request-forwarding issue in CLI, Worker, and Dashboard Fetch clients. All three now reject redirects (`redirect: 'error'`); regressions verify that a redirect target receives no request, task body, or Worker lease token.
+- No unresolved confirmed exploitable finding is being asserted by this consolidation. This statement is limited to the reviewed paths and recorded tests; it is not a claim that all possible vulnerabilities have been found.
+
+### Residual risks and explicit boundaries
+
+- **Windows filesystem permissions:** restrictive NTFS ACLs on database and backup directories remain an owner/operator responsibility. No ACL helper was run and no ACL was inspected or changed as part of this work.
+- **Portable path race:** database path symlink/junction checks are pre-open checks; portable Node SQLite APIs do not provide an atomic no-follow open here. Keep parent directories writable only by trusted principals.
+- **Backup restore credential rollback:** follow the mandatory recovery runbook before allowing any Worker or adapter to reconnect.
+- **Same-user / Administrator compromise:** a process running with the same user or Administrator privileges may inspect or manipulate local processes/files. Loopback binding does not defend against a fully compromised local account.
+- **Platform durability:** Windows parent-directory fsync is not available through the portable Node API used here. The project does not claim universal power-loss durability.
+- **External side effects:** the Control Center cannot prove a prior Worker stopped or that an external action did not occur before a Task is requeued. The Operator attestations are explicit human decisions, not machine verification.
+- **Remote exposure:** remote binding, tunnels, reverse proxies, and port forwarding remain disabled and out of scope.
+- **Remaining review work:** continue focused review of dashboard DOM/XSS sinks, CLI/Worker secret lifecycle under adversarial inputs, and additional authorization/state-transition edges. Do not treat the current bounded review as complete.
+
+### Verification and owner decision
+
+- Exact reviewed PR head for this consolidation: `749a40896e13022e1256cece201e7ef90efc74a7`.
+- Exact-head CI Push and Pull Request both passed all Node 24/26 x Linux/Windows jobs; exact-head Security Scans Push and Pull Request both passed CodeQL and Gitleaks. Links are recorded under SEC-014 above.
+- Local Windows suite: 152 passed, 3 skipped, 0 failed (155 total), on Node v22.23.2 (below the declared supported engine); local results are diagnostic, while supported-runtime CI is the authoritative runtime matrix evidence.
+- Owner decision remains: use an owner-led AI-assisted internal security review. A third-party review is not a project gate. Do not label this process an independent audit, penetration test, certification, or proof of security.
+- PR #1 remains Open, Draft, and Unmerged. The API remains bound to `127.0.0.1`. No live `.data`, ACLs, credentials, or API binding settings were changed.
