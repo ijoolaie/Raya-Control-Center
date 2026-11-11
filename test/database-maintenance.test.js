@@ -242,6 +242,42 @@ test('backup cleanup preserves unexpected contents added to its owned staging di
   }
 });
 
+test('restore rollback publication never replaces a colliding rollback artifact', () => {
+  const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-rollback-collision-'));
+  const database = join(directory, 'live.sqlite');
+  const backupSource = join(directory, 'backup-source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const rollbackUuid = '99999999-9999-4999-8999-999999999999';
+  const rollbackCollision = database + '.pre-restore-' + rollbackUuid;
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'rollback.collision.original' });
+    db.close();
+    db = null;
+    db = openDatabase(backupSource);
+    new ControlCenter(db).createTask({ type: 'rollback.collision.replacement' });
+    db.close();
+    db = null;
+    createDatabaseBackup(backupSource, backup);
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'restore-rollback-collision', database, backup,
+      JSON.stringify(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', rollbackUuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'])
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).ok, false);
+    assert.equal(readFileSync(rollbackCollision, 'utf8'), 'preserve-rollback-collision');
+    assert.equal(existsSync(database + '.restore-journal.json'), false);
+    assert.deepEqual(readdirSync(directory).filter(name => name.startsWith('.live.sqlite.') && name.endsWith('.restore')), []);
+    db = openDatabase(database);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'rollback.collision.original'), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('maintenance temp collisions never delete artifacts not created by this operation', () => {
   const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-maintenance-temp-collision-'));
