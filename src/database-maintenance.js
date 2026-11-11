@@ -1,6 +1,6 @@
 import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
-import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, rmdirSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
@@ -372,6 +372,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
   const rollback = destination + '.pre-restore-' + randomUUID();
   let temporaryCreated = false;
+  let rollbackPublished = false;
   let movedOriginal = false;
   let installPublished = false;
   let journalCreated = false;
@@ -396,7 +397,11 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     syncFileContents(temporary);
     if (pathEntryExists(destination)) {
       if (!lstatSync(destination).isFile()) throw new Error('Restore destination must be a regular file');
-      renameSync(destination, rollback);
+      // Publish the rollback name with no-replace semantics. renameSync may
+      // overwrite an existing target on POSIX; linkSync fails if it exists.
+      linkSync(destination, rollback);
+      rollbackPublished = true;
+      unlinkSync(destination);
       movedOriginal = true;
       syncDirectory(dirname(destination));
     }
@@ -418,18 +423,27 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     if (temporaryCreated) {
       try { unlinkSync(temporary); syncDirectory(dirname(destination)); } catch {}
     }
+    let rollbackRestored = false;
     if (movedOriginal && !installPublished) {
       if (!pathEntryExists(destination)) {
-        try { renameSync(rollback, destination); syncDirectory(dirname(destination)); }
-        catch (rollbackError) {
+        try {
+          // Restore the rollback link without replacing a destination that may
+          // have appeared concurrently. Flush the restored name before unlinking
+          // the redundant rollback link.
+          linkSync(rollback, destination);
+          syncDirectory(dirname(destination));
+          unlinkSync(rollback);
+          rollbackRestored = true;
+        } catch (rollbackError) {
           throw new AggregateError([error, rollbackError], 'Restore failed and automatic rollback could not complete; the original database remains at ' + rollback);
         }
       } else {
         throw new Error('Restore failed because the destination appeared concurrently; the original database remains at ' + rollback, { cause: error });
       }
     }
-    if (journalCreated && ((!movedOriginal && !installPublished) || (movedOriginal && !installPublished && pathEntryExists(destination)))) {
-      // No rollback decision remains outstanding; otherwise preserve the journal with the rollback file.
+    if (journalCreated && !installPublished && (!rollbackPublished || rollbackRestored)) {
+      // Keep the journal if a rollback link was published but the original path
+      // could not be removed, or if a concurrent destination blocks rollback.
       try { unlinkSync(journalPath); syncDirectory(dirname(journalPath)); } catch {}
     }
     throw error;
