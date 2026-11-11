@@ -91,11 +91,11 @@ Use `npm run cli -- participant list --status active` to list participants, and 
 
 ## Database maintenance
 
-- `npm run db:backup` creates a consistent SQLite snapshot in `.backups` (or pass an explicit destination).
+- `npm run db:backup` creates a consistent SQLite snapshot in `.backups`; on Windows, do not use this default unless the repository directory and its parent are restricted to trusted principals. Prefer an explicit destination under a protected per-user directory, such as `$env:LOCALAPPDATA/Raya-Control-Center/backups/control-center.sqlite`, after securing both the dedicated parent and backup directory with `scripts/secure-data-acl.ps1` as documented in `docs/OPERATIONS.md`.
 - `npm run db:restore -- <backup-file>` validates and restores a snapshot. Stop the server first; restore refuses existing WAL sidecars and retains the replaced database for rollback.
 - `RAYA_CC_DATABASE` selects the live database path for both commands.
 
-See `docs/OPERATIONS.md` for the safe restore procedure.
+See `docs/OPERATIONS.md` for the safe backup and restore procedures.
 
 ## Reference Worker
 
