@@ -131,3 +131,4 @@ Never report completion based only on file creation.
 - [x] SEC-019: replace overwrite-capable Restore rollback renames with no-replace hard-link transitions; cover rollback-path collisions and the intermediate crash state (2026-11-11).
 - [x] SEC-020: reconcile recognized Backup staging left by a crash immediately after publication; preserve the already-published backup on retry (2026-11-11).
 - [x] SEC-021: detect Restore source-path replacement between preflight validation and staging; add deterministic regression coverage (2026-11-11).
+- [x] SEC-022: detect Backup source-path replacement before SQLite open and after snapshot generation; add deterministic regression coverage (2026-11-11).
