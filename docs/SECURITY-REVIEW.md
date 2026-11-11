@@ -705,3 +705,29 @@ Verification:
 - Existing raw-HTTP regression `in-flight participant lease action is rejected when participant is revoked during body upload` proves the delayed completion request is rejected with 409 after revocation and the Task result remains null. Existing service and race regressions additionally cover revoked credentials, stale Lease rejection, and concurrent completion/revocation outcomes.
 - Cancellation request is Operator-only; cancellation acknowledgement is Participant/Lease-bound. The service preserves cooperative cancellation: only the active Worker with the current Lease can acknowledge it.
 - No confirmed authorization bypass was established in these inspected routes and exercised interleavings. This is bounded source/test evidence and does not establish correctness for every future route or state transition. No source or test code changed in this checkpoint.
+
+## SEC-015 — malformed Worker API URL could echo embedded userinfo in startup diagnostics
+
+Severity: **Low**
+
+Status: **Remediated locally; supported-runtime CI pending**
+
+Affected paths:
+- `examples/reference-worker/worker.mjs`
+- `test/reference-worker.test.js`
+
+Observation:
+- The reference Worker constructed `new URL(BASE)` at module startup without catching parse failures. Node's uncaught `ERR_INVALID_URL` diagnostic includes the original input string.
+- A local process probe using a deliberately malformed loopback URL containing dummy userinfo confirmed that the Worker exited with an unhandled error and printed the entire input, including the password-like component, to stderr.
+
+Impact:
+- A malformed `RAYA_CC_URL` containing embedded userinfo can disclose that configuration value in startup logs or captured stderr. This is a local configuration-error path; it does not show that the Worker forwards credentials to a remote host or that API requests were made.
+
+Remediation:
+- Catch URL-construction errors and throw a fixed, generic configuration message without embedding the original URL or native error.
+- Added a real child-process regression that starts the Worker with a malformed URL containing a dummy secret and verifies nonzero exit, the generic error, and absence of both the dummy secret and `ERR_INVALID_URL` from stderr.
+
+Verification:
+- Focused Worker URL/redirect tests: 13/13 passed locally on Node v22.23.2 (below declared Node >=24.15.0). `node --check` passed for the Worker and its test file; `git diff --check` passed.
+- Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are required for the exact remediation commit before marking this finding CI-verified.
+- Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.

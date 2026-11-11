@@ -120,3 +120,5 @@ Never report completion based only on file creation.
 - [x] Inspect dashboard DOM sinks and CLI/Worker credential lifecycles; record bounded evidence and remaining same-process trust boundaries (2026-11-11).
 
 - [x] Recheck post-body Operator authorization and transactional Participant/Lease validation, including revocation during a delayed request body (2026-11-11).
+
+- [x] SEC-015: suppress native URL-parser diagnostics that could echo malformed Worker API URL userinfo; add a child-process regression (2026-11-11).

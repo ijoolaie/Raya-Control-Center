@@ -5,7 +5,9 @@ import { removeOperatorCredential } from './environment.mjs';
 removeOperatorCredential();
 
 const BASE = (process.env.RAYA_CC_URL || 'http://127.0.0.1:4317/control/v1').replace(/\/+$/, '');
-const API_URL = new URL(BASE);
+let API_URL;
+try { API_URL = new URL(BASE); }
+catch { throw new Error('RAYA_CC_URL must be a valid HTTP URL on a loopback host.'); }
 if (API_URL.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(API_URL.hostname) || API_URL.username || API_URL.password || API_URL.pathname !== '/control/v1' || API_URL.search || API_URL.hash) {
   throw new Error('RAYA_CC_URL must use HTTP on a loopback host.');
 }

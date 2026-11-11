@@ -77,6 +77,18 @@ async function stop(child) {
   await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('worker did not stop')), 3000))]);
 }
 
+test('reference worker does not echo malformed API URL userinfo in startup errors', async () => {
+  await harness(async ({ register, startWorker }) => {
+    const participant = await register();
+    const secret = 'malformed-url-config-secret';
+    const worker = startWorker(participant.token, { RAYA_CC_URL: 'http://worker:' + secret + '@%' });
+    const [code] = await once(worker.child, 'close');
+    assert.notEqual(code, 0);
+    assert.match(worker.stderr, /RAYA_CC_URL must be a valid HTTP URL on a loopback host/);
+    assert.equal(worker.stderr.includes(secret), false);
+    assert.equal(worker.stderr.includes('ERR_INVALID_URL'), false);
+  });
+});
 test('reference worker rejects loopback API URLs containing embedded userinfo', async () => {
   await harness(async ({ register, startWorker, base }) => {
     const participant = await register();
