@@ -840,7 +840,7 @@ Verification:
 
 Severity: **Medium**
 
-Status: **Remediated in implementation; exact-head supported-runtime CI and Security Scans pending**
+Status: **Remediated; exact-head supported-runtime CI and Security Scans passed**
 
 Affected paths:
 - `src/database-maintenance.js`
@@ -864,7 +864,8 @@ Remediation:
 - Added read-only inventory coverage for all three orphan classes, updated the real child-process crash-boundary expectation after journal cleanup, added a POSIX unreadable-path regression (skipped on Windows and when running as root), and verified a blocked retry preserves both the staged file and live database.
 
 Verification:
-- Implementation head: `3893ce935be7a6638713857077aeba8ebe921d58`.
-- Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are queued for the implementation head. Do not mark this finding CI-verified until the exact current PR head passes.
+- Implementation and regression-test head: `5630c4d729796d088020c253201200821dbd29a4`.
+- Pull Request CI run [42978980179](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42978980179) passed Node 24/26 on Linux/Windows (4/4 jobs). Linux: 165 passed, 0 failed; Windows: 161 passed, 4 platform-specific skips, 0 failed.
+- Pull Request Security Scans run [42978979875](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42978979875) passed CodeQL JavaScript analysis and Gitleaks.
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
