@@ -205,13 +205,9 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
     if (!/^[0-9a-f-]{36}$/i.test(token)) continue;
     const candidate = resolve(directory, entry);
     const stat = lstatSync(candidate);
-    if (stat.isFile() && !stat.isSymbolicLink()) {
-      unlinkSync(candidate);
-      changed = true;
-      continue;
-    }
-    // Backup temp directories contain only the known snapshot file. Preserve
-    // unexpected entries, links, and non-directory artifacts for operator review.
+    // Backup staging artifacts are directories. A regular file with the same
+    // UUID-shaped name is unexpected evidence, not a stale staging directory.
+    // Preserve it for operator review rather than deleting it by filename alone.
     if (suffix === '.tmp' && stat.isDirectory() && !stat.isSymbolicLink()) {
       const contents = readdirSync(candidate);
       if (contents.length > 1 || (contents.length === 1 && contents[0] !== 'snapshot.sqlite')) continue;
