@@ -860,7 +860,8 @@ Remediation:
 - When the published journal is absent, inspection now enumerates exact UUID-shaped rollback files, staged `.restore` files, and unpublished journal `.tmp` files. It preserves the existing string-path shape of `orphanedTemporaryFiles` and reports the other artifact inventories with their observed file metadata.
 - Added `no-journal-recovery-artifacts-present` when any such artifact remains and `no-pending-restore-artifact-state-unknown` when enumeration is incomplete. A missing parent directory is treated as an empty inventory; other enumeration failures remain unknown.
 - Journal absence is now accepted only when `exists === false`; unknown or non-regular journal paths are classified as unreadable.
-- Added read-only inventory coverage for all three orphan classes, updated the real child-process crash-boundary expectation after journal cleanup, and added a POSIX unreadable-path regression (skipped on Windows and when running as root).
+- A new Restore now refuses to start while a UUID-shaped orphaned staged `.restore` file remains. It no longer silently deletes that evidence during retry; the operator must inspect and resolve it first.
+- Added read-only inventory coverage for all three orphan classes, updated the real child-process crash-boundary expectation after journal cleanup, added a POSIX unreadable-path regression (skipped on Windows and when running as root), and verified a blocked retry preserves both the staged file and live database.
 
 Verification:
 - Implementation head: `3893ce935be7a6638713857077aeba8ebe921d58`.
