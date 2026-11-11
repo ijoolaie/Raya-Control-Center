@@ -4,11 +4,12 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   const live = observed(artifacts.destination?.exists);
   const rollback = observed(artifacts.rollback?.exists);
   const temporary = observed(artifacts.temporary?.exists);
+  const journalTemporary = observed(artifacts.journalTemporary?.exists);
   const source = observed(artifacts.source?.exists);
   const runtimeLock = observed(locks.runtime?.active) ?? observed(locks.runtime?.exists);
   const maintenanceLock = observed(locks.maintenance?.active) ?? observed(locks.maintenance?.exists);
   const lockStateUnknown = [locks.runtime, locks.maintenance].some(lock => lock && (lock.error != null || (lock.active == null && lock.exists == null)));
-  const observations = { live, rollback, temporary, source, runtimeLock, maintenanceLock };
+  const observations = { live, rollback, temporary, journalTemporary, source, runtimeLock, maintenanceLock };
 
   if (journalStatus === 'absent') {
     if (runtimeLock || maintenanceLock) return {
@@ -18,6 +19,14 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
     if (lockStateUnknown) return {
       state: 'no-pending-restore-lock-state-unknown', severity: 'warning', automaticAction: 'none', observations,
       guidance: 'No Restore journal was found, but at least one lock state could not be inspected. Do not infer that no lock exists; verify database users and filesystem state before operator action.'
+    };
+    if (artifacts.inventoryComplete === false) return {
+      state: 'no-pending-restore-artifact-state-unknown', severity: 'warning', automaticAction: 'none', observations,
+      guidance: 'No Restore journal was found, but recovery-artifact enumeration was incomplete. Do not infer that rollback or staged files are absent; inspect the database directory before operator action.'
+    };
+    if (rollback === true || temporary === true || journalTemporary === true) return {
+      state: 'no-journal-recovery-artifacts-present', severity: 'warning', automaticAction: 'none', observations,
+      guidance: 'No published Restore journal was found, but one or more rollback or temporary recovery artifacts remain. Preserve them, verify all database users are stopped, and follow the recovery runbook; their presence does not establish which database is authoritative.'
     };
     return {
       state: 'no-pending-restore', severity: 'info', automaticAction: 'none', observations,
