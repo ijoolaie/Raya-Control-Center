@@ -4,7 +4,7 @@ Raya Control Center is an independent, local-first application for coordinating 
 
 **Product:** Raya Control Center  
 **Core subsystem:** Raya Control Plane  
-**Status:** Phase 4 - local API, CLI, Reference Worker, and Operator dashboard with controlled blocked-task recovery implemented; verification in progress.
+**Status:** Phase 4 verified. Phase 0 remains in progress while the foundation PR is intentionally Open, Draft, and Unmerged.
 
 ## Ownership and scope
 
@@ -85,18 +85,17 @@ Do not place prompts, transcripts, hidden reasoning, credentials, raw tool argum
 
 The default database is `.data/control-center.sqlite`; protect and back it up as private application data.
 
-
 ## Listing records
 
-Use npm run cli -- participant list --status active to list participants, and npm run cli -- task list --status queued --limit 25 to list tasks. Both commands accept filters and bounded offset pagination; see docs/API-CONTRACT.md.
+Use `npm run cli -- participant list --status active` to list participants, and `npm run cli -- task list --status queued --limit 25` to list tasks. Both commands accept filters and bounded offset pagination; see `docs/API-CONTRACT.md`.
 
 ## Database maintenance
 
-- npm run db:backup creates a consistent SQLite snapshot in .backups (or pass an explicit destination).
-- npm run db:restore -- <backup-file> validates and restores a snapshot. Stop the server first; restore refuses existing WAL sidecars and retains the replaced database for rollback.
-- RAYA_CC_DATABASE selects the live database path for both commands.
+- `npm run db:backup` creates a consistent SQLite snapshot in `.backups` (or pass an explicit destination).
+- `npm run db:restore -- <backup-file>` validates and restores a snapshot. Stop the server first; restore refuses existing WAL sidecars and retains the replaced database for rollback.
+- `RAYA_CC_DATABASE` selects the live database path for both commands.
 
-See docs/OPERATIONS.md for the safe restore procedure.
+See `docs/OPERATIONS.md` for the safe restore procedure.
 
 ## Reference Worker
 
