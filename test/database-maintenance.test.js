@@ -622,7 +622,7 @@ test('restore cleanup crash boundaries retain artifacts and classify released SQ
       if (!scenario.journal) assert.equal(report.journal.orphanedRollbackFiles.length, 1);
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, true);
-      assert.equal(report.recovery.observations.rollback, scenario.journal ? true : null);
+      assert.equal(report.recovery.observations.rollback, true);
       assert.equal(report.recovery.observations.runtimeLock, false);
       assert.equal(report.recovery.observations.maintenanceLock, false);
       assert.equal(existsSync(journalPath), scenario.journal, 'inspection must not mutate journal state');
