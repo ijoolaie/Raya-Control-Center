@@ -4,7 +4,7 @@
 Raya Control Center is the authoritative coordination service for registered participants and durable work. Its core subsystem is the Raya Control Plane. The product name and architectural subsystem name are intentionally distinct.
 
 ## System boundary
-This repository owns participant identity records, status, scopes, credential verifiers, task records, lifecycle transitions, assignment, lease ownership, authorization policy, append-only operational events, local API, CLI, migrations, and read-only operational dashboard.
+This repository owns participant identity records, status, scopes, credential verifiers, task records, lifecycle transitions, assignment, lease ownership, authorization policy, append-only operational events, local API, CLI, migrations, and an Operator-authenticated operational dashboard with inspection, audited capability updates, and guarded Task requeue actions.
 
 External clients do not own authoritative state:
 - Raya-Agent may later register as a participant and claim/execute tasks.
@@ -33,7 +33,7 @@ The initial implementation must not assume a cloud database, message broker, Kub
 ## Task ownership and execution
 A Participant claims the highest-priority oldest queued Task for which its stored capability set contains every requiredCapabilities entry. The claim operation atomically verifies Participant status and the tasks:claim scope, applies exact capability matching, assigns a unique Lease token and expiry, transitions the Task to claimed, and appends the corresponding event. Empty Task requirements preserve legacy unrestricted routing. Participant kind remains descriptive metadata. Task-type and payload safety is still validated by the consuming Worker.
 
-The capability-aware routing model is approved and implemented in the current working tree; see TASK-ROUTING-DESIGN.md and API-CONTRACT.md. Owner-led AI-assisted security review is in progress; third-party review is optional and is not a project gate.
+The capability-aware routing model is approved and implemented; see TASK-ROUTING-DESIGN.md and API-CONTRACT.md. The bounded owner-led AI-assisted security review is complete and recorded in SECURITY-REVIEW.md; third-party review is optional and is not a project gate.
 
 The worker then reports running, bounded progress metadata, heartbeat, and terminal outcome. A heartbeat proves liveness only; it is not evidence of progress.
 
