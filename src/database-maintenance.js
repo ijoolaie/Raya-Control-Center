@@ -332,7 +332,14 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   assertNoSymlinkComponents(dirname(destination), 'Restore destination parent');
   const journalPath = destination + '.restore-journal.json';
   if (pathEntryExists(journalPath)) throw new Error('An interrupted Restore journal already exists; inspect and resolve it before starting another Restore: ' + journalPath);
-  cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.restore');
+  const restoreTemporaryPrefix = '.' + basename(destination) + '.';
+  const orphanedRestoreTemporaries = readdirSync(dirname(destination)).filter(name =>
+    name.startsWith(restoreTemporaryPrefix) && name.endsWith('.restore')
+    && /^[0-9a-f-]{36}$/i.test(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)));
+  if (orphanedRestoreTemporaries.length) {
+    throw new Error('Orphaned Restore temporary files exist; inspect and preserve them before retrying: '
+      + orphanedRestoreTemporaries.map(name => resolve(dirname(destination), name)).join(', '));
+  }
   if (pathEntryExists(destination) && !lstatSync(destination).isFile())
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
