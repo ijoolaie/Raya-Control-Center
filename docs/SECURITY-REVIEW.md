@@ -736,7 +736,7 @@ Verification:
 
 Severity: **Low**
 
-Status: **Remediated locally; supported-runtime CI pending**
+Status: **Remediated; implementation commit `38474e331ff3436a9192ec90075d20bbe9834134` passed supported-runtime CI and Security Scans**
 
 Affected paths:
 - `src/database-maintenance.js`
