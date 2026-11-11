@@ -501,6 +501,33 @@ test('restore crash simulation classifies journal publication and staging bounda
     }
   }
 });
+test('restore refuses to delete orphaned staged files when the journal is absent', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-orphan-block-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const orphan = join(directory, '.live.sqlite.11111111-1111-4111-8111-111111111111.restore');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.orphan.preserve' });
+    createDatabaseBackup(database, backup);
+    db.close();
+    db = null;
+    writeFileSync(orphan, 'preserve-this-staged-artifact');
+    const original = readFileSync(database, 'base64');
+    assert.throws(() => restoreDatabaseBackup(backup, database), /Orphaned Restore temporary files exist/);
+    assert.equal(existsSync(orphan), true, 'a retry must not delete the orphaned staged file');
+    assert.equal(readFileSync(orphan, 'utf8'), 'preserve-this-staged-artifact');
+    assert.equal(readFileSync(database, 'base64'), original, 'a blocked retry must not replace the live database');
+    assert.equal(existsSync(database + '.restore-journal.json'), false, 'a blocked retry must not publish a new journal');
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore can recover the original database after a crash between move and install', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-gap-'));
   const database = join(directory, 'live.sqlite');
