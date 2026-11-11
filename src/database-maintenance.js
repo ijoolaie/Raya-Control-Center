@@ -42,7 +42,8 @@ export function inspectDatabaseRestore(databasePath) {
   if (unsafeParentError) {
     report.recovery = classifyRestoreRecoveryState({ journalStatus: 'unreadable', locks: report.locks });
     return report;
-  }  if (!report.journal.exists) {
+  }
+  if (report.journal.exists === false) {
     const directory = dirname(journalPath);
     try {
       const entries = readdirSync(directory);
