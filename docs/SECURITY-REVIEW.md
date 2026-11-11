@@ -1054,3 +1054,13 @@ Verification:
 - Focused runtime tests: 7/7 passed. Full local Windows suite: 169 passed, 4 skipped, 0 failed (173 total); npm run check and git diff --check passed.
 - Local Node version is 22.23.2, below the declared Node >=24.15.0 engine; this is supplemental diagnostic evidence. Exact-head GitHub Actions for commit 1dc0031c4dd755d357c379e423f3875c61a7d388 passed all 13 check runs: both Node 24/26 x Linux/Windows matrices, CodeQL, and Gitleaks.
 - This tests the runtime shutdown implementation directly; it does not claim a Windows OS-level forced process termination test or exhaustive shutdown fault injection.
+
+## Documentation status synchronization — 2026-11-11 (e0444a1)
+
+- Corrected the README phase-status summary: Phase 4 is verified; Phase 0 remains in progress solely because foundation PR #1 is intentionally Open, Draft, and Unmerged.
+- No application source, test code, runtime behavior, security controls, or project scope changed in this documentation-only commit.
+- Exact PR head: `e0444a1dffd0cdc0a4141098fe16dad3de4c515b`.
+- Exact-head GitHub checks: all 13 check runs completed successfully, including Node 24/26 on Linux/Windows, CodeQL, and Gitleaks.
+- Existing local Windows implementation/test evidence remains: 169 passed, 4 skipped, 0 failed (173 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 is below the declared Node >=24.15.0 engine; supported-runtime CI remains authoritative.
+- PR #1 remains Open, Draft, and Unmerged. API remains loopback-only; Phase 5 remote/multi-machine operation remains deferred.
+- Classification: documentation synchronization and automated CI evidence only; not an independent audit, penetration test, or certification.
