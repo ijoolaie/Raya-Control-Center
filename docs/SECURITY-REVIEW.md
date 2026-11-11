@@ -167,12 +167,12 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [x] Add offline token recovery guarded by a per-database exclusive runtime lock.
 - [ ] Independently review token handling under local filesystem and backup threat scenarios.
 - [x] Add regression coverage for credential redaction in HTTP errors, audit events, CLI failures, and dashboard output/source sinks.
-- [ ] Obtain independent adversarial review of credential handling and interactive browser behavior.
-- [ ] Obtain an independent security review from a reviewer who did not implement the controls.
+- [ ] **Deferred / optional, not a project gate:** obtain an independent adversarial review of credential handling and interactive browser behavior.
+- [ ] **Deferred / optional, not a project gate:** obtain a third-party security review from a reviewer who did not implement the controls.
 
 ## Gate
 
-Phase 4 security work remains **in progress**. This document is preparation for an independent review, not evidence that such a review has passed. Keep the API loopback-only until the independent review gate is completed.
+Phase 4 security work remains **in progress** while the remaining owner/operator-specific hardening and acceptance items are unresolved. This register records an owner-led AI-assisted review; it is not an independent audit, penetration test, or certification. A third-party review is optional and is not a project or merge gate. The API remains loopback-only as an explicit product/security boundary; this restriction does not depend on a third-party review.
 
 Backup temporary-file handling: failed VACUUM INTO operations remove partial snapshots in an error path. After a maintenance lock is acquired, the next operation removes only regular files matching the exact destination-specific UUID temp pattern; symlinks, directories, and preserved .pre-restore-* rollback files are not removed. A forced crash can leave a stale maintenance lock, which still requires operator verification before removal.
 
