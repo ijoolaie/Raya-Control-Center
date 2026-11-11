@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LATEST_SCHEMA_VERSION, migrate, openDatabase } from '../src/db.js';
@@ -93,7 +93,7 @@ test('a failed migration rolls back its schema changes and does not advance user
 });
 
 
-test('openDatabase rejects a future schema before changing its journal mode', () => {
+test('openDatabase rejects a future schema before changing file permissions or journal mode', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-db-future-version-'));
   const filename = join(directory, 'future.sqlite');
   try {
@@ -101,19 +101,29 @@ test('openDatabase rejects a future schema before changing its journal mode', ()
     future.exec('PRAGMA journal_mode = DELETE; PRAGMA user_version = 7;');
     future.close();
 
+    let originalMode = null;
+    if (process.platform !== 'win32') {
+      chmodSync(filename, 0o644);
+      originalMode = statSync(filename).mode & 0o777;
+    }
+
     assert.throws(
       () => openDatabase(filename),
-      /Unsupported database schema version 7; this build supports versions 0\.\.6/
+      /Unsupported database schema version 7; this build supports versions 0\\.\\.6/
     );
 
     const verify = new DatabaseSync(filename);
     try {
       assert.equal(verify.prepare('PRAGMA user_version').get().user_version, 7);
       assert.equal(verify.prepare('PRAGMA journal_mode').get().journal_mode, 'delete');
+      if (originalMode !== null) {
+        assert.equal(statSync(filename).mode & 0o777, originalMode,
+          'a rejected future-version database must retain its original permissions');
+      }
     } finally {
       verify.close();
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+});;
