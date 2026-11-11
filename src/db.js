@@ -149,9 +149,11 @@ export function openDatabase(filename = '.data/control-center.sqlite') {
   }
 }
 
+export const LATEST_SCHEMA_VERSION = migrations.at(-1).version;
+
 export function migrate(db) {
   const current = db.prepare('PRAGMA user_version').get().user_version;
-  const latestSupported = migrations.at(-1).version;
+  const latestSupported = LATEST_SCHEMA_VERSION;
   if (!Number.isInteger(current) || current < 0 || current > latestSupported)
     throw new Error(`Unsupported database schema version ${current}; this build supports versions 0..${latestSupported}`);
   for (const migration of migrations) {
