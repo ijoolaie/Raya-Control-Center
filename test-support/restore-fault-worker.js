@@ -9,7 +9,7 @@ const originalRm = fs.rmSync;
 const originalUnlink = fs.unlinkSync;
 
 fs.linkSync = (source, target) => {
-  if (target === destination && !source.startsWith(destination + '.pre-restore-') && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup', 'journal-cleanup-failure', 'destination-race', 'rollback-failure'].includes(mode) && !mode.startsWith('directory-sync-failure-')) throw new Error('injected-install-failure');
+  if (target === destination && !source.startsWith(destination + '.pre-restore-') && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup', 'journal-cleanup-failure', 'destination-race', 'rollback-failure', 'source-replaced-before-copy'].includes(mode) && !mode.startsWith('directory-sync-failure-')) throw new Error('injected-install-failure');
   if (mode === 'crash-before-journal-publish' && target === destination + '.restore-journal.json') process.exit(82);
   if (mode === 'destination-race' && target === destination) fs.writeFileSync(destination, 'concurrent destination');
   const result = originalLink(source, target);
@@ -17,6 +17,13 @@ fs.linkSync = (source, target) => {
   return result;
 };
 
+if (mode === 'source-replaced-before-copy') {
+  fs.copyFileSync = (source, target, flags) => {
+    fs.renameSync(source, source + '.original');
+    fs.renameSync(source + '.replacement', source);
+    return originalCopy(source, target, flags);
+  };
+}
 if (mode === 'crash-after-stage') {
   fs.copyFileSync = (source, target, flags) => {
     const result = originalCopy(source, target, flags);
