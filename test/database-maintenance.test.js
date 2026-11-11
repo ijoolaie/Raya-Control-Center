@@ -685,6 +685,15 @@ test('restore crash simulation classifies journal publication and staging bounda
 
       const report = inspectDatabaseRestore(database);
       assert.equal(report.journal.status, 'valid');
+      if (scenario.mode === 'crash-after-journal') {
+        assert.equal(report.journal.orphanedTemporaryFiles.length, 1,
+          'inspection must inventory the journal hard link left by a crash after publication');
+        assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true,
+          'inspection must preserve the journal temporary hard link');
+        assert.ok(report.journal.warnings.some(warning => warning.includes('temporary hard links remain')));
+      } else {
+        assert.deepEqual(report.journal.orphanedTemporaryFiles, []);
+      }
       assert.equal(report.recovery.state, scenario.temporary ? 'live-present-temporary-present-no-rollback' : 'live-present-no-rollback');
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, scenario.live);
