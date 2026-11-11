@@ -196,6 +196,26 @@ function validateSnapshot(filename) {
   }
 }
 
+function removeBackupTemporaryDirectory(directory) {
+  let stat;
+  try { stat = lstatSync(directory); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    throw new Error('Backup temporary path is not an owned regular directory: ' + directory);
+  const contents = readdirSync(directory);
+  if (contents.length === 1 && contents[0] === 'snapshot.sqlite') {
+    const snapshot = resolve(directory, 'snapshot.sqlite');
+    const snapshotStat = lstatSync(snapshot);
+    if (!snapshotStat.isFile() || snapshotStat.isSymbolicLink())
+      throw new Error('Unexpected backup staging snapshot artifact was preserved: ' + snapshot);
+    unlinkSync(snapshot);
+  } else if (contents.length !== 0) {
+    throw new Error('Unexpected backup staging contents were preserved for operator review: ' + directory);
+  }
+  rmdirSync(directory);
+  syncDirectory(dirname(directory));
+}
+
 function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
   const prefix = '.' + baseName + '.';
   let changed = false;
@@ -284,7 +304,7 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     try { syncDirectory(dirname(destination)); }
     catch (error) { error.publishedArtifact = destination; throw error; }
     const cleanupWarnings = [];
-    try { rmSync(temporaryDirectory, { recursive: true }); syncDirectory(dirname(destination)); }
+    try { removeBackupTemporaryDirectory(temporaryDirectory); }
     catch (cleanupError) {
       cleanupWarnings.push({ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name });
     }
@@ -292,8 +312,7 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   } catch (error) {
     try {
       if (temporaryDirectoryCreated) {
-        rmSync(temporaryDirectory, { recursive: true, force: true });
-        syncDirectory(dirname(destination));
+        removeBackupTemporaryDirectory(temporaryDirectory);
       }
     }
     catch (cleanupError) {
