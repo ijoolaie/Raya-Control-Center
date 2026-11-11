@@ -106,6 +106,37 @@ test('restore inspect reports an absent journal without creating or changing fil
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('restore inspect inventories rollback and staged artifacts when the journal is absent', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-orphans-'));
+  const database = join(directory, 'live.sqlite');
+  const token = '11111111-1111-4111-8111-111111111111';
+  const rollback = database + '.pre-restore-' + token;
+  const temporary = join(directory, '.live.sqlite.' + token + '.restore');
+  const journalTemporary = database + '.restore-journal.json.' + token + '.tmp';
+  try {
+    writeFileSync(rollback, 'rollback-evidence');
+    writeFileSync(temporary, 'staged-evidence');
+    writeFileSync(journalTemporary, 'journal-intent-evidence');
+    const before = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    const report = inspectDatabaseRestore(database);
+    const after = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    assert.equal(report.journal.status, 'absent');
+    assert.equal(report.journal.artifactInventoryComplete, true);
+    assert.equal(report.journal.orphanedRollbackFiles.length, 1);
+    assert.equal(report.journal.orphanedRollbackFiles[0].path, rollback);
+    assert.equal(report.journal.orphanedRestoreTemporaryFiles.length, 1);
+    assert.equal(report.journal.orphanedRestoreTemporaryFiles[0].path, temporary);
+    assert.equal(report.journal.orphanedTemporaryFiles.length, 1);
+    assert.equal(report.journal.orphanedTemporaryFiles[0].path, journalTemporary);
+    assert.equal(report.recovery.state, 'no-journal-recovery-artifacts-present');
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.equal(report.recovery.observations.rollback, true);
+    assert.equal(report.recovery.observations.temporary, true);
+    assert.equal(report.recovery.observations.journalTemporary, true);
+    assert.deepEqual(after, before, 'inspection must preserve every orphaned recovery artifact');
+  } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
 test('restore inspect reports valid journal artifacts and is strictly read-only', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-valid-'));
   const database = join(directory, 'live.sqlite');
