@@ -159,7 +159,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 - [x] Add startup listener-failure fault injection; verify SQLite can be reopened and the runtime lock is released after `EADDRINUSE` (`test/server-runtime.test.js`).
 - [x] Exercise shutdown when the listener has already stopped; verify the close error is surfaced while SQLite closes and the runtime lock is released (`test/server-runtime-shutdown-failure.test.js`). Forced termination during the shutdown drain window remains untested.
 - [x] Reject malformed Host authorities that could use URL userinfo to disguise a remote host (SEC-002; CI verified).
-- [ ] Complete broader URL/Host parsing and adversarial raw HTTP parser review.
+- [x] Complete the bounded URL/Host and raw HTTP parser review for the current loopback API surface; exact tested cases and limits are recorded in the 2026-11-11 checkpoint below. This is not protocol fuzzing or an exhaustive review of Node's HTTP parser.
 - [x] Prevent CLI Operator-token forwarding to non-loopback API overrides (SEC-003; CI verified).
 - [x] Add and test an opt-in Windows ACL hardening helper for a dedicated data directory.
 - [ ] Apply and verify restrictive ACLs on the actual configured data and backup directories after the operator stops all processes; no live ACL has been changed.
@@ -1007,7 +1007,7 @@ Verification:
 
 Severity: **Low**
 
-Status: **Remediated; exact-head CI and Security Scans pending**
+Status: **Remediated; exact-head CI and Security Scans passed**
 
 Affected paths:
 - `src/database-maintenance.js`
@@ -1035,3 +1035,13 @@ Verification:
 - Exact PR head `88194b5813d46f076db14bbb9043baee92788721` passed all four Node 24/26 × Linux/Windows CI jobs in workflow [43018965267](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/43018965267); CodeQL and Gitleaks both passed in Security Scans workflow [43018965313](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/43018965313).
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+
+## Loopback HTTP parser review checkpoint — 2026-11-11
+
+- Scope was kept to the existing Phase 2 loopback HTTP API; no new routes, transport modes, dependencies, or remote-access features were introduced.
+- Source inspection covered exact Host authority allowlisting, rejection of duplicate/missing Host headers, origin-form-only request targets, encoded path-segment validation, query allowlists, request size/header/time limits, and response closure on parser/body errors.
+- Existing raw TCP regression `test('raw HTTP parser rejects ambiguous framing and non-origin request targets')` covers duplicate Host, userinfo, integer/octal/hex and trailing-dot loopback aliases, invalid ports, absolute-form and network-path targets, backslashes, fragments, dot segments, encoded separators, Transfer-Encoding plus Content-Length, duplicate Content-Length, obsolete folded headers, and oversized headers.
+- Adjacent existing regressions cover declared and chunked oversized bodies, incomplete-body disconnects, keep-alive limits, and bounded pipelining. No new parser implementation was added; Node's built-in HTTP parser remains responsible for HTTP syntax/framing rejection.
+- No confirmed exploitable issue was identified in this bounded review. This is source inspection plus existing regression/CI evidence, not HTTP parser fuzzing, an independent audit, or proof against every parser differential. API remains loopback-only.
+- Review baseline: PR #1 head `88194b5813d46f076db14bbb9043baee92788721`; the documentation follow-up commit `7a307a066b77b508f164f0a547f96bd4f68a64d1` passed all Node 24/26 Linux/Windows checks, CodeQL, and Gitleaks.
