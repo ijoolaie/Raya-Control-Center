@@ -648,7 +648,7 @@ Impact:
 Remediation:
 - Both CLI and reference Worker now set redirect: 'error', refusing all Fetch redirects rather than forwarding a credential-bearing request.
 - Reference Worker loopback URL validation now also rejects embedded URL username/password fields, matching the stricter CLI policy.
-- Added CLI and real Worker regressions using separate loopback redirect and target listeners. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token.
+- Added CLI and real Worker regressions using separate loopback redirect and target listeners. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token. A separate Worker regression rejects loopback API URLs containing embedded userinfo.
 
 Verification:
 - Targeted local tests passed for both CLI and Worker redirect rejection on Node v22.23.2.

@@ -77,6 +77,17 @@ async function stop(child) {
   await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('worker did not stop')), 3000))]);
 }
 
+test('reference worker rejects loopback API URLs containing embedded userinfo', async () => {
+  await harness(async ({ register, startWorker, base }) => {
+    const participant = await register();
+    const url = base.replace('http://', 'http://embedded-user:embedded-pass@');
+    const worker = startWorker(participant.token, { RAYA_CC_URL: url });
+    const [code] = await once(worker.child, 'close');
+    assert.notEqual(code, 0);
+    assert.match(worker.stderr, /RAYA_CC_URL must use HTTP on a loopback host/);
+    assert.equal(worker.stderr.includes('embedded-pass'), false);
+  });
+});
 test('reference worker rejects API redirects before forwarding a lease token', async () => {
   await harness(async ({ register, startWorker }) => {
     const participant = await register();
