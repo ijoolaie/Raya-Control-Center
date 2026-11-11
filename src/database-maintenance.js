@@ -268,11 +268,14 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   const destination = resolve(backupPath);
   if (source.toLowerCase() === destination.toLowerCase())
     throw new Error('Backup destination must differ from the live database');
-  if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
   mkdirSync(dirname(destination), { recursive: true });
   assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
+  // Reconcile only recognized stale staging directories while holding both
+  // source and destination maintenance locks, even when the published backup
+  // already exists (for example, after a crash between publication and cleanup).
   cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.tmp');
+  if (pathEntryExists(destination)) throw new Error('Backup destination already exists: ' + destination);
   const temporaryDirectory = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
   const temporary = resolve(temporaryDirectory, 'snapshot.sqlite');
   let temporaryDirectoryCreated = false;
