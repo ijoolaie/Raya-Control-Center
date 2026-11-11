@@ -28,7 +28,7 @@ syncBuiltinESMExports();
 
 try {
   const maintenance = await import('../src/database-maintenance.js');
-  const result = mode === 'backup'
+  const result = mode === 'backup' || mode === 'backup-unexpected-temp-entry'
     ? maintenance.createDatabaseBackup(database, backup)
     : maintenance.restoreDatabaseBackup(backup, database);
   process.stdout.write(JSON.stringify({ ok: true, result }));
