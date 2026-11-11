@@ -817,3 +817,20 @@ Verification:
 - CI run [42967844083](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42967844083) passed Node 24/26 on Linux/Windows (4/4 jobs).
 - Security Scans run [42967844105](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42967844105) passed CodeQL JavaScript analysis and Gitleaks.
 - Owner-led AI-assisted internal review only; not an independent audit, penetration test, certification, or proof of security.
+
+
+### Follow-up — reject future schemas before file-permission changes
+
+A second ordering pass found that the first schema guard was correctly before WAL activation but still followed the POSIX main-file permission restriction. That meant a future-version database could be rejected while its mode was changed to owner-only.
+
+- Extracted `assertSupportedSchemaVersion()` and call it immediately after connection PRAGMAs, before permission changes, migration DDL, or journal-mode changes.
+- `migrate()` reuses the same guard, keeping direct migration callers protected.
+- Extended the file-backed future-version regression: on POSIX it seeds mode `0644` and asserts that rejection preserves that mode; on all platforms it asserts schema version 7 and DELETE journal mode remain unchanged.
+- Valid databases still have their main file restricted before WAL is enabled, preserving the existing sidecar-permission ordering.
+
+Follow-up implementation head: `963a024720c9330e785c0098e2860d70d930cdbf`.
+
+Verification:
+- CI run [42977592907](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42977592907): Node 24/26 on Linux/Windows passed (4/4).
+- Security Scans run [42977592853](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42977592853): CodeQL and Gitleaks passed.
+- No local or manual acceptance is claimed.
