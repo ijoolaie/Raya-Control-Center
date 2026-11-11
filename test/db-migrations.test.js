@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrate, openDatabase } from '../src/db.js';
+import { LATEST_SCHEMA_VERSION, migrate, openDatabase } from '../src/db.js';
 
 test('migration rejects a database schema newer than this build without changing it', () => {
   const db = new DatabaseSync(':memory:');
@@ -44,7 +44,8 @@ test('migration still initializes a new database through the latest supported ve
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, LATEST_SCHEMA_VERSION);
+    assert.equal(LATEST_SCHEMA_VERSION, 6);
     assert.ok(db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'participants'").get());
     assert.ok(db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'tasks'").get());
   } finally {
