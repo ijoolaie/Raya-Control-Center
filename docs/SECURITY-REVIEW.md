@@ -634,11 +634,13 @@ Status: **Remediated locally; supported-runtime CI pending**
 Affected paths:
 - src/cli.js — callApi()
 - examples/reference-worker/worker.mjs — api()
+- dashboard/dashboard.js — request()
 - test/http-server.test.js
 - test/reference-worker.test.js
+- test/dashboard-session.test.js
 
 Observation:
-- Both clients used the default Fetch redirect behavior. A 307/308 response can preserve the original method and request body when following a redirect to another origin.
+- All three API clients used the default Fetch redirect behavior. A 307/308 response can preserve the original method and request body when following a redirect to another origin.
 - A local two-listener Node.js probe confirmed that a redirected POST forwarded its body and the custom x-lease-token header to the second listener. The Authorization header was stripped by Fetch on the cross-origin hop, so this finding does not claim that the Operator or Participant Bearer header was forwarded in that probe.
 - CLI task creation can carry user-supplied task payloads; Worker lease-bound requests carry the lease token in x-lease-token. Forwarding either to a redirect target is unnecessary and unsafe.
 
@@ -646,9 +648,9 @@ Impact:
 - If the loopback API endpoint or an intermediary response is manipulated to return a cross-origin 307/308, task request bodies and Worker lease tokens can be disclosed to the redirect destination. This is a local-endpoint compromise / malicious-response scenario; it does not establish that the current API emits redirects or that remote ingress is enabled.
 
 Remediation:
-- Both CLI and reference Worker now set redirect: 'error', refusing all Fetch redirects rather than forwarding a credential-bearing request.
+- CLI, reference Worker, and dashboard now set redirect: 'error', refusing all Fetch redirects rather than forwarding a credential-bearing request.
 - Reference Worker loopback URL validation now also rejects embedded URL username/password fields, matching the stricter CLI policy.
-- Added CLI and real Worker regressions using separate loopback redirect and target listeners. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token. A separate Worker regression rejects loopback API URLs containing embedded userinfo.
+- Added CLI and real Worker regressions using separate loopback redirect and target listeners. Dashboard session tests also assert that every API request refuses redirects. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token. A separate Worker regression rejects loopback API URLs containing embedded userinfo.
 
 Verification:
 - Targeted local tests passed for both CLI and Worker redirect rejection on Node v22.23.2.

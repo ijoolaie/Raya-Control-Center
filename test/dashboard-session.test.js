@@ -68,6 +68,7 @@ test('dashboard ignores successful responses from an in-flight refresh after Dis
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(pending.length, 4, 'refresh should issue four parallel requests');
   assert.ok(pending.every(item => item.options.signal instanceof AbortSignal));
+  assert.ok(pending.every(item => item.options.redirect === 'error'), 'dashboard must reject API redirects');
 
   disconnect();
   assert.equal(elements.get('auth-status').textContent, 'Disconnected');

@@ -17,7 +17,7 @@
     const headers = {};
     if (auth) headers.authorization = 'Bearer ' + token;
     if (body !== undefined) headers['content-type'] = 'application/json';
-    const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', credentials: 'same-origin', signal });
+    const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', credentials: 'same-origin', signal, redirect: 'error' });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.code || 'http_' + response.status);
     return data;
