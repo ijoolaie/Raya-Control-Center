@@ -133,3 +133,4 @@ Never report completion based only on file creation.
 - [x] SEC-020: reconcile recognized Backup staging left by a crash immediately after publication; preserve the already-published backup on retry (2026-11-11).
 - [x] SEC-021: detect Restore source-path replacement between preflight validation and staging; add deterministic regression coverage (2026-11-11).
 - [x] SEC-022: detect Backup source-path replacement before SQLite open and after snapshot generation; add deterministic regression coverage (2026-11-11).
+- [x] Harden Windows data/backup ACL verification: require exact trusted principals, Allow/FullControl semantics, and expected inheritance flags; verify disposable primary and separate-backup fixtures (2026-11-11).
