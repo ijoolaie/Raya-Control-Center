@@ -125,6 +125,23 @@ export function inspectDatabaseRestore(databasePath) {
     && /^[0-9a-f-]{36}$/i.test(temporaryToken)
     && /^[0-9a-f-]{36}$/i.test(rollbackToken));
   const destinationMatches = validShape && recordedDestination.toLowerCase() === destination.toLowerCase();
+  // A crash after the journal hard link is published but before its temporary
+  // hard link is removed leaves both names. Inventory these even when the
+  // published journal is valid; inspection must never silently omit evidence.
+  try {
+    const directory = dirname(journalPath);
+    const journalPrefix = basename(journalPath) + '.';
+    report.journal.orphanedTemporaryFiles = readdirSync(directory)
+      .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
+        && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
+      .map(name => resolve(directory, name));
+    if (report.journal.orphanedTemporaryFiles.length) {
+      report.journal.warnings.push('Restore journal temporary hard links remain beside the published journal. Preserve them for operator review; they may contain the same published journal record.');
+    }
+  } catch (error) {
+    report.journal.artifactInventoryComplete = false;
+    report.journal.warnings.push('Restore journal temporary artifacts could not be fully enumerated (' + (error.code || error.name) + ').');
+  }
   report.journal.record = {
     version: record?.version ?? null, operation: record?.operation ?? null,
     pid: Number.isSafeInteger(record?.pid) && record.pid > 0 ? record.pid : null,
