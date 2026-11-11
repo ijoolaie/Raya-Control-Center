@@ -940,3 +940,64 @@ Verification:
 - Push Security Scans run [42980790130](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980790130) and Pull Request Security Scans run [42980796152](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980796152) passed CodeQL JavaScript analysis and Gitleaks.
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+
+## SEC-020 — Backup retry did not reconcile staging after post-publication process crash
+
+Severity: **Low**
+
+Status: **Remediated; exact-head CI and Security Scans passed**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test-support/backup-fault-worker.js`
+- `test/database-maintenance.test.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- A process crash immediately after the backup hard link was published could leave the destination-local staging directory behind.
+- A retry previously checked whether the final destination already existed before reconciling stale staging directories. Since Backup correctly refuses to overwrite an existing destination, that retry could exit without cleaning the recognized stale staging artifact.
+
+Impact:
+- An otherwise valid, already-published backup remained available, but the abandoned staging directory could persist indefinitely and consume storage.
+
+Remediation:
+- Backup now reconciles only recognized stale staging artifacts while holding both source and destination maintenance locks, before checking whether the final destination already exists.
+- Cleanup retains the existing ownership and shape checks; unexpected contents are preserved.
+- Added a child-process crash immediately after publication and a regression proving that a retry cleans the stale staging directory while preserving the already-published backup.
+
+Verification:
+- Implementation, test, and runbook commits: `fe92a0d3730b64d20262682849e13ca603b2f446`, `3a13873cba94fdc04f848f3dfb585ebc37595bc7`.
+- The exact current PR head `1ea309e22bfdc7df2df40b1d8a2066ea8fed5a76` passed Node 24/26 on Linux/Windows, CodeQL, and Gitleaks.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+## SEC-021 — Restore source path could be replaced between validation and staging
+
+Severity: **Low**
+
+Status: **Remediated; exact-head CI and Security Scans passed**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test-support/restore-fault-worker.js`
+- `test/database-maintenance.test.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- Restore validated the selected backup path, then copied it into a staging file. If a process with write access to the backup directory replaced that path with another valid SQLite database between those operations, validating the staged bytes alone would not establish that they came from the originally selected file.
+
+Impact:
+- Restore could install a different, independently valid database than the one validated at preflight. No remote exploit or privilege boundary bypass was established; the scenario requires local filesystem write access to the backup path's directory.
+
+Remediation:
+- Restore now captures the source file identity before validation and compares it again immediately after staging. A changed device/inode/size/mtime/ctime identity aborts before the live database is moved or modified.
+- The exact staged copy continues to receive independent SQLite integrity, foreign-key, and schema validation.
+- Added deterministic child-process fault injection that replaces the source path with a different valid SQLite database between validation and copy; the regression verifies that Restore refuses installation, preserves the live database, and retains both source artifacts.
+- This is best-effort race detection, not a defense against a hostile same-user process capable of restoring filesystem metadata. Database and backup parent directories must remain writable only by trusted principals.
+
+Verification:
+- Implementation, fault worker, regression, and runbook commits: `f48b072c69f819adbfdcc5e51fe0679357d799ae`, `c169147dbccb85ca408a5aa75b324d5cd363ff01`, `f70f3dbcfa1aa8cf99f8caf14b2c04b0f47d0ec6`, `1ea309e22bfdc7df2df40b1d8a2066ea8fed5a76`.
+- The exact current PR head `1ea309e22bfdc7df2df40b1d8a2066ea8fed5a76` passed Node 24/26 on Linux/Windows, CodeQL, and Gitleaks.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
