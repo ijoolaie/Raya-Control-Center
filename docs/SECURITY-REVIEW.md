@@ -710,7 +710,7 @@ Verification:
 
 Severity: **Low**
 
-Status: **Remediated locally; supported-runtime CI pending**
+Status: **Remediated; supported-runtime CI and Security Scans verified on exact PR head `da8e2facfc9843586c4a463a24981b8d470fec96`**
 
 Affected paths:
 - `examples/reference-worker/worker.mjs`
