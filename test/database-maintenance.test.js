@@ -681,6 +681,39 @@ test('restore refuses to delete orphaned staged files when the journal is absent
   }
 });
 
+test('restore crash after no-replace rollback link publication preserves both names and journal', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-rollback-link-crash-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.rollback.link.original' });
+    createDatabaseBackup(database, backup);
+    db.close();
+    db = null;
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'crash-after-rollback-link', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 74, result.stderr);
+    const journalPath = database + '.restore-journal.json';
+    assert.equal(existsSync(journalPath), true);
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
+    assert.equal(existsSync(database), true, 'the original live path remains until the hard-link move is complete');
+    assert.equal(existsSync(journal.rollback), true, 'the no-replace rollback link is already published');
+    assert.equal(existsSync(journal.temporary), true);
+    assert.equal(readFileSync(database, 'base64'), readFileSync(journal.rollback, 'base64'));
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.recovery.state, 'live-and-rollback-present-ambiguous');
+    assert.equal(report.recovery.automaticAction, 'none');
+    db = openDatabase(database);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'restore.rollback.link.original'), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore can recover the original database after a crash between move and install', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-crash-gap-'));
   const database = join(directory, 'live.sqlite');
