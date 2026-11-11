@@ -197,6 +197,22 @@ function assertRegularFile(filename, label) {
   return path;
 }
 
+function snapshotFileIdentity(filename) {
+  const stat = lstatSync(filename, { bigint: true });
+  if (!stat.isFile() || stat.isSymbolicLink())
+    throw new Error('Restore source must remain a regular non-symbolic-link file: ' + filename);
+  return {
+    device: stat.dev, inode: stat.ino, size: stat.size,
+    modified: stat.mtimeNs, changed: stat.ctimeNs
+  };
+}
+
+function sameSnapshotFileIdentity(left, right) {
+  return left.device === right.device && left.inode === right.inode
+    && left.size === right.size && left.modified === right.modified
+    && left.changed === right.changed;
+}
+
 function validateSnapshot(filename) {
   const db = new DatabaseSync(filename);
   try {
@@ -367,6 +383,7 @@ function createRestoreJournal(journalPath, record) {
 
 function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const source = assertRegularFile(backupPath, 'Backup source');
+  const sourceIdentity = snapshotFileIdentity(source);
   const destination = resolve(databasePath);
   if (source.toLowerCase() === destination.toLowerCase())
     throw new Error('Restore source must differ from the live database');
@@ -411,6 +428,12 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     journalCreated = true;
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
     temporaryCreated = true;
+    // Bind the validated backup path to the bytes staged for installation.
+    // A path replacement or in-place mutation between validation and copy
+    // must not silently switch the selected backup.
+    if (!sameSnapshotFileIdentity(sourceIdentity, snapshotFileIdentity(source))) {
+      throw new Error('Restore source changed during staging; refusing to install a different backup');
+    }
     restrictSnapshotPermissions(temporary);
     // Validate the exact bytes that will be installed, not only the earlier source path.
     const metadata = validateSnapshot(temporary);
