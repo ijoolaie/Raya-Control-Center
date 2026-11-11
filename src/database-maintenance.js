@@ -255,8 +255,10 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
   cleanupStaleMaintenanceTemps(dirname(destination), basename(destination), '.tmp');
   const temporaryDirectory = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.tmp');
   const temporary = resolve(temporaryDirectory, 'snapshot.sqlite');
+  let temporaryDirectoryCreated = false;
   try {
     mkdirSync(temporaryDirectory, { mode: 0o700 });
+    temporaryDirectoryCreated = true;
     if (process.platform !== 'win32') {
       chmodSync(temporaryDirectory, 0o700);
       if ((statSync(temporaryDirectory).mode & 0o777) !== 0o700)
@@ -288,7 +290,12 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     }
     return { path: destination, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporaryDirectory, { recursive: true, force: true }); syncDirectory(dirname(destination)); }
+    try {
+      if (temporaryDirectoryCreated) {
+        rmSync(temporaryDirectory, { recursive: true, force: true });
+        syncDirectory(dirname(destination));
+      }
+    }
     catch (cleanupError) {
       error.cleanupWarnings = [{ artifact: 'temporary', path: temporary, error: cleanupError.code || cleanupError.name }];
     }
@@ -298,8 +305,10 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
 function createRestoreJournal(journalPath, record) {
   const temporary = journalPath + '.' + randomUUID() + '.tmp';
   let descriptor;
+  let temporaryCreated = false;
   try {
     descriptor = openSync(temporary, 'wx', 0o600);
+    temporaryCreated = true;
     writeFileSync(descriptor, JSON.stringify(record, null, 2) + '\n', 'utf8');
     fsyncSync(descriptor);
     closeSync(descriptor);
@@ -309,7 +318,10 @@ function createRestoreJournal(journalPath, record) {
     syncDirectory(dirname(journalPath));
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
-    try { unlinkSync(temporary); syncDirectory(dirname(journalPath)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (temporaryCreated) {
+      try { unlinkSync(temporary); syncDirectory(dirname(journalPath)); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
   }
 }
 
@@ -340,6 +352,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     throw new Error('Restore destination must be a regular file');
   const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
   const rollback = destination + '.pre-restore-' + randomUUID();
+  let temporaryCreated = false;
   let movedOriginal = false;
   let installPublished = false;
   let journalCreated = false;
@@ -356,6 +369,7 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     });
     journalCreated = true;
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
+    temporaryCreated = true;
     restrictSnapshotPermissions(temporary);
     // Validate the exact bytes that will be installed, not only the earlier source path.
     const metadata = validateSnapshot(temporary);
@@ -382,7 +396,9 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
     }
     return { path: destination, rollbackPath: movedOriginal ? rollback : null, ...metadata, cleanupWarnings };
   } catch (error) {
-    try { rmSync(temporary, { force: true }); syncDirectory(dirname(destination)); } catch {}
+    if (temporaryCreated) {
+      try { unlinkSync(temporary); syncDirectory(dirname(destination)); } catch {}
+    }
     if (movedOriginal && !installPublished) {
       if (!pathEntryExists(destination)) {
         try { renameSync(rollback, destination); syncDirectory(dirname(destination)); }
