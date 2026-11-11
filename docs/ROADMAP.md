@@ -113,3 +113,4 @@ Never report completion based only on file creation.
 - [x] Review Backup/Restore locking, WAL snapshots, validation, journals, rollback, crash boundaries, and platform durability limitations.
 - [x] Review loopback HTTP Host/request-target handling, Bearer-only authorization, browser CORS/preflight behavior, and dashboard security headers; add a cross-origin regression test.
 - [x] Add isolated multi-connection concurrency regressions for completion/cancellation, completion/revocation, and heartbeat/expiry reconciliation; repeat race tests five times.
+- [x] Reject HTTP redirects in CLI and Worker API clients to prevent forwarding request bodies and lease credentials to another origin; add local 307 regression tests (SEC-014).

@@ -38,7 +38,7 @@ async function callApi(path, { method = 'GET', body, operator = true } = {}) {
   }
   if (body !== undefined) headers['content-type'] = 'application/json';
   const response = await fetch(BASE + path, {
-    method, headers, body: body === undefined ? undefined : JSON.stringify(body)
+    method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error'
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};

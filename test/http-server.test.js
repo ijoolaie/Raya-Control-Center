@@ -365,6 +365,55 @@ test('CLI rejects remote and malformed API overrides before sending operator cre
   }
 });
 
+test('CLI rejects API redirects without forwarding Operator credentials or mutation bodies', async () => {
+  const token = 'cli-redirect-check-token-value';
+  let targetRequests = 0;
+  let redirectRequest;
+  const target = createHttpServer((req, res) => {
+    targetRequests++;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ tasks: [] }));
+  });
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+  const redirect = createHttpServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      redirectRequest = { authorization: req.headers.authorization, body };
+      res.writeHead(307, { location: 'http://127.0.0.1:' + target.address().port + '/collect' });
+      res.end();
+    });
+  });
+  await new Promise(resolve => redirect.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['src/cli.js', 'task', 'create', '--type', 'cli.redirect-probe', '--payload', '{"marker":"do-not-forward"}'], {
+        cwd: process.cwd(),
+        env: { ...process.env, RAYA_CC_URL: 'http://127.0.0.1:' + redirect.address().port + '/control/v1', RAYA_CC_OPERATOR_TOKEN: token },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+      child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', code => resolve({ code, stdout, stderr }));
+    });
+    assert.notEqual(result.code, 0);
+    assert.equal(redirectRequest.authorization, 'Bearer ' + token);
+    assert.match(redirectRequest.body, /do-not-forward/);
+    assert.equal(targetRequests, 0, 'CLI must not follow the 307 to another origin');
+    assert.equal((result.stdout + result.stderr).includes(token), false);
+  } finally {
+    redirect.closeAllConnections();
+    target.closeAllConnections();
+    await Promise.all([
+      new Promise(resolve => redirect.close(resolve)),
+      new Promise(resolve => target.close(resolve))
+    ]);
+  }
+});
 test('CLI redacts the operator token if an API error echoes it', async () => {
   const token = 'cli-token-must-never-appear-in-error-output';
   const fake = createHttpServer((req, res) => {

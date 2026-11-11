@@ -6,7 +6,7 @@ removeOperatorCredential();
 
 const BASE = (process.env.RAYA_CC_URL || 'http://127.0.0.1:4317/control/v1').replace(/\/+$/, '');
 const API_URL = new URL(BASE);
-if (API_URL.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(API_URL.hostname) || API_URL.pathname !== '/control/v1' || API_URL.search || API_URL.hash) {
+if (API_URL.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(API_URL.hostname) || API_URL.username || API_URL.password || API_URL.pathname !== '/control/v1' || API_URL.search || API_URL.hash) {
   throw new Error('RAYA_CC_URL must use HTTP on a loopback host.');
 }
 const PARTICIPANT_TOKEN = process.env.RAYA_CC_PARTICIPANT_TOKEN;
@@ -32,7 +32,7 @@ async function api(path, { method = 'GET', body, leaseToken, signal } = {}) {
   let response;
   try {
     response = await fetch(BASE + path, {
-      method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal, redirect: 'error'
     });
   } catch (error) {
     // A network failure after a mutation is ambiguous. Never replay that mutation.

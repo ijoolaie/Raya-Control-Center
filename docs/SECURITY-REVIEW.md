@@ -625,3 +625,32 @@ This section supersedes earlier notes that identify `bcd5598` or `e236c27` as th
 - Full local Windows suite on Node v22.23.2 (below supported >=24.15.0): 149 passed, 3 skipped, 0 failed (152 total); npm run check and git diff --check passed. The three skips are platform-conditional POSIX tests. Treat local results as diagnostic only; supported-runtime CI must verify the exact pushed commit.
 - No confirmed task/lease concurrency defect was established in these exercised races. This is bounded test evidence, not proof against every possible interleaving or external side-effect duplication.
 - Test-only changes: test/control-center.test.js and test-support/task-race-worker.js. No production source, live .data, ACLs, credentials, or API binding settings were changed. PR #1 remains Open, Draft, and Unmerged; API remains loopback-only.
+### SEC-014 - CLI and Worker followed credential-bearing API redirects
+
+Severity: **Medium**
+
+Status: **Remediated locally; supported-runtime CI pending**
+
+Affected paths:
+- src/cli.js — callApi()
+- examples/reference-worker/worker.mjs — api()
+- test/http-server.test.js
+- test/reference-worker.test.js
+
+Observation:
+- Both clients used the default Fetch redirect behavior. A 307/308 response can preserve the original method and request body when following a redirect to another origin.
+- A local two-listener Node.js probe confirmed that a redirected POST forwarded its body and the custom x-lease-token header to the second listener. The Authorization header was stripped by Fetch on the cross-origin hop, so this finding does not claim that the Operator or Participant Bearer header was forwarded in that probe.
+- CLI task creation can carry user-supplied task payloads; Worker lease-bound requests carry the lease token in x-lease-token. Forwarding either to a redirect target is unnecessary and unsafe.
+
+Impact:
+- If the loopback API endpoint or an intermediary response is manipulated to return a cross-origin 307/308, task request bodies and Worker lease tokens can be disclosed to the redirect destination. This is a local-endpoint compromise / malicious-response scenario; it does not establish that the current API emits redirects or that remote ingress is enabled.
+
+Remediation:
+- Both CLI and reference Worker now set redirect: 'error', refusing all Fetch redirects rather than forwarding a credential-bearing request.
+- Reference Worker loopback URL validation now also rejects embedded URL username/password fields, matching the stricter CLI policy.
+- Added CLI and real Worker regressions using separate loopback redirect and target listeners. They verify the initial local request contains its intended data but the redirect target receives no request, no task body or lease token is forwarded, and CLI error output does not disclose the Operator token.
+
+Verification:
+- Targeted local tests passed for both CLI and Worker redirect rejection on Node v22.23.2.
+- Full supported-runtime CI and security scans must pass against the exact commit before this remediation is marked CI-verified.
+- Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.

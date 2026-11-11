@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../src/db.js';
@@ -76,6 +77,64 @@ async function stop(child) {
   await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('worker did not stop')), 3000))]);
 }
 
+test('reference worker rejects API redirects before forwarding a lease token', async () => {
+  await harness(async ({ register, startWorker }) => {
+    const participant = await register();
+    const leaseToken = 'redirected-lease-token-probe';
+    let targetRequests = 0;
+    let redirectRequest;
+    const target = createHttpServer((req, res) => {
+      targetRequests++;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+    const redirector = createHttpServer((req, res) => {
+      if (req.url === '/control/v1/tasks/claim') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          claim: {
+            task: { id: 'redirect-task', type: 'demo.echo', payload: { value: 'probe' } },
+            lease: { id: 'redirect-lease', token: leaseToken, expiresAt: new Date(Date.now() + 30000).toISOString() }
+          }
+        }));
+        return;
+      }
+      let body = '';
+      req.setEncoding('utf8');
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        redirectRequest = { leaseToken: req.headers['x-lease-token'], body };
+        res.writeHead(307, { location: 'http://127.0.0.1:' + target.address().port + '/control/v1/tasks/redirect-task/start' });
+        res.end();
+      });
+    });
+    await new Promise(resolve => redirector.listen(0, '127.0.0.1', resolve));
+    const worker = startWorker(participant.token, { RAYA_CC_URL: 'http://127.0.0.1:' + redirector.address().port + '/control/v1' });
+    try {
+      const closed = once(worker.child, 'close');
+      let timer;
+      const [code] = await Promise.race([
+        closed,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('redirect-test worker did not exit')), 3000); })
+      ]);
+      clearTimeout(timer);
+      assert.equal(code, 0);
+      assert.equal(redirectRequest.leaseToken, leaseToken);
+      assert.equal(redirectRequest.body, '{}');
+      assert.equal(targetRequests, 0, 'worker must not follow the 307 to another origin');
+      assert.equal(worker.stderr.includes(leaseToken), false);
+    } finally {
+      await stop(worker.child);
+      redirector.closeAllConnections();
+      target.closeAllConnections();
+      await Promise.all([
+        new Promise(resolve => redirector.close(resolve)),
+        new Promise(resolve => target.close(resolve))
+      ]);
+    }
+  });
+});
 test('real worker process executes allowlisted echo and completes task without Operator credentials', async () => {
   await harness(async ({ register, createTask, getTask, startWorker }) => {
     const participant = await register();
