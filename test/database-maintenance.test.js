@@ -89,6 +89,21 @@ test('restore inspect refuses symlinked parent paths before reading recovery jou
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('restore inspect does not treat an unreadable journal path as absent', { skip: process.platform === 'win32' || typeof process.getuid !== 'function' || process.getuid() === 0 }, () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-unreadable-'));
+  const database = join(directory, 'live.sqlite');
+  try {
+    chmodSync(directory, 0o000);
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.exists, null);
+    assert.equal(report.journal.status, 'unreadable');
+    assert.equal(report.recovery.state, 'manual-review-invalid-journal');
+  } finally {
+    chmodSync(directory, 0o700);
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore inspect reports an absent journal without creating or changing files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-absent-'));
   const database = join(directory, 'live.sqlite');
