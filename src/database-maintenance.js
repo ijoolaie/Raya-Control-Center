@@ -52,7 +52,7 @@ export function inspectDatabaseRestore(databasePath) {
       report.journal.orphanedTemporaryFiles = entries
         .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
           && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
-        .map(name => inspectPath(resolve(directory, name)));
+        .map(name => resolve(directory, name));
       report.journal.orphanedRollbackFiles = entries
         .filter(name => name.startsWith(rollbackPrefix)
           && /^[0-9a-f-]{36}$/i.test(name.slice(rollbackPrefix.length)))
@@ -62,7 +62,6 @@ export function inspectDatabaseRestore(databasePath) {
           && /^[0-9a-f-]{36}$/i.test(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)))
         .map(name => inspectPath(resolve(directory, name)));
       report.journal.artifactInventoryComplete = [
-        ...report.journal.orphanedTemporaryFiles,
         ...report.journal.orphanedRollbackFiles,
         ...report.journal.orphanedRestoreTemporaryFiles
       ].every(artifact => artifact.exists === true);
