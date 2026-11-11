@@ -861,6 +861,48 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+test('restore refuses a backup path replaced after validation but before staging', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-source-race-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const replacement = backup + '.replacement';
+  let db;
+  let replacementDb;
+  try {
+    db = openDatabase(database);
+    const center = new ControlCenter(db);
+    center.createTask({ type: 'restore.source.original.one' });
+    createDatabaseBackup(database, backup);
+    center.createTask({ type: 'restore.source.original.two' });
+    db.close();
+    db = null;
+
+    replacementDb = new DatabaseSync(replacement);
+    replacementDb.exec('PRAGMA user_version = 1; CREATE TABLE replacement_marker (value TEXT NOT NULL); INSERT INTO replacement_marker VALUES (\'different valid database\');');
+    replacementDb.close();
+    replacementDb = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), 'source-replaced-before-copy', backup, database], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.message, /Restore source changed during staging/);
+    assert.equal(existsSync(database + '.restore-journal.json'), false,
+      'a pre-install source identity mismatch should close the intent journal after safe cleanup');
+    assert.equal(existsSync(backup + '.original'), true, 'the originally validated backup remains preserved');
+    assert.equal(existsSync(backup), true, 'the replacement path remains untouched for investigation');
+    db = openDatabase(database);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2,
+      'the live database must remain unchanged when the selected backup path is replaced');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'replacement_marker'").get().count, 0);
+  } finally {
+    if (db) db.close();
+    if (replacementDb) replacementDb.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore cleanup crash boundaries retain artifacts and classify released SQLite locks', () => {
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   const scenarios = [
