@@ -99,6 +99,7 @@ Requires an explicit product decision, threat-model review, authenticated transp
 
 ## Phase 6 — Deferred capability closure
 **Status: Planned — not started**
+Detailed baseline, design constraints, workstreams, and evidence-based acceptance criteria: `docs/PHASE-6-ACCEPTANCE.md`.
 This phase is the planned closure phase for every capability currently marked Deferred in this roadmap or the architecture's Deferred section. Phase 6 is not authorization to begin Phase 5 or to relax the current local-first/loopback-only boundary early. Phase 5 remains deferred and must not start before explicit operator authorization. The intent is that **no item in the current Deferred inventory remains deferred when Phase 6 exits**.
 
 ### Workstreams and implementation approach
