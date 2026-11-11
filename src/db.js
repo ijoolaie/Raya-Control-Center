@@ -130,12 +130,12 @@ export function openDatabase(filename = '.data/control-center.sqlite') {
   }
   const db = new DatabaseSync(path);
   try {
-    // Restrict the main file before enabling WAL so newly created sidecars inherit its private mode.
-    if (path !== ':memory:') restrictPrivateDatabaseFile(path);
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA busy_timeout = 5000');
-    // Validate/migrate the schema before changing the database journal mode.
-    // In particular, an older build must not alter a future-version database.
+    // Reject unsupported schemas before changing file permissions or journal mode.
+    assertSupportedSchemaVersion(db);
+    // Restrict the main file before enabling WAL so newly created sidecars inherit its private mode.
+    if (path !== ':memory:') restrictPrivateDatabaseFile(path);
     migrate(db);
     if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
     if (path !== ':memory:') {
@@ -151,11 +151,15 @@ export function openDatabase(filename = '.data/control-center.sqlite') {
 
 export const LATEST_SCHEMA_VERSION = migrations.at(-1).version;
 
-export function migrate(db) {
+function assertSupportedSchemaVersion(db) {
   const current = db.prepare('PRAGMA user_version').get().user_version;
-  const latestSupported = LATEST_SCHEMA_VERSION;
-  if (!Number.isInteger(current) || current < 0 || current > latestSupported)
-    throw new Error(`Unsupported database schema version ${current}; this build supports versions 0..${latestSupported}`);
+  if (!Number.isInteger(current) || current < 0 || current > LATEST_SCHEMA_VERSION)
+    throw new Error(`Unsupported database schema version ${current}; this build supports versions 0..${LATEST_SCHEMA_VERSION}`);
+  return current;
+}
+
+export function migrate(db) {
+  const current = assertSupportedSchemaVersion(db);
   for (const migration of migrations) {
     if (migration.version <= current) continue;
     db.exec('BEGIN IMMEDIATE');
