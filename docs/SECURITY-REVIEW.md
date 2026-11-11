@@ -731,3 +731,31 @@ Verification:
 - Focused Worker URL/redirect tests: 13/13 passed locally on Node v22.23.2 (below declared Node >=24.15.0). `node --check` passed for the Worker and its test file; `git diff --check` passed.
 - Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are required for the exact remediation commit before marking this finding CI-verified.
 - Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.
+
+## SEC-016 — Restore inspection followed symlinked database parent paths
+
+Severity: **Low**
+
+Status: **Remediated locally; supported-runtime CI pending**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test/database-maintenance.test.js`
+
+Observation:
+- Runtime-lock inspection correctly failed closed when the configured database path traversed a symlink or Windows junction, but `inspectDatabaseRestore()` continued to inspect and read the adjacent `.restore-journal.json` through that alias.
+- An isolated local probe created a temporary directory and a symlink/junction alias. A journal in the target directory was parsed through the alias and its `source` field was returned even though lock state was reported as `unsafe-database-path`.
+
+Impact:
+- The read-only recovery-inspection command could disclose metadata from a journal reached through a path alias that the lock inspector considered unsafe. No file was modified and this did not bypass Restore's mutation-time path checks or acquire a lock on the aliased database. The demonstrated impact is limited to local metadata disclosure through a configured symlink/junction path.
+
+Remediation:
+- `inspectDatabaseRestore()` now validates the database parent path before inspecting any database or journal artifacts.
+- On a symlink/junction parent, inspection fails closed in its structured report: database and journal state are unknown/unreadable, the journal record is not returned, recovery remains manual, and no artifact is read or changed.
+- Added a regression with a real temporary symlink/junction and a planted journal marker; it verifies the journal is not returned and the inspection reports `unsafe-database-path`.
+
+Verification:
+- `test/database-maintenance.test.js`: 42 passed, 1 skipped, 0 failed on Windows. The skip is the POSIX-only directory-fsync fault-injection test.
+- `npm run check` and `git diff --check` passed. Local Node v22.23.2 is below the declared Node >=24.15.0 engine, so this is supplemental diagnostic evidence.
+- Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are required for the exact remediation commit before marking this finding CI-verified.
+- Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.

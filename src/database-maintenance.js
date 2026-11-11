@@ -25,12 +25,23 @@ function inspectPath(filename) {
 export function inspectDatabaseRestore(databasePath) {
   const destination = resolve(databasePath);
   const journalPath = destination + '.restore-journal.json';
+  let unsafeParentError = null;
+  try { assertNoSymlinkComponents(dirname(destination), 'Database restore inspection'); }
+  catch (error) { unsafeParentError = error; }
   const report = {
-    operation: 'restore-inspect', readOnly: true, database: inspectPath(destination),
+    operation: 'restore-inspect', readOnly: true,
+    database: unsafeParentError
+      ? { path: destination, exists: null, kind: null, size: null, error: 'unsafe-database-path' }
+      : inspectPath(destination),
     locks: inspectDatabaseRuntimeLocks(destination),
-    journal: { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: [] }
+    journal: unsafeParentError
+      ? { path: journalPath, exists: null, kind: null, size: null, error: 'unsafe-database-path', status: 'unreadable', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: ['Database parent path traverses a symbolic link or junction. Journal and artifacts were not inspected; no files or locks were changed.'] }
+      : { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], warnings: [] }
   };
-  if (!report.journal.exists) {
+  if (unsafeParentError) {
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: 'unreadable', locks: report.locks });
+    return report;
+  }  if (!report.journal.exists) {
     try {
       const prefix = basename(journalPath) + '.';
       report.journal.orphanedTemporaryFiles = readdirSync(dirname(journalPath))

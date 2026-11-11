@@ -64,6 +64,28 @@ test('Restore recovery state model never treats a lock as proof of a live or sta
   assert.match(result.guidance, /not classified as stale/);
 });
 
+test('restore inspect refuses symlinked parent paths before reading recovery journals', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-link-'));
+  const realDirectory = join(directory, 'real');
+  const linkedDirectory = join(directory, 'linked');
+  try {
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    const database = join(linkedDirectory, 'live.sqlite');
+    writeFileSync(join(realDirectory, 'live.sqlite.restore-journal.json'), JSON.stringify({
+      version: 1, operation: 'restore', source: 'must-not-be-read', destination: database,
+      temporary: join(linkedDirectory, '.live.sqlite.11111111-1111-4111-8111-111111111111.restore'),
+      rollback: database + '.pre-restore-11111111-1111-4111-8111-111111111111'
+    }));
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'unreadable');
+    assert.equal(report.journal.record, null);
+    assert.equal(report.journal.error, 'unsafe-database-path');
+    assert.equal(report.database.exists, null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('restore inspect reports an absent journal without creating or changing files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-absent-'));
   const database = join(directory, 'live.sqlite');
@@ -875,7 +897,8 @@ test('runtime lock inspection fails closed for symlinked database parent paths',
     assert.equal(report.maintenance.error, 'unsafe-database-path');
     assert.equal(report.runtime.exists, null);
     const restoreReport = inspectDatabaseRestore(join(linkedDirectory, 'live.sqlite'));
-    assert.equal(restoreReport.recovery.state, 'no-pending-restore-lock-state-unknown');
+    assert.equal(restoreReport.journal.status, 'unreadable');
+    assert.equal(restoreReport.recovery.automaticAction, 'none');
     assert.equal(restoreReport.recovery.automaticAction, 'none');
     assert.equal(existsSync(database + '.maintenance.lock'), true);
   } finally {
