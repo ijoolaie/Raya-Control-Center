@@ -75,8 +75,11 @@ export function inspectDatabaseRestore(databasePath) {
         report.journal.warnings.push('Staged Restore files remain without a published journal. Preserve them for operator review; they are not verified backups.');
       }
     } catch (error) {
-      report.journal.artifactInventoryComplete = false;
-      report.journal.warnings.push('Restore recovery artifacts could not be fully enumerated (' + (error.code || error.name) + ').');
+      if (error.code === 'ENOENT') report.journal.artifactInventoryComplete = true;
+      else {
+        report.journal.artifactInventoryComplete = false;
+        report.journal.warnings.push('Restore recovery artifacts could not be fully enumerated (' + (error.code || error.name) + ').');
+      }
     }
     report.recovery = classifyRestoreRecoveryState({
       journalStatus: 'absent', locks: report.locks,
