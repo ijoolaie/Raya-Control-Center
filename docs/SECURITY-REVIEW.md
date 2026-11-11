@@ -905,3 +905,38 @@ Verification:
 - Push Security Scans run [42980054018](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980054018) and Pull Request Security Scans run [42980061837](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980061837) passed CodeQL JavaScript analysis and Gitleaks.
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+
+## SEC-019 — Restore rollback publication could overwrite an existing path
+
+Severity: **Medium**
+
+Status: **Remediated; exact-head CI and Security Scans passed**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test-support/restore-fault-worker.js`
+- `test-support/maintenance-temp-collision-worker.js`
+- `test/database-maintenance.test.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- Restore generated a UUID-shaped rollback path and moved the live database with `renameSync(destination, rollback)`. On POSIX, rename may replace an existing target. The rollback path is recorded in the published journal before the move, so another process with write access to the database directory could create that path after journal publication but before the move.
+- The automatic rollback path also used `renameSync(rollback, destination)` after checking that the destination was absent. A competing destination could appear between the check and rename, creating an overwrite race on POSIX.
+
+Impact:
+- A colliding file at the rollback path could be replaced by the live database. During automatic rollback, a destination created after the existence check could likewise be overwritten. Both behaviors violated the no-replacement rule used elsewhere in Backup/Restore publication.
+
+Remediation:
+- Restore now publishes the original database at the rollback path with `linkSync`, which fails if the rollback target already exists, and only then unlinks the live name. It never replaces a colliding rollback artifact.
+- If a process stops after the rollback hard link is published but before the live name is unlinked, both names and the journal remain. Inspection classifies the state as ambiguous and takes no automatic action.
+- Automatic rollback now republishes the rollback link at the live path with the same no-replace hard-link operation, flushes that directory entry, and only then unlinks the redundant rollback name. A concurrent destination is not replaced.
+- Added deterministic rollback-path collision coverage, a child-process crash boundary between hard-link publication and live-name removal, and updated rollback/directory-fsync fault injection to exercise the new transitions.
+
+Verification:
+- Implementation and regression-test head: `6247a0d0eafd13c349c87424f2c57b134d547ab4`.
+- Push CI run [42980790081](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980790081) and Pull Request CI run [42980796168](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980796168) passed Node 24/26 on Linux/Windows (4/4 jobs each).
+- Linux: 169 passed, 0 failed for each Node version. Windows: 165 passed, 4 platform-specific skips, 0 failed for each Node version.
+- Push Security Scans run [42980790130](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980790130) and Pull Request Security Scans run [42980796152](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42980796152) passed CodeQL JavaScript analysis and Gitleaks.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
