@@ -1468,6 +1468,43 @@ test('backup does not overwrite a destination created after preflight validation
   }
 });
 
+test('backup refuses a source path replaced between preflight and SQLite open', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-source-race-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const replacement = database + '.replacement';
+  let db;
+  let replacementDb;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.source.original' });
+    db.close();
+    db = null;
+
+    replacementDb = new DatabaseSync(replacement);
+    replacementDb.exec("PRAGMA user_version = 1; CREATE TABLE replacement_marker (value TEXT NOT NULL); INSERT INTO replacement_marker VALUES ('different valid database');");
+    replacementDb.close();
+    replacementDb = null;
+
+    const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [fileURLToPath(worker), database, backup, 'source-replaced-before-open'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.message, /Backup source changed while opening/);
+    assert.equal(existsSync(backup), false, 'a snapshot of the replacement database must not be published');
+    assert.equal(existsSync(database + '.original'), true, 'the originally selected source file remains preserved');
+    assert.equal(existsSync(database), true, 'the replacement path remains untouched for investigation');
+    db = openDatabase(database + '.original');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name = 'replacement_marker'").get().count, 0);
+  } finally {
+    if (db) db.close();
+    if (replacementDb) replacementDb.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('backup remains a transactionally consistent snapshot during a concurrent WAL commit', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-concurrent-wal-'));
   const database = join(directory, 'source.sqlite');
