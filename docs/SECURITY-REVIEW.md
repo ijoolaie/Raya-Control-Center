@@ -789,3 +789,31 @@ Verification context:
 - Exact PR head `2e2553587ed7f418036c65eb28fea14dc2313609` documentation-sync CI run [42964949293](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42964949293) passed Node 24/26 on Linux/Windows (4/4 jobs).
 - Exact-head Security Scans run [42964949299](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42964949299) passed CodeQL JavaScript analysis and Gitleaks.
 - Owner-led AI-assisted internal review only; not an independent audit, penetration test, certification, or proof of security. API remains loopback-only. PR #1 remains Open, Draft, and Unmerged.
+
+
+## SQLite schema-version and migration-safety checkpoint — 2026-11-11
+
+Review target: PR #1 implementation head `2f11e9c5160d1d806b419de9eb66e3a29e7df99b`.
+
+Reviewed paths:
+- `src/db.js`: schema-version validation, migration transaction boundaries, and database-open ordering.
+- `src/database-maintenance.js`: backup snapshot schema validation.
+- `test/db-migrations.test.js` and `test/database-maintenance.test.js`: future-version rejection, migration rollback, journal-mode preservation, and backup/restore schema-version assertions.
+
+Observations and changes:
+- `migrate()` rejects negative and newer-than-supported `PRAGMA user_version` values before applying migrations. Rejected future-version databases are not partially migrated.
+- `openDatabase()` now validates/migrates before switching a file-backed database to WAL. A regression verifies that opening a future-version database leaves both its schema version and its existing DELETE journal mode unchanged.
+- A migration-failure regression creates a conflict at the second DDL statement in migration 2 and verifies the first DDL statement is rolled back, the pre-existing conflicting trigger remains, and `user_version` does not advance.
+- Exported `LATEST_SCHEMA_VERSION` from the migration source of truth and reused it in backup snapshot validation and backup/restore test assertions. This removes the duplicated hard-coded supported-version ceiling.
+- Existing backup/restore behavior remains conservative: schema validation happens before replacing the destination, and restore recovery artifacts are not automatically removed when a later durability/cleanup step fails.
+
+Findings and limitations:
+- The reviewed paths now consistently use the migration list as the supported schema-version source. No additional confirmed migration or backup-version mismatch was found in this focused pass.
+- This is bounded source inspection plus regression coverage; it does not establish safety against arbitrary filesystem compromise, power loss on every platform, or every malformed SQLite database.
+- No local test run was performed for this checkpoint. Do not represent CI as local or manual acceptance.
+
+Verification:
+- Exact PR head `2f11e9c5160d1d806b419de9eb66e3a29e7df99b`.
+- CI run [42967844083](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42967844083) passed Node 24/26 on Linux/Windows (4/4 jobs).
+- Security Scans run [42967844105](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42967844105) passed CodeQL JavaScript analysis and Gitleaks.
+- Owner-led AI-assisted internal review only; not an independent audit, penetration test, certification, or proof of security.
