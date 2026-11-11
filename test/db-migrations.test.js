@@ -109,7 +109,7 @@ test('openDatabase rejects a future schema before changing file permissions or j
 
     assert.throws(
       () => openDatabase(filename),
-      /Unsupported database schema version 7; this build supports versions 0\\.\\.6/
+      /Unsupported database schema version 7; this build supports versions 0\.\.6/
     );
 
     const verify = new DatabaseSync(filename);
@@ -126,4 +126,4 @@ test('openDatabase rejects a future schema before changing file permissions or j
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});;
+});
