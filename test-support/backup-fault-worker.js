@@ -15,7 +15,7 @@ DatabaseSync.prototype.exec = function (sql) {
     const snapshot = match[1].replaceAll("''", "'");
     fs.writeFileSync(marker, String(fs.statSync(dirname(snapshot)).mode & 0o777));
   }
-  if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
+  if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure', 'crash-after-publish'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
     if (!match) throw new Error('unexpected-vacuum-sql');
     const partialPath = match[1].replaceAll("''", "'");
@@ -28,6 +28,13 @@ if (mode === 'destination-race') {
   fs.linkSync = (source, target) => {
     if (target === destination) fs.writeFileSync(target, 'concurrent destination');
     return originalLink(source, target);
+  };
+}
+if (mode === 'crash-after-publish') {
+  fs.linkSync = (source, target) => {
+    const result = originalLink(source, target);
+    if (target === destination) process.exit(91);
+    return result;
   };
 }
 if (mode === 'cleanup-failure' || mode === 'vacuum-cleanup-failure') {
