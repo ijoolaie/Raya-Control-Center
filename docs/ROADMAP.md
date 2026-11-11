@@ -127,3 +127,5 @@ Never report completion based only on file creation.
 - [x] Reject unsupported SQLite schema versions before changing file permissions or journal mode; centralize the latest supported schema version across migration and Backup/Restore validation (2026-11-11).
 
 - [x] SEC-018: restrict Backup/Restore temporary cleanup to artifacts created by the current operation; preserve UUID-shaped regular files and unexpected staging contents; add collision/race regressions (2026-11-11).
+
+- [x] SEC-019: replace overwrite-capable Restore rollback renames with no-replace hard-link transitions; cover rollback-path collisions and the intermediate crash state (2026-11-11).
