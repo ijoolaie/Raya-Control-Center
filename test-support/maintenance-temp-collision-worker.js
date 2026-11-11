@@ -17,6 +17,15 @@ if (mode === 'backup-unexpected-temp-entry') {
     return result;
   };
 }
+if (mode === 'restore-rollback-collision') {
+  const originalLink = fs.linkSync;
+  fs.linkSync = (source, target) => {
+    if (source === database && target.startsWith(database + '.pre-restore-')) {
+      fs.writeFileSync(target, 'preserve-rollback-collision', { flag: 'wx' });
+    }
+    return originalLink(source, target);
+  };
+}
 if (mode === 'restore-stage-collision') {
   const originalCopyFile = fs.copyFileSync;
   fs.copyFileSync = (source, target, flags) => {
