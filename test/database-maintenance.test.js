@@ -211,6 +211,83 @@ test('restore inspect flags unsupported journal versions and destination mismatc
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('maintenance temp collisions never delete artifacts not created by this operation', () => {
+  const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-maintenance-temp-collision-'));
+  const backupSource = join(directory, 'backup-source.sqlite');
+  const backupDestination = join(directory, 'backup.sqlite');
+  const backupUuid = '11111111-1111-4111-8111-111111111111';
+  const backupCollisionDirectory = join(directory, '.backup.sqlite.' + backupUuid + '.tmp');
+  const backupCollisionMarker = join(backupCollisionDirectory, 'preserve.txt');
+  const restoreSource = join(directory, 'restore-source.sqlite');
+  const restoreBackup = join(directory, 'restore-backup.sqlite');
+  const journalTarget = join(directory, 'journal-target.sqlite');
+  const journalUuid = '22222222-2222-4222-8222-222222222222';
+  const journalCollision = journalTarget + '.restore-journal.json.' + journalUuid + '.tmp';
+  const stagedTarget = join(directory, 'staged-target.sqlite');
+  const stagedUuid = '33333333-3333-4333-8333-333333333333';
+  const stagedCollision = join(directory, '.staged-target.sqlite.' + stagedUuid + '.restore');
+  let db;
+  try {
+    db = openDatabase(backupSource);
+    new ControlCenter(db).createTask({ type: 'temp.collision.backup.source' });
+    db.close();
+    db = null;
+    mkdirSync(backupCollisionDirectory);
+    writeFileSync(backupCollisionMarker, 'do-not-delete');
+    let result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'backup', backupSource, backupDestination, JSON.stringify([backupUuid])
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).ok, false);
+    assert.equal(readFileSync(backupCollisionMarker, 'utf8'), 'do-not-delete');
+    assert.equal(existsSync(backupDestination), false);
+
+    db = openDatabase(restoreSource);
+    new ControlCenter(db).createTask({ type: 'temp.collision.restore.snapshot' });
+    db.close();
+    db = null;
+    createDatabaseBackup(restoreSource, restoreBackup);
+
+    db = openDatabase(journalTarget);
+    new ControlCenter(db).createTask({ type: 'temp.collision.journal.target' });
+    db.close();
+    db = null;
+    writeFileSync(journalCollision, 'preserve-journal-temp');
+    result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'restore', journalTarget, restoreBackup,
+      JSON.stringify(['44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555', journalUuid])
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).ok, false);
+    assert.equal(readFileSync(journalCollision, 'utf8'), 'preserve-journal-temp');
+    assert.equal(existsSync(journalTarget + '.restore-journal.json'), false);
+    db = openDatabase(journalTarget);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'temp.collision.journal.target'), true);
+    db.close();
+    db = null;
+
+    db = openDatabase(stagedTarget);
+    new ControlCenter(db).createTask({ type: 'temp.collision.staged.target' });
+    db.close();
+    db = null;
+    writeFileSync(stagedCollision, 'preserve-staged-temp');
+    result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'restore', stagedTarget, restoreBackup,
+      JSON.stringify([stagedUuid, '66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777'])
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).ok, false);
+    assert.equal(readFileSync(stagedCollision, 'utf8'), 'preserve-staged-temp');
+    assert.equal(existsSync(stagedTarget + '.restore-journal.json'), false);
+    db = openDatabase(stagedTarget);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'temp.collision.staged.target'), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('SQLite backup captures committed WAL data and restores a validated database', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-'));
   const database = join(directory, 'live.sqlite');
