@@ -6,8 +6,21 @@ import { createDatabaseBackup } from '../src/database-maintenance.js';
 
 const [database, destination, mode, marker] = process.argv.slice(2);
 const originalExec = DatabaseSync.prototype.exec;
+const originalLstat = fs.lstatSync;
 const originalLink = fs.linkSync;
 const originalUnlink = fs.unlinkSync;
+if (mode === 'source-replaced-before-open') {
+  let replaced = false;
+  fs.lstatSync = (target, options) => {
+    const result = originalLstat(target, options);
+    if (target === database && options?.bigint === true && !replaced) {
+      fs.renameSync(database, database + '.original');
+      fs.renameSync(database + '.replacement', database);
+      replaced = true;
+    }
+    return result;
+  };
+}
 DatabaseSync.prototype.exec = function (sql) {
   if (mode === 'concurrent-write' && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
@@ -15,7 +28,7 @@ DatabaseSync.prototype.exec = function (sql) {
     const snapshot = match[1].replaceAll("''", "'");
     fs.writeFileSync(marker, String(fs.statSync(dirname(snapshot)).mode & 0o777));
   }
-  if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure', 'crash-after-publish'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
+  if (!['destination-race', 'concurrent-write', 'cleanup-failure', 'sync-failure', 'crash-after-publish', 'source-replaced-before-open'].includes(mode) && sql.startsWith('VACUUM INTO ')) {
     const match = sql.match(/^VACUUM INTO '((?:''|[^'])*)'$/);
     if (!match) throw new Error('unexpected-vacuum-sql');
     const partialPath = match[1].replaceAll("''", "'");
