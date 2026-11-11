@@ -1,9 +1,9 @@
-### SEC-012 - Runtime retained and exposed an unnecessary plaintext Operator token Internal Security Review Preparation
+# Internal Security Review Preparation
 
-Status: in progress  
+Status: owner-led internal review completed; residual risks recorded
 Review type: internal code and test inspection; **not an independent security review**  
-Review date: 2026-11-07  
-Reviewed implementation commit: d4eb172ad7ea704b2cae16884b88fcf6b309fb35
+Review date: 2026-11-11
+Review baseline and subsequent checkpoints: see exact commit SHAs recorded in each verification section.
 
 ## Scope
 
@@ -172,7 +172,7 @@ The WAL recovery regression launches a child process, opens an immediate write t
 
 ## Gate
 
-Phase 4 security work remains **in progress** while the remaining owner/operator-specific hardening and acceptance items are unresolved. This register records an owner-led AI-assisted review; it is not an independent audit, penetration test, or certification. A third-party review is optional and is not a project or merge gate. The API remains loopback-only as an explicit product/security boundary; this restriction does not depend on a third-party review.
+Phase 4 owner-led security hardening and acceptance items are complete for the documented local-only scope. Confirmed findings have recorded dispositions, the actual repository data directory ACLs are verified, and the shutdown drain/forced-close path now has an integration regression. Residual risks and platform limits remain documented below. This register records an owner-led AI-assisted review; it is not an independent audit, penetration test, or certification. A third-party review is optional and is not a project or merge gate. The API remains loopback-only as an explicit product/security boundary.
 
 Backup temporary-file handling: failed VACUUM INTO operations remove partial snapshots in an error path. After a maintenance lock is acquired, the next operation removes only regular files matching the exact destination-specific UUID temp pattern; symlinks, directories, and preserved .pre-restore-* rollback files are not removed. A forced crash can leave a stale maintenance lock, which still requires operator verification before removal.
 
@@ -675,7 +675,7 @@ Verification:
 - **Platform durability:** Windows parent-directory fsync is not available through the portable Node API used here. The project does not claim universal power-loss durability.
 - **External side effects:** the Control Center cannot prove a prior Worker stopped or that an external action did not occur before a Task is requeued. The Operator attestations are explicit human decisions, not machine verification.
 - **Remote exposure:** remote binding, tunnels, reverse proxies, and port forwarding remain disabled and out of scope.
-- **Review status at this checkpoint:** the owner-led AI-assisted passes for dashboard DOM/client-secret handling, CLI/Worker credential lifecycle, HTTP authorization revalidation, capability routing, and task/lease concurrency are recorded in the dated checkpoints below. These are bounded source-and-regression reviews, not exhaustive audits. Remaining operator-specific work is applying and verifying NTFS ACLs on the actual data and backup directories; forced termination during the HTTP shutdown drain window also remains untested.
+- **Review status at this checkpoint:** owner-led AI-assisted passes for dashboard DOM/client-secret handling, CLI/Worker credential lifecycle, HTTP authorization revalidation, capability routing, task/lease concurrency, actual Windows data ACLs, and HTTP shutdown drain/forced-close behavior are recorded in the dated checkpoints below. These are bounded source-and-regression reviews, not exhaustive audits. A separate backup directory did not exist during ACL verification; secure any future backup directory before use.
 
 ### Verification and owner decision
 
@@ -1045,3 +1045,12 @@ Verification:
 - Adjacent existing regressions cover declared and chunked oversized bodies, incomplete-body disconnects, keep-alive limits, and bounded pipelining. No new parser implementation was added; Node's built-in HTTP parser remains responsible for HTTP syntax/framing rejection.
 - No confirmed exploitable issue was identified in this bounded review. This is source inspection plus existing regression/CI evidence, not HTTP parser fuzzing, an independent audit, or proof against every parser differential. API remains loopback-only.
 - Review baseline: PR #1 head `88194b5813d46f076db14bbb9043baee92788721`; the documentation follow-up commit `7a307a066b77b508f164f0a547f96bd4f68a64d1` passed all Node 24/26 Linux/Windows checks, CodeQL, and Gitleaks.
+
+## HTTP shutdown drain and forced-close verification - 2026-11-11
+
+- Closed the previously untested owner/operator acceptance item for forced termination during the HTTP shutdown drain window.
+- Added an integration regression that opens a real loopback HTTP connection, begins an authenticated request body, leaves the body incomplete, and invokes the runtime shutdown path.
+- The test confirms the active request is allowed to remain during the 10-second drain window, then closeAllConnections() closes the stuck connection; shutdown completes, SQLite can be reopened, and the runtime lock is released.
+- Focused runtime tests: 7/7 passed. Full local Windows suite: 169 passed, 4 skipped, 0 failed (173 total); npm run check and git diff --check passed.
+- Local Node version is 22.23.2, below the declared Node >=24.15.0 engine; this is supplemental diagnostic evidence. Supported-runtime CI for the exact commit is required before marking this checkpoint CI-verified.
+- This tests the runtime shutdown implementation directly; it does not claim a Windows OS-level forced process termination test or exhaustive shutdown fault injection.

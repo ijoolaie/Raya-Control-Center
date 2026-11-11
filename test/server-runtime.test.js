@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
+import { createServer, connect } from 'node:net';
 import { openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { startControlCenter } from '../src/server-runtime.js';
@@ -247,6 +248,53 @@ test('startup listener failure closes SQLite and releases the runtime lock', asy
     assert.equal(occupiedRuntime.server.listening, true, 'the existing listener must remain available');
   } finally {
     if (occupiedRuntime?.server.listening) await occupiedRuntime.shutdown();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+
+test('runtime force-closes a stuck active HTTP request after the shutdown drain window', { timeout: 20_000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-server-forced-shutdown-'));
+  const databasePath = join(directory, 'forced-shutdown.sqlite');
+  const operatorToken = 'forced-shutdown-test-operator-token-'.repeat(2);
+  let runtime;
+  let socket;
+  let socketError;
+  try {
+    runtime = await startControlCenter({ databasePath, port: 0, operatorToken });
+    const port = runtime.server.address().port;
+    socket = connect({ host: '127.0.0.1', port });
+    socket.on('error', error => { socketError = error; });
+    await once(socket, 'connect');
+    const socketClosed = once(socket, 'close');
+    socket.write(
+      'POST /control/v1/tasks HTTP/1.1\r\n' +
+      'Host: 127.0.0.1\r\n' +
+      'Authorization: Bearer ' + operatorToken + '\r\n' +
+      'Content-Type: application/json\r\n' +
+      'Content-Length: 100\r\n\r\n' +
+      '{'
+    );
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('shutdown did not force-close the active request')), 15_000);
+      runtime.shutdown().then(() => { clearTimeout(timer); resolve(); }, error => { clearTimeout(timer); reject(error); });
+    });
+
+    assert.equal(runtime.server.listening, false);
+    await Promise.race([socketClosed, new Promise((_, reject) => setTimeout(() => reject(new Error('client socket did not observe forced close')), 2_000))]);
+    assert.equal(socket.destroyed, true, 'the stuck client socket must be destroyed');
+    assert.ok(!socketError || socketError.code === 'ECONNRESET');
+    assert.equal(inspectDatabaseFileLock(databasePath + '.runtime.lock').active, false);
+
+    const reopened = openDatabase(databasePath);
+    assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 6);
+    reopened.close();
+    runtime = undefined;
+  } finally {
+    socket?.destroy();
+    if (runtime?.server.listening) await runtime.shutdown();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
