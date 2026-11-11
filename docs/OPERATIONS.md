@@ -102,7 +102,7 @@ The blanket revocation is intentional: the restored database cannot identify whi
 
 The database, WAL/SHM sidecars, and backups contain sensitive application state. On Windows, the default NTFS ACL inherited from a broadly writable parent directory may allow other local accounts to read or modify these files. Inspect the configured data directory and any separate backup directory before using the application with real data.
 
-An opt-in helper is provided for a dedicated data directory. Stop the Control Center and all workers first, close any process using files in the directory, then run this from the repository root:
+An opt-in helper is provided for a dedicated data directory. Open an elevated PowerShell session (Run as administrator), stop the Control Center and all workers, and close any process using files in the directory before running this from the repository root:
 
 ```powershell
 .\scripts\secure-data-acl.ps1 -Path .\.data

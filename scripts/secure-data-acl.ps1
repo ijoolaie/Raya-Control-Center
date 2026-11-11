@@ -67,12 +67,55 @@ $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
 $administratorsSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
 $principals = @($userSid, $systemSid, $administratorsSid)
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class RayaControlCenterDaclNative {
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "SetFileSecurityW")]
+    public static extern bool SetFileSecurity(string path, uint securityInformation, byte[] securityDescriptor);
+}
+'@
+
+function Set-DaclOnlySecurityDescriptor {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Sddl,
+        [Parameter(Mandatory = $true)][bool]$IsDirectory,
+        [Parameter(Mandatory = $true)][bool]$IsProtected
+    )
+    $descriptor = if ($IsDirectory) {
+        [Security.AccessControl.DirectorySecurity]::new()
+    } else {
+        [Security.AccessControl.FileSecurity]::new()
+    }
+    $descriptor.SetSecurityDescriptorSddlForm($Sddl, [Security.AccessControl.AccessControlSections]::Access)
+    $securityInformation = [uint32]4 # DACL_SECURITY_INFORMATION
+    if ($IsProtected) { $securityInformation = [uint32]2147483652 } # PROTECTED_DACL_SECURITY_INFORMATION | DACL
+    else { $securityInformation = [uint32]536870916 } # UNPROTECTED_DACL_SECURITY_INFORMATION | DACL
+    if (-not [RayaControlCenterDaclNative]::SetFileSecurity($LiteralPath, $securityInformation, $descriptor.GetSecurityDescriptorBinaryForm())) {
+        $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw (New-Object ComponentModel.Win32Exception($code))
+    }
+}
+
+function Get-DaclSnapshot {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $current = Get-Acl -LiteralPath $LiteralPath
+    return [pscustomobject]@{
+        Sddl = $current.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+        IsProtected = $current.AreAccessRulesProtected
+    }
+}
+
 function Set-RestrictedAcl {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
         [Parameter(Mandatory = $true)][bool]$IsDirectory
     )
-    $acl = Get-Acl -LiteralPath $LiteralPath
+    $current = Get-Acl -LiteralPath $LiteralPath
+    $sddl = $current.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    $acl = if ($IsDirectory) { [Security.AccessControl.DirectorySecurity]::new() } else { [Security.AccessControl.FileSecurity]::new() }
+    $acl.SetSecurityDescriptorSddlForm($sddl, [Security.AccessControl.AccessControlSections]::Access)
     # Discard inherited and explicit access entries, then add only the three trusted principals.
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($existingRule in @($acl.Access)) {
@@ -93,7 +136,8 @@ function Set-RestrictedAcl {
         )
         [void]$acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $LiteralPath -AclObject $acl
+    $restrictedSddl = $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    Set-DaclOnlySecurityDescriptor -LiteralPath $LiteralPath -Sddl $restrictedSddl -IsDirectory $IsDirectory -IsProtected $true
 
     $verified = Get-Acl -LiteralPath $LiteralPath
     if (-not $verified.AreAccessRulesProtected) {
@@ -111,7 +155,11 @@ $targets = @()
 foreach ($directory in $directories) { $targets += [pscustomobject]@{ Path = $directory.FullName; IsDirectory = $true } }
 foreach ($file in $files) { $targets += [pscustomobject]@{ Path = $file.FullName; IsDirectory = $false } }
 $originalAcls = @{}
-foreach ($item in $targets) { $originalAcls[$item.Path] = Get-Acl -LiteralPath $item.Path }
+$targetByPath = @{}
+foreach ($item in $targets) {
+    $originalAcls[$item.Path] = Get-DaclSnapshot -LiteralPath $item.Path
+    $targetByPath[$item.Path] = $item
+}
 $changed = [Collections.Generic.List[string]]::new()
 try {
     foreach ($item in $targets) {
@@ -123,8 +171,11 @@ try {
     $rollbackErrors = [Collections.Generic.List[string]]::new()
     for ($index = $changed.Count - 1; $index -ge 0; $index--) {
         $changedPath = $changed[$index]
-        try { Set-Acl -LiteralPath $changedPath -AclObject $originalAcls[$changedPath] }
-        catch { $rollbackErrors.Add($changedPath + ': ' + $_.Exception.Message) }
+        try {
+            $item = $targetByPath[$changedPath]
+            $snapshot = $originalAcls[$changedPath]
+            Set-DaclOnlySecurityDescriptor -LiteralPath $changedPath -Sddl $snapshot.Sddl -IsDirectory $item.IsDirectory -IsProtected $snapshot.IsProtected
+        } catch { $rollbackErrors.Add($changedPath + ': ' + $_.Exception.Message) }
     }
     if ($rollbackErrors.Count -gt 0) {
         throw ('ACL update failed and rollback was incomplete. Original error: ' + $applyError.Exception.Message + '. Rollback errors: ' + ($rollbackErrors -join ' | '))
