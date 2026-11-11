@@ -80,7 +80,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Complete focused owner-led AI-assisted security review of capability routing; record tested cases, findings, and owner decisions in `docs/SECURITY-REVIEW.md` (2026-11-11).
 
 ## Phase 4 — Dashboard and operational hardening
-**Status: In progress**
+**Status: Verified**
 - [x] Operator-authenticated dashboard for task, participant, health, and audit inspection; blocked-task history inspection and explicitly confirmed, API-revalidated manual requeue. No payload/result rendering or automatic retry.
 - [x] Participant detail inspector with creation/update/last-seen metadata and append-only registration, capability-change, and revocation history; revocation history identifies tasks blocked by the action. Event details are rendered from explicit allowlisted fields only; credentials are never displayed.
 - [x] Operator-only Participant capability editor with sorted before/after diff, identifier/duplicate/64-item validation, explicit acknowledgement, final native confirmation, and append-only audit through the existing API. Editing is hidden for revoked/disabled Participants, and the API transaction rejects updates unless the Participant is still active; changes affect future claims only and preserve active Leases. Dashboard DOM-harness regression covers preview, rejection of duplicate identifiers, confirmation, API request, refreshed details, and audit history.
@@ -91,6 +91,7 @@ This phase does not authorize development in either external repository. Raya-Ag
 - [x] Backup, restore, and recovery tests for WAL snapshots and corrupt/unsafe restore inputs.
 - [x] Upgrade and packaging review: private distribution policy, runtime matrix, package allowlist, and bundle contents documented and verified.
 - [x] Remote exposure remains disabled and out of scope; retain the loopback-only boundary under the current project constraints.
+- [x] Apply and verify restrictive Windows DACLs on the actual repository .data directory and all four present files (2026-11-11); no separate backup directory existed, so secure any future backup directory before use.
 
 ## Phase 5 — Optional remote/multi-machine operation
 **Status: Deferred**
