@@ -174,6 +174,22 @@ function Set-RestrictedAcl {
     if (Compare-Object -ReferenceObject $expectedSids -DifferenceObject $actualSids) {
         throw ('Unexpected ACL principals remain on: ' + $LiteralPath)
     }
+    if ($verified.Access.Count -ne $expectedSids.Count) {
+        throw ('Unexpected number of access rules remain on: ' + $LiteralPath)
+    }
+    $expectedInheritance = if ($IsDirectory) {
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    } else {
+        [Security.AccessControl.InheritanceFlags]::None
+    }
+    foreach ($rule in $verified.Access) {
+        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+            $rule.InheritanceFlags -ne $expectedInheritance -or
+            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) {
+            throw ('Unexpected access rule semantics remain on: ' + $LiteralPath)
+        }
+    }
 }
 
 # Capture original descriptors before the first write so a failed application can be rolled back.

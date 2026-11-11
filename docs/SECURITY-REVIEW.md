@@ -1083,3 +1083,12 @@ Verification:
 - Full local Windows suite: 169 passed, 4 skipped, 0 failed (173 total); `npm run check` and `git diff --check` passed. Local Node 22.23.2 remains below the declared Node >=24.15.0 engine; supported-runtime CI is authoritative.
 - This verifies helper behavior on disposable NTFS test trees; it does not verify an actual operator-created backup directory or its parent ACLs. Any real backup destination must still be secured before real backups are stored.
 - Classification: bounded regression hardening; not an independent audit, penetration test, or certification.
+## Windows ACL verification semantics — 2026-11-11
+
+- Tightened scripts/secure-data-acl.ps1 post-application verification. In addition to protected DACL state and the exact trusted SID set, it now requires exactly one access rule per trusted principal; every rule must be Allow + FullControl, with ContainerInherit | ObjectInherit on directories, no inheritance on files, and no propagation flags.
+- Extended both disposable Windows ACL fixtures (the primary data tree and separately located backup tree) to independently assert the same access-rule semantics, not merely the principal names.
+- Windows PowerShell 5.1 disposable fixture passed, including locked-file rejection, external hard-link rejection before mutation, -WhatIf, recursive data-tree verification, and separate-backup parent/sibling scope preservation.
+- No live .data, backup directory, or backup content was read or modified by this regression.
+- Local Windows Node test suite: 169 passed, 4 skipped, 0 failed (173 total); npm run check and git diff --check passed. Local Node 22.23.2 remains below the declared Node >=24.15.0 engine; supported-runtime CI is authoritative.
+- This verifies the helper's resulting DACL semantics on disposable local NTFS fixtures. It does not verify a real operator-created backup destination, non-NTFS filesystems, or hostile concurrent directory-entry races.
+- Classification: bounded verification hardening; not an independent audit, penetration test, or certification.

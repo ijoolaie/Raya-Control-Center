@@ -51,6 +51,20 @@ try {
         if (-not $acl.AreAccessRulesProtected) { throw ('Inheritance was not disabled: ' + $item.FullName) }
         $actual = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
         if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) { throw ('Unexpected principals on ' + $item.FullName + ': ' + ($actual -join ', ')) }
+        if ($acl.Access.Count -ne $expected.Count) { throw ('Unexpected access-rule count on ' + $item.FullName) }
+        $expectedInheritance = if ($item.PSIsContainer) {
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        } else {
+            [Security.AccessControl.InheritanceFlags]::None
+        }
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+                $rule.InheritanceFlags -ne $expectedInheritance -or
+                $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) {
+                throw ('Unexpected access-rule semantics on ' + $item.FullName)
+            }
+        }
     }
     # A separately configured backup directory must be securable without changing its parent or the data sibling.
     $separateData = Join-Path $separateRoot 'data'
@@ -71,6 +85,21 @@ try {
         if (-not $acl.AreAccessRulesProtected) { throw ('Separate backup ACL inheritance was not disabled: ' + $pathToVerify) }
         $actual = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
         if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) { throw ('Unexpected principals on separate backup item ' + $pathToVerify) }
+        if ($acl.Access.Count -ne $expected.Count) { throw ('Unexpected access-rule count on separate backup item ' + $pathToVerify) }
+        $separateItem = Get-Item -LiteralPath $pathToVerify
+        $expectedInheritance = if ($separateItem.PSIsContainer) {
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        } else {
+            [Security.AccessControl.InheritanceFlags]::None
+        }
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+                $rule.InheritanceFlags -ne $expectedInheritance -or
+                $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) {
+                throw ('Unexpected access-rule semantics on separate backup item ' + $pathToVerify)
+            }
+        }
     }
     Write-Output 'PASS: locked files, external hard links, WhatIf, and isolated separate-backup ACL scope are safe; only current user, SYSTEM, and local Administrators have access on secured trees.'
     Write-Output 'Verified separate backup directory and file; parent and sibling data ACLs remained unchanged.'
