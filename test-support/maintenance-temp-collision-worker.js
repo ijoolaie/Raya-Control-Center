@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 
 const [mode, database, backup, uuidList] = process.argv.slice(2);
@@ -7,6 +8,13 @@ crypto.randomUUID = () => {
   if (!uuids.length) throw new Error('test-uuid-sequence-exhausted');
   return uuids.shift();
 };
+if (mode === 'restore-stage-collision') {
+  const originalCopyFile = fs.copyFileSync;
+  fs.copyFileSync = (source, target, flags) => {
+    fs.writeFileSync(target, 'preserve-staged-temp', { flag: 'wx' });
+    return originalCopyFile(source, target, flags);
+  };
+}
 syncBuiltinESMExports();
 
 try {
