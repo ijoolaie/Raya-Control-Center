@@ -1052,5 +1052,5 @@ Verification:
 - Added an integration regression that opens a real loopback HTTP connection, begins an authenticated request body, leaves the body incomplete, and invokes the runtime shutdown path.
 - The test confirms the active request is allowed to remain during the 10-second drain window, then closeAllConnections() closes the stuck connection; shutdown completes, SQLite can be reopened, and the runtime lock is released.
 - Focused runtime tests: 7/7 passed. Full local Windows suite: 169 passed, 4 skipped, 0 failed (173 total); npm run check and git diff --check passed.
-- Local Node version is 22.23.2, below the declared Node >=24.15.0 engine; this is supplemental diagnostic evidence. Supported-runtime CI for the exact commit is required before marking this checkpoint CI-verified.
+- Local Node version is 22.23.2, below the declared Node >=24.15.0 engine; this is supplemental diagnostic evidence. Exact-head GitHub Actions for commit 1dc0031c4dd755d357c379e423f3875c61a7d388 passed all 13 check runs: both Node 24/26 x Linux/Windows matrices, CodeQL, and Gitleaks.
 - This tests the runtime shutdown implementation directly; it does not claim a Windows OS-level forced process termination test or exhaustive shutdown fault injection.
