@@ -1001,3 +1001,37 @@ Verification:
 - The exact current PR head `1ea309e22bfdc7df2df40b1d8a2066ea8fed5a76` passed Node 24/26 on Linux/Windows, CodeQL, and Gitleaks.
 - No local or manual acceptance is claimed.
 - Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
+
+
+## SEC-022 — Backup source path could be replaced between preflight and SQLite open
+
+Severity: **Low**
+
+Status: **Remediated; exact-head CI and Security Scans pending**
+
+Affected paths:
+- `src/database-maintenance.js`
+- `test-support/backup-fault-worker.js`
+- `test/database-maintenance.test.js`
+- `docs/RESTORE-RECOVERY.md`
+
+Observation:
+- Backup checked that the source path was a regular non-symbolic-link file, then later opened SQLite by pathname. A replacement between those operations could cause SQLite to open a different, independently valid database than the one checked during preflight.
+- A second replacement during `VACUUM INTO` could leave the selected pathname referring to a different file object than the open connection.
+
+Impact:
+- Backup could publish a valid snapshot of a different database than the one selected at preflight. The scenario requires local filesystem write access to the database parent; no remote exploit or privilege boundary bypass was established.
+
+Remediation:
+- Backup captures the source file's device/inode identity before opening SQLite and compares it immediately after connection creation.
+- It compares the file-object identity again after `VACUUM INTO`, before validating, flushing, and publishing the snapshot. Normal in-place SQLite writes retain the same file object and are not rejected.
+- Added deterministic fault injection that replaces the source pathname with a different valid SQLite database immediately after the initial identity read. The regression verifies Backup refuses to publish a snapshot and preserves both source files.
+- This is best-effort detection. It does not defend against a hostile same-user process capable of manipulating and restoring filesystem paths/identities; database parent directories must remain writable only by trusted principals.
+
+Verification:
+- Production change: `ec966aa8023286520c0a3fd876dd37ac176649bf`.
+- Fault worker: `1fba55558095f13b58b7c454b4b7deb747b356d0`.
+- Regression: `3d72cd0b4e31a901dce942f04091a71ff9262817`.
+- Exact-head Node 24/26 Linux/Windows CI, CodeQL, and Gitleaks are pending.
+- No local or manual acceptance is claimed.
+- Classification: owner-led AI-assisted internal review; not an independent audit, penetration test, or certification.
