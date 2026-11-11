@@ -242,6 +242,49 @@ test('backup cleanup preserves unexpected contents added to its owned staging di
   }
 });
 
+test('backup retry cleans staging left after a crash immediately following publication', () => {
+  const worker = new URL('../test-support/backup-fault-worker.js', import.meta.url);
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-publish-crash-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.publish.crash' });
+    db.close();
+    db = null;
+
+    const crashed = spawnSync(process.execPath, [
+      fileURLToPath(worker), database, backup, 'crash-after-publish', ''
+    ], { encoding: 'utf8' });
+    assert.equal(crashed.status, 91, crashed.stderr);
+    assert.equal(existsSync(backup), true, 'the atomically published backup survives worker termination');
+
+    const stagingNames = readdirSync(directory).filter(name =>
+      name.startsWith('.backup.sqlite.') && name.endsWith('.tmp'));
+    assert.equal(stagingNames.length, 1, 'the crash leaves one staging directory for the published hard link');
+    const stagedSnapshot = join(directory, stagingNames[0], 'snapshot.sqlite');
+    assert.equal(existsSync(stagedSnapshot), true);
+
+    db = openDatabase(backup);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'backup.publish.crash'), true,
+      'the published backup remains a readable database');
+    db.close();
+    db = null;
+
+    assert.throws(() => createDatabaseBackup(database, backup), /already exists/,
+      'the retry must still refuse to overwrite the published backup');
+    assert.equal(existsSync(stagedSnapshot), false,
+      'recognized stale staging hard link is cleaned before the existing-destination refusal');
+    assert.equal(existsSync(backup), true, 'cleanup must not remove the published backup');
+    db = openDatabase(backup);
+    assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'backup.publish.crash'), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore rollback publication never replaces a colliding rollback artifact', () => {
   const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-rollback-collision-'));
