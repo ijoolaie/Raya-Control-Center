@@ -3,9 +3,9 @@
 Status: approved, implemented, and committed on `bootstrap/project-foundation`. Capability routing, the Operator editor, active-Lease preservation, and isolated Chrome acceptance are recorded in `docs/ROADMAP.md` and `docs/SECURITY-REVIEW.md`. A focused owner-led AI-assisted security review checkpoint is recorded in the security register (2026-11-11).
 Scope: Raya Control Center repository only. This design does not authorize changes to Raya-Agent or Raya-MCP.
 
-## 1. Problem statement
+## 1. Original problem statement
 
-The current claim operation selects the highest-priority oldest queued Task without considering the claiming Participant's `kind` or capabilities. Every active Participant with `tasks:claim` competes for the same queue. This is a routing/compatibility limitation, not an authorization bypass. The consuming Worker must still validate Task type and payload before execution.
+Before capability-aware routing was implemented, the claim operation selected the highest-priority oldest queued Task without considering the claiming Participant's `kind` or capabilities. Every active Participant with `tasks:claim` competed for the same queue. This was a routing/compatibility limitation, not an authorization bypass. The consuming Worker must still validate Task type and payload before execution.
 
 ## 2. Goals
 
@@ -70,19 +70,19 @@ If no queued Task matches, return the existing empty-claim result (`claim: null`
 ## 8. Audit and operational behavior
 
 - Include capability declarations/requirements in the relevant Operator-visible records.
-- Record capability changes as append-only Participant events if an update operation is introduced.
+- Capability updates use the implemented Operator-only endpoint and are recorded as append-only `participant.capabilities_updated` events.
 - Do not put secrets or credentials in capability labels.
-- Do not add verbose per-poll “no matching task” audit events; this would create unbounded noise.
+- Do not add verbose per-poll "no matching task" audit events; this would create unbounded noise.
 - Preserve deterministic priority ordering among Tasks eligible for the same Participant.
 
-## 9. Compatibility and rollout
+## 9. Original implementation and rollout sequence (completed)
 
-1. Add migration with empty-array defaults; verify old databases upgrade and reopen correctly.
-2. Extend Operator registration/task creation inputs with optional arrays; old clients omit them and retain current behavior.
-3. Extend read models and API contract tests.
-4. Add capability-aware claim selection inside the existing transaction.
-5. Add tests for empty requirements, exact matching, multiple required capabilities (AND semantics), incompatible high-priority Task being skipped, two differently capable Participants competing, revocation/Lease invariants, and legacy rows.
-6. Update reference-worker examples and docs to demonstrate an explicitly provisioned capability without changing its execution allowlist.
+1. Additive migration with empty-array defaults; old databases upgrade and reopen correctly.
+2. Operator registration/task creation accept optional arrays; old clients may omit them and retain legacy behavior.
+3. Read models and API contract tests cover the capability fields.
+4. Capability-aware claim selection runs inside the existing transaction.
+5. Tests cover empty requirements, exact matching, multiple required capabilities (AND semantics), incompatible high-priority Task skipping, differently capable Participants competing, revocation/Lease invariants, and legacy rows.
+6. Reference-worker examples and docs demonstrate an explicitly provisioned capability without changing the execution allowlist.
 
 No remote exposure, external broker, automatic retry, or changes to other repositories are part of this proposal.
 
