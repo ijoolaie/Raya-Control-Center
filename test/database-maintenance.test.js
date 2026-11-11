@@ -127,7 +127,7 @@ test('restore inspect inventories rollback and staged artifacts when the journal
     assert.equal(report.journal.orphanedRestoreTemporaryFiles.length, 1);
     assert.equal(report.journal.orphanedRestoreTemporaryFiles[0].path, temporary);
     assert.equal(report.journal.orphanedTemporaryFiles.length, 1);
-    assert.equal(report.journal.orphanedTemporaryFiles[0].path, journalTemporary);
+    assert.equal(report.journal.orphanedTemporaryFiles[0], journalTemporary);
     assert.equal(report.recovery.state, 'no-journal-recovery-artifacts-present');
     assert.equal(report.recovery.automaticAction, 'none');
     assert.equal(report.recovery.observations.rollback, true);
