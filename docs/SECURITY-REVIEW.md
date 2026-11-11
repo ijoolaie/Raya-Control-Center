@@ -759,3 +759,33 @@ Verification:
 - `npm run check` and `git diff --check` passed. Local Node v22.23.2 is below the declared Node >=24.15.0 engine, so this is supplemental diagnostic evidence.
 - Supported-runtime Node 24/26 x Linux/Windows CI and CodeQL/Gitleaks scans are required for the exact remediation commit before marking this finding CI-verified.
 - Classification: owner-led AI-assisted internal review; not independent review, penetration testing, or certification.
+
+
+## Capability-routing security review checkpoint — 2026-11-11
+
+Review target: PR #1 head `2e2553587ed7f418036c65eb28fea14dc2313609` (documentation-only synchronization after the reviewed implementation commits).
+
+Reviewed paths:
+- `src/control-center.js`: capability validation/normalization, Participant registration, Operator capability update transaction, routing summary SQL, Task requirement persistence, and atomic claim selection.
+- `src/http-server.js`: Operator-only capability mutation and routing-summary routes, plus Operator-only Task creation and Participant registration.
+- `test/control-center.test.js`: existing regressions for incompatible high-priority Task skipping, legacy empty requirements, exact all-required matching, unmatched queue preservation, malformed/duplicate labels, routing-summary counts, and active-Lease preservation.
+- `test/http-server.test.js`: route-level authorization and capability mutation coverage.
+- `docs/TASK-ROUTING-DESIGN.md`: approved matching semantics and trust-boundary requirements.
+
+Review observations:
+- Capability labels are bounded, ASCII-validated, unique, sorted, and case-sensitive. Participant capabilities are capped at 64; Task requirements at 32.
+- The claim path re-reads the active Participant, verifies the stored token hash and `tasks:claim` scope inside `BEGIN IMMEDIATE`, then selects only queued Tasks whose complete required-capability set is contained in the Participant's stored capability JSON. The claim, Lease insert, assignment, and audit event are committed in the same transaction.
+- Empty Task requirements preserve legacy unrestricted routing. Incompatible higher-priority Tasks are skipped without mutation; no matching Task returns the existing empty-claim result.
+- Capability updates are Operator-authenticated at the HTTP boundary and transactionally reject non-active Participants. Updates append an audit event and affect future claims only; existing active Leases are not rewritten or revoked.
+- The routing summary counts queued Tasks with no active, claim-scoped, capability-compatible Participant. Its matching predicate mirrors the claim eligibility predicate.
+- No Participant-facing route or claim request field accepts caller-supplied capabilities as authority. Capability labels remain scheduling metadata, not execution authorization or a sandbox.
+
+Findings and limitations:
+- No confirmed capability-routing authorization bypass, claim-filter mismatch, or active-Lease regression was established in this focused review.
+- This checkpoint is source inspection plus existing regression coverage; it does not claim exhaustive testing of arbitrary database corruption or every possible SQLite JSON edge case. Capability routing does not establish Worker identity or safe execution.
+- No application source or test code changed in this checkpoint.
+
+Verification context:
+- Exact PR head `2e2553587ed7f418036c65eb28fea14dc2313609` documentation-sync CI run [42964949293](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42964949293) passed Node 24/26 on Linux/Windows (4/4 jobs).
+- Exact-head Security Scans run [42964949299](https://github.com/ijoolaie/Raya-Control-Center/actions/runs/42964949299) passed CodeQL JavaScript analysis and Gitleaks.
+- Owner-led AI-assisted internal review only; not an independent audit, penetration test, certification, or proof of security. API remains loopback-only. PR #1 remains Open, Draft, and Unmerged.
