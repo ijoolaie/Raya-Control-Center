@@ -24,6 +24,9 @@ test('Restore recovery state model is conservative across observed artifact comb
   const cases = [
     [{ ...base, journalStatus: 'absent' }, 'no-pending-restore'],
     [{ ...base, journalStatus: 'absent', locks: { runtime: artifact(true) } }, 'no-pending-restore-lock-present'],
+    [{ ...base, journalStatus: 'absent', artifacts: { destination: artifact(true), rollback: artifact(true) } }, 'no-journal-recovery-artifacts-present'],
+    [{ ...base, journalStatus: 'absent', artifacts: { destination: artifact(true), temporary: artifact(true) } }, 'no-journal-recovery-artifacts-present'],
+    [{ ...base, journalStatus: 'absent', artifacts: { inventoryComplete: false } }, 'no-pending-restore-artifact-state-unknown'],
     [{ ...base, journalStatus: 'malformed' }, 'manual-review-invalid-journal'],
     [{ ...base, locks: { runtime: artifact(true) } }, 'blocked-lock-present'],
     [{ ...base, artifacts: { ...base.artifacts, destination: artifact(false), rollback: artifact(true), temporary: artifact(true) } }, 'live-missing-rollback-present'],
@@ -96,6 +99,9 @@ test('restore inspect reports an absent journal without creating or changing fil
     assert.equal(report.journal.status, 'absent');
     assert.equal(report.recovery.state, 'no-pending-restore');
     assert.equal(report.database.exists, false);
+    assert.equal(report.journal.artifactInventoryComplete, true);
+    assert.deepEqual(report.journal.orphanedRollbackFiles, []);
+    assert.deepEqual(report.journal.orphanedRestoreTemporaryFiles, []);
     assert.deepEqual(readdirSync(directory), before);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -548,7 +554,7 @@ test('restore cleanup crash boundaries retain artifacts and classify released SQ
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   const scenarios = [
     { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'live-and-rollback-present-ambiguous' },
-    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-pending-restore' }
+    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-journal-recovery-artifacts-present' }
   ];
   for (const scenario of scenarios) {
     const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-cleanup-crash-'));
@@ -582,6 +588,7 @@ test('restore cleanup crash boundaries retain artifacts and classify released SQ
       }
       const report = inspectDatabaseRestore(database);
       assert.equal(report.recovery.state, scenario.state);
+      if (!scenario.journal) assert.equal(report.journal.orphanedRollbackFiles.length, 1);
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, true);
       assert.equal(report.recovery.observations.rollback, scenario.journal ? true : null);
