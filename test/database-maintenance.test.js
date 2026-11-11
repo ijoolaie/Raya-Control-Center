@@ -211,6 +211,37 @@ test('restore inspect flags unsupported journal versions and destination mismatc
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('backup cleanup preserves unexpected contents added to its owned staging directory', () => {
+  const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-backup-unexpected-staging-'));
+  const database = join(directory, 'source.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  const uuid = '88888888-8888-4888-8888-888888888888';
+  const temporaryDirectory = join(directory, '.backup.sqlite.' + uuid + '.tmp');
+  const unexpected = join(temporaryDirectory, 'unexpected.bin');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'backup.unexpected.staging' });
+    db.close();
+    db = null;
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'backup-unexpected-temp-entry', database, backup, JSON.stringify([uuid])
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.result.cleanupWarnings.length, 1);
+    assert.equal(outcome.result.cleanupWarnings[0].artifact, 'temporary');
+    assert.equal(outcome.result.cleanupWarnings[0].path, join(temporaryDirectory, 'snapshot.sqlite'));
+    assert.equal(existsSync(backup), true, 'the published backup remains available');
+    assert.equal(readFileSync(unexpected, 'utf8'), 'preserve-unexpected-entry');
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('maintenance temp collisions never delete artifacts not created by this operation', () => {
   const worker = new URL('../test-support/maintenance-temp-collision-worker.js', import.meta.url);
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-maintenance-temp-collision-'));
