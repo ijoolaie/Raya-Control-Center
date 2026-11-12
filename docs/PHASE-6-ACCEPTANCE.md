@@ -198,3 +198,87 @@ For any future operation that must reserve more than one database, use one share
 - Run the same tests on supported Windows and POSIX CI. Filesystems with unreliable SQLite locking or unsupported canonicalization remain outside the automatic-recovery support matrix.
 
 **Implementation boundary:** this is a proposed protocol, not a claim that current Backup/Restore already use sorted multi-lock acquisition. No lock code or runtime behavior is changed in this step.
+
+### Handle-based file identity adapters (proposed; design only)
+
+The current implementation has useful pathname diagnostics but no cross-platform handle-identity proof. Snapshot helpers use lstatSync; their device/inode and metadata values describe a directory entry at sampling time. A later open/copy can race with replacement. Parent-component checks and lock-path canonicalization also perform pathname walks that can become stale. These checks are defense-in-depth, not proof that the opened object is the intended directory entry.
+
+This adapter contract is a prerequisite for any future automatic Restore recovery. It does not approve any recovery state today.
+
+#### Common adapter contract
+
+Define a platform adapter with explicit capability reporting and a snapshot operation over an already-open handle:
+
+- openRegularFile(parentHandle, leafName, policy) returns an owned handle plus a snapshot, or fails closed. It must not fall back to ordinary path-based open when no-follow/reparse guarantees are unavailable.
+- snapshotHandle(handle) returns the immutable observation below. Every unavailable field is null; absence is never interpreted as safe.
+- verifyPathEntry(parentHandle, leafName, expectedSnapshot) verifies that the current directory entry still identifies the opened object.
+- verifyUnchanged(handle, beforeSnapshot) re-reads identity and mutation-sensitive metadata after hashing/copying. A mismatch or unsupported comparison means ineligible.
+- Keep handles open while identity is relied upon. Surface close errors.
+- Capability discovery is explicit and versioned. Check every capability required by the operation and filesystem.
+
+Normalized snapshot fields:
+
+| Field | Meaning |
+|---|---|
+| platform, adapterVersion | Adapter identity and protocol version |
+| objectType | Regular file / directory / other, determined from handle |
+| volumeOrDeviceId | Windows volume identity or POSIX device ID |
+| fileId | Stable native file identifier where exposed |
+| size, linkCount | Handle-derived byte length and hard-link count |
+| modifiedTime, changedTime, birthTime | Available high-resolution handle timestamps; otherwise null |
+| openFlags | Effective no-follow, access, sharing, and reparse policy |
+| parentIdentity | Identity of opened parent directory |
+| pathEntryIdentityBefore, pathEntryIdentityAfter | Entry identity observations bracketing operation |
+| filesystemType, filesystemCapabilities | Known filesystem and tested capability profile |
+| identityStable, noFollowProven, entryMatchProven | Explicit booleans; unknown is never true |
+
+The adapter distinguishes unavailable fields from queried zero values. File IDs are identity evidence, not content proof. SHA-256 plus byte length proves byte equality at hashing time, not provenance. Eligibility requires object relationship and expected digest, trusted-parent and reservation gates.
+
+#### POSIX adapter requirements
+
+- Open and retain the parent directory descriptor. Walk parent components without following symlinks where supported; verify each opened component with fstat and reject non-directories or unexpected filesystem transitions.
+- Open the leaf relative to the retained parent descriptor using openat with O_NOFOLLOW and restrictive access flags. O_NOFOLLOW protects the final component only; it does not secure an earlier pathname walk. Do not claim protection against platform-specific magic-link or mount behavior without tests.
+- Use fstat on the returned descriptor as authority for type, device, inode, size, link count, and timestamps. Reject non-regular files and unexpected link counts; where a single name is required, require link count exactly one.
+- Compare handle-derived device/inode with a no-follow directory-entry observation relative to the retained parent (fstatat with AT_SYMLINK_NOFOLLOW, or stronger statx identity where supported). Repeat after hashing and immediately before namespace transition. If entry identity changes or no-follow comparison is unavailable, mark ineligible.
+- Keep the parent descriptor open across checks and namespace changes. Prefer descriptor-relative rename/link/unlink operations; pathname re-resolution reintroduces parent replacement races.
+- Directory fsync is a separate durability capability. Identity verification does not imply namespace durability. Unsupported statx, descriptor-relative operations, or directory fsync combinations remain manual-review-only.
+
+Node's portable node:fs API exposes file descriptors and handle metadata, but not a complete portable descriptor-relative openat/fstatat/renameat protocol. Do not assume lstat(path) followed by open(path) closes the race. A native addon/helper or narrower proven platform implementation is required for the full contract.
+
+#### Windows adapter requirements
+
+- Use a native handle-opening implementation based on CreateFileW, with explicit FILE_FLAG_OPEN_REPARSE_POINT policy for inspecting the leaf and a defined directory-handle strategy for parent identity. Reject reparse points unless a separately specified and tested policy handles the exact tag.
+- Query identity and metadata from the opened handle using GetFileInformationByHandle and/or GetFileInformationByHandleEx, including volume serial/file ID, attributes, size, link count, and timestamps. Do not treat fs.stat(path) or a path-derived inode as a stable native file ID.
+- Define and test share modes. State whether concurrent read, write, and delete/rename opens are permitted while the handle is held. If the share policy cannot exclude conflicting mutation for the critical interval, that transition is ineligible.
+- Retain parent directory handles with required backup-semantics and reparse policy. Verify the leaf file ID relative to the intended parent before and after hashing. If a race-resistant parent-relative query is unavailable, report entryMatchProven=false.
+- Treat volume identity and file ID as filesystem-dependent. Validate NTFS and explicitly test or exclude ReFS, SMB/network shares, FAT/exFAT, cloud-synced folders, and other filesystems.
+- Windows ACL preflight is separate. The existing PowerShell ACL helper's handle-based hard-link count check does not implement the Restore runtime adapter, parent-relative no-reparse open protocol, or namespace durability.
+
+The current Node implementation cannot claim these native Windows guarantees. syncDirectory explicitly reports that portable Node directory-handle flush is unsupported on Windows. Until a native, tested directory durability primitive exists, Windows transitions depending on durable rename/link/unlink ordering remain manual-review-only even if handle identity is implemented.
+
+#### Capability and eligibility matrix
+
+| Capability | POSIX candidate | Windows candidate | Missing/unknown outcome |
+|---|---|---|---|
+| Retained parent directory handle | Descriptor open | Native directory handle | Manual review |
+| No-follow leaf open | openat + O_NOFOLLOW | CreateFileW + explicit reparse policy | Manual review |
+| Handle-derived stable identity | fstat device/inode | Native volume/file ID query | Manual review |
+| Parent-relative entry comparison | fstatat/statx no-follow | Native parent-relative query with tested semantics | Manual review |
+| Link-count verification | st_nlink | Native handle link count | Manual review |
+| Prevent conflicting mutation | Tested OS/filesystem locking policy | Tested CreateFileW share modes | Manual review |
+| Durable namespace transition | Tested directory fsync | Native directory flush on tested filesystems | Manual review |
+| Filesystem support profile | Per filesystem/mount | Per volume/filesystem | Manual review |
+
+A platform is eligible only when every capability required by the exact transition is positively reported and covered by CI/integration tests on that filesystem. A generic supported=true flag is insufficient; report individual capabilities and a stable filesystem profile. Capability probing must not mutate the database or attempt speculative recovery.
+
+#### Threat assumptions and required tests
+
+- Database, journal, and artifact parents are trusted and protected against untrusted same-user/admin mutation according to the operator boundary. Handle identity does not defend against a privileged actor rewriting both journal and artifacts.
+- SQLite reservations serialize cooperating Control Center processes only. They do not prove absence of arbitrary external handles or direct filesystem mutation. Native sharing/locking semantics must be specified independently.
+- Test replacement between parent open, leaf open, initial snapshot, hashing, final snapshot, and namespace transition. Include symlink/reparse swaps, junctions, hard-link creation/removal, rename races, parent replacement, mount/volume changes, and case/alias behavior.
+- Test that a handle continues to identify the same object after pathname rename, and that a replacement at the old name is detected by post-operation entry comparison.
+- Test link counts, unsupported metadata fields, file-ID reuse after deletion, timestamp granularity, and filesystems returning unstable or synthetic identifiers.
+- Inject permission, sharing-violation, stale-handle, I/O, disk-full, and durability failures. Unknown or failed capabilities must preserve artifacts and produce manual review.
+- Run child-process adversarial tests on each declared supported OS/filesystem combination. Mocked metadata alone is not evidence for native handle semantics.
+
+**Decision:** retain current pathname checks as diagnostics and defense-in-depth only. Do not enable automatic Restore continuation or rollback on their basis. Implement POSIX and Windows adapters as separate native contracts, and keep a platform/filesystem combination ineligible unless handle identity, parent-entry comparison, mutation exclusion, and required durability are proven. This section is design-only; no runtime code, API behavior, Phase 5 scope, or network exposure changes.
