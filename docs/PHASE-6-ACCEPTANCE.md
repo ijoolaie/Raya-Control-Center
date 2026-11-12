@@ -109,7 +109,7 @@ The SHA-256 digest and checksum do not protect against a malicious actor who can
 - Document supported filesystems/platforms and explicitly state durability limits where directory synchronization is unavailable. Do not promise power-loss guarantees that the platform API cannot provide.
 
 ### Acceptance evidence
-- A written state/transition matrix maps every journal/artifact/lock combination to exactly one of: safe automatic continuation, safe automatic rollback, or manual review. No implicit/default action is allowed.
+- Before any future evaluator is enabled, a written state/transition matrix must map every supported v2 journal/artifact/lock combination to exactly one bounded result: eligible continuation, eligible rollback, or manual review. Until the evaluator and executor are implemented and accepted, every current state remains manual/operator-led with no automatic action. No implicit/default action is allowed.
 - Child-process crash injection occurs immediately before and after every durable transition, then runs recovery repeatedly and verifies the same final result.
 - Tests cover path replacement, symlink/junction parents, hard-link and identity changes, malformed/truncated journals, unknown fields/versions, source mutation, destination collisions, stale-looking and active locks, unreadable directories, disk-full/permission/fsync failures, and unsupported filesystem behavior.
 - Windows CI verifies actual supported crash-state behavior; POSIX CI verifies its corresponding durability behavior. Unsupported combinations remain manual-review states.
@@ -350,3 +350,47 @@ The following mapping makes the classifier's information loss explicit. It assum
 | Journal absent after all recognized artifacts are removed | Journal absent; no recognized artifacts; inventory complete | no-pending-restore | This is a normal diagnostic state, not proof of database integrity or historical Restore success |
 
 This table is intentionally many-to-one: several crash boundaries collapse into the same coarse state because the current inspector does not collect the evidence needed to distinguish them. Do not add inferred phase labels to the classifier. A future v2 evaluator must derive eligibility from verified evidence and explicit capabilities, not from this crosswalk. Until then, all rows remain operator-led and automaticAction remains none.
+
+### Future Restore recovery evaluator contract (design only; not implemented)
+
+Keep three layers separate:
+1. **Inspector:** read-only collection of observations. It reports unknown/error explicitly and never mutates files or locks.
+2. **Classifier:** the existing lossy diagnostic summary. It may group observations for operator display but cannot grant eligibility.
+3. **Evaluator:** a future, separately versioned pure decision function over a complete, validated evidence bundle. It returns a bounded decision; it does not execute filesystem operations. A separate executor would revalidate the decision's evidence immediately before each transition.
+
+#### Required evaluator input
+
+The input must be a single immutable evidence snapshot containing all of the following, with explicit unknown values rather than omitted properties:
+
+- schemaVersion and evaluatorVersion, both exact supported values.
+- inventory.complete === true, with enumerated names and per-entry inspection results for every recognized and unrecognized artifact in the trusted parent. false, null, omitted, unreadable, or partial inventory is ineligible.
+- Journal state: exact status, strict v2 schema validation result, canonical serialization/checksum result, operation UUID/kind, and every required immutable intent field. v1, unknown fields/versions, duplicate or contradictory fields, malformed records, and path mismatch are ineligible.
+- Reservation evidence: the complete deterministic reservation set (destination Runtime, source Maintenance, destination Maintenance), successful acquisition tokens/ownership observations, and proof that all reservations remain held. Missing source reservation or uncertain ownership is ineligible.
+- Parent evidence: retained parent handles, stable parent identities, trusted ACL/ownership boundary, no-follow/reparse proof, parent-entry comparisons, and supported filesystem profile.
+- File evidence for source, original destination if initially present, staged object, rollback, and live destination: handle-derived object type, stable identity, link count, size, digest algorithm/value, before/after metadata, path-entry match, and whether the exact same retained handle anchored the operation. Required evidence cannot be inferred from paths or names.
+- SQLite evidence for staged/live candidates: integrity, foreign-key, and supported-schema checks tied to the exact hashed object.
+- Platform capability evidence: tested no-replace namespace primitives, external-handle exclusion/share-mode policy, file flush, and required directory/namespace durability. Unsupported or unknown capability is ineligible.
+- A contradiction/error list. It must be empty for any candidate action; errors cannot be downgraded to warnings by the evaluator.
+
+No evaluator input may be assembled by promoting the current inspector's exists, kind, PID, path-based lstat, or lock-sidecar observations into handle/digest/reservation proof. The current inspector does not produce this contract.
+
+#### Bounded output
+
+The evaluator returns exactly one of:
+- manual-review — preserve every journal/artifact; no automatic mutation.
+- eligible-continuation — a candidate authorization for one precisely named, non-destructive/forward namespace transition, with evidence digest, operation UUID, required preconditions, and expiry/revalidation boundary.
+- eligible-rollback — a candidate authorization for one precisely named rollback transition, with the same binding and revalidation requirements.
+
+no-pending-restore is an inspector/classifier diagnostic state, not an evaluator action or recovery authorization. The evaluator must not return generic success, recover, cleanup, delete, or retry decisions.
+
+#### Mandatory decision precedence
+
+1. Any missing/unknown/unsupported input, incomplete inventory, malformed or non-v2 journal, lock/handle uncertainty, untrusted parent, identity/path mismatch, digest/SQLite mismatch, unexpected hard link, destination collision, unsupported filesystem, failed flush/durability, or contradiction => manual-review.
+2. If the evidence bundle does not prove one unique transition from the immutable intent and observed file identities/content, => manual-review.
+3. If more than one candidate action could apply, or continuation and rollback both appear plausible, => manual-review.
+4. Only after all general gates pass may a narrowly enumerated v2 transition rule return one candidate authorization. Candidate rules remain disabled until implementation, adversarial tests, and platform-specific acceptance evidence are complete.
+5. The executor must reacquire/retain the complete reservations and handles and revalidate the evidence binding immediately before mutation. Any drift, stale decision, or failed revalidation cancels authorization and returns to manual review. A decision object is never a reusable bearer capability.
+
+#### Current status and compatibility
+
+Today the evaluator does not exist; every state in the runtime classifier remains automaticAction: none. All v1 journals and all current crash states remain operator-led. The two v2 rows in the eligibility matrix are hypotheses for future rule design, not active rules. Phase 6 acceptance must be updated only after actual evaluator/executor implementation and tests; documentation alone cannot mark Automatic Restore Recovery complete.
