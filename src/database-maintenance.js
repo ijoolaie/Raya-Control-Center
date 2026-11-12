@@ -1,4 +1,4 @@
-import { acquireDatabaseRuntimeLock, acquireDatabaseMaintenanceLock, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
+import { acquireDatabaseReservationSet, canonicalDatabasePath, inspectDatabaseRuntimeLocks } from './database-runtime-lock.js';
 import { DatabaseSync } from 'node:sqlite';
 import { closeSync, constants, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, rmdirSync, chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, parse, resolve, sep } from 'node:path';
@@ -515,35 +515,45 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   }
 }
 
+function sameCanonicalDatabasePath(left, right) {
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
 export function createDatabaseBackup(databasePath, backupPath) {
-  const source = resolve(databasePath);
-  const destination = resolve(backupPath);
-  if (source.toLowerCase() === destination.toLowerCase())
+  const source = canonicalDatabasePath(databasePath);
+  const destination = canonicalDatabasePath(backupPath);
+  if (sameCanonicalDatabasePath(source, destination))
     throw new Error('Backup destination must differ from the live database');
-  // Serialize by both source database and destination name. The destination lock
-  // prevents another source database's cleanup from deleting our active temp file.
-  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
-  mkdirSync(dirname(destination), { recursive: true });
-  assertNoSymlinkComponents(dirname(destination), 'Backup destination parent');
-  const releaseSourceLock = acquireDatabaseMaintenanceLock(databasePath);
-  let releaseDestinationLock;
+
+  const guard = acquireDatabaseReservationSet([
+    { databasePath: source, lockClass: 'maintenance' },
+    { databasePath: destination, lockClass: 'maintenance' }
+  ]);
   try {
-    releaseDestinationLock = acquireDatabaseMaintenanceLock(destination);
+    guard.assertHeld();
     return createDatabaseBackupUnlocked(databasePath, backupPath);
   } finally {
-    try { releaseDestinationLock?.(); }
-    finally { releaseSourceLock(); }
+    guard.release();
   }
 }
 
 export function restoreDatabaseBackup(backupPath, databasePath) {
-  const releaseRuntimeLock = acquireDatabaseRuntimeLock(databasePath);
-  let releaseMaintenanceLock;
+  const source = canonicalDatabasePath(backupPath);
+  const destination = canonicalDatabasePath(databasePath);
+  if (sameCanonicalDatabasePath(source, destination))
+    throw new Error('Restore source must differ from the live database');
+
+  const guard = acquireDatabaseReservationSet([
+    { databasePath: destination, lockClass: 'runtime' },
+    { databasePath: source, lockClass: 'maintenance' },
+    { databasePath: destination, lockClass: 'maintenance' }
+  ]);
   try {
-    releaseMaintenanceLock = acquireDatabaseMaintenanceLock(databasePath);
+    guard.assertHeld();
     return restoreDatabaseBackupUnlocked(backupPath, databasePath);
   } finally {
-    try { releaseMaintenanceLock?.(); }
-    finally { releaseRuntimeLock(); }
+    guard.release();
   }
 }

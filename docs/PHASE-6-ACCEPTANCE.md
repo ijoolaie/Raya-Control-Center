@@ -39,7 +39,7 @@ Phase 6 closes the Deferred inventory recorded when it was added. A workstream i
 
 ## 2. Automatic Restore Recovery (carried from Phase 2)
 
-**Workstream status:** Design/feasibility review documented; implementation is blocked on the separately specified native filesystem-adapter prerequisites. Do not enable a recovery executor or automatic file/lock action until the feasibility and acceptance gates below pass; current inspector remains read-only and all states remain operator-led.
+**Workstream status:** Design/feasibility review documented; the shared multi-database reservation guard is implemented and tested. Automatic recovery execution remains blocked on the separately specified native filesystem-adapter prerequisites. Do not enable a recovery executor or automatic file/lock action until the feasibility and acceptance gates below pass; current inspector remains read-only and all states remain operator-led.
 
 ### Current baseline
 - Restore publishes a versioned intent journal atomically and refuses a second Restore while the journal exists.
@@ -237,9 +237,9 @@ The two candidate rows above are hypotheses, not a complete truth table. They ar
 
 **Decision:** no observed crash state is currently approved for automatic continuation or automatic rollback. The current runtime remains operator-led and read-only for recovery inspection. This review changes documentation only; it does not implement Journal v2, alter Restore behavior, or start Phase 5.
 
-### Multi-database reservation protocol (proposed; design only)
+### Multi-database reservation protocol (design and implementation slice)
 
-Source review confirms that the current Backup flow acquires maintenance reservations in call order (source first, destination second), while Restore acquires the destination runtime reservation and then its maintenance reservation. The current Restore path does not reserve the backup source. These are distinct lock classes; a persistent sidecar file is only a rendezvous point, while the live SQLite BEGIN IMMEDIATE transaction is the reservation.
+Baseline before the implementation slice: Backup acquired source and destination maintenance reservations in call order, while Restore acquired only the destination runtime and maintenance reservations. Restore did not reserve the backup source. These are distinct lock classes; a persistent sidecar file is only a rendezvous point, while the live SQLite BEGIN IMMEDIATE transaction is the reservation.
 
 For any future operation that must reserve more than one database, use one shared acquisition helper and a single total order:
 
@@ -253,6 +253,13 @@ For any future operation that must reserve more than one database, use one share
 8. The acquisition helper must return one operation-scoped guard that owns the complete sorted set, exposes only the acquired lock classes/keys and a live-held assertion, and releases in reverse order exactly once. Individual raw release callbacks must not escape to callers that can release a subset while evidence is being evaluated. A failed acquisition returns no guard and guarantees reverse release of every partial acquisition. The guard is an in-process lifetime anchor, not a serializable ownership token or proof against non-cooperating processes.
 9. Evaluator and executor must share the same live guard instance and retained adapter context. Releasing and reacquiring an equivalent path set does not preserve the earlier evidence binding; it requires a new evidence snapshot and a new evaluation.
 
+#### Reservation guard implementation evidence (2026-11-12)
+
+- acquireDatabaseReservationSet now canonicalizes database parents, deduplicates identical (database, lock-class) keys, orders by canonical path and then runtime-before-maintenance, and returns one operation-scoped guard. Raw release callbacks do not escape the helper.
+- Partial acquisition failure releases every acquired key in reverse order. Successful guard release is reverse-ordered and idempotent; assertHeld rejects use after release.
+- Backup now reserves source and destination maintenance keys through the shared guard. Restore reserves destination runtime plus source and destination maintenance keys before it inspects or publishes Restore intent.
+- Regression tests verify deterministic order, duplicate-key collapse, partial-release after a busy later key, and that a Restore source-lock conflict leaves no destination reservation and publishes no journal. The complete database-maintenance test file passes on the local Windows host. Full suite: 181 passed, 4 skipped, 0 failed; npm run check and git diff --check pass.
+- These SQLite reservations coordinate only cooperating processes. They do not satisfy the still-open native handle identity, external-mutation exclusion, or platform durability gates and do not make any recovery state eligible for automatic action.
 #### Required concurrency tests
 
 - Two child processes request the same pair of maintenance locks in opposite argument order. Both must terminate deterministically: one may acquire while the other receives the documented busy result; neither may hang, leak a reservation, or leave a partially held set.

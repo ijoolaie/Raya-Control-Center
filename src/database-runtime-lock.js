@@ -22,8 +22,10 @@ function assertNoSymlinkParentComponents(filename) {
   return absolute;
 }
 
-export function databaseRuntimeLockPath(databasePath) {
-  if (databasePath === ':memory:') return null;
+export function canonicalDatabasePath(databasePath) {
+  if (typeof databasePath !== 'string' || !databasePath || databasePath === ':memory:') {
+    throw new Error('A file-backed database path is required for reservations');
+  }
   const absolute = resolve(databasePath);
   const parentDirectory = dirname(absolute);
   assertNoSymlinkParentComponents(parentDirectory);
@@ -38,12 +40,18 @@ export function databaseRuntimeLockPath(databasePath) {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  return database + '.runtime.lock';
+  return database;
+}
+
+export function databaseRuntimeLockPath(databasePath) {
+  if (databasePath === ':memory:') return null;
+  return canonicalDatabasePath(databasePath) + '.runtime.lock';
 }
 
 function lockPathFor(databasePath, suffix) {
-  const runtimePath = databaseRuntimeLockPath(databasePath);
-  return runtimePath ? runtimePath.slice(0, -'.runtime.lock'.length) + suffix : null;
+  if (databasePath === ':memory:') return null;
+  const database = canonicalDatabasePath(databasePath);
+  return database + suffix;
 }
 
 function isBusyError(error) {
@@ -74,13 +82,9 @@ function openLockDatabase(lockPath) {
     throw error;
   }
 }
-function acquireDatabaseFileLock(databasePath, suffix, label) {
-  const lockPath = lockPathFor(databasePath, suffix);
-  if (!lockPath) return () => {};
 
-  // The persistent zero-byte SQLite file is only a rendezvous point. The open
-  // BEGIN IMMEDIATE transaction, not a pathname record, represents ownership.
-  // Never unlink this file: SQLite releases the reservation on close or crash.
+function acquireDatabaseFileLockAtPath(lockPath, label) {
+  if (!lockPath) return () => {};
   let database;
   try {
     database = openLockDatabase(lockPath);
@@ -102,6 +106,84 @@ function acquireDatabaseFileLock(databasePath, suffix, label) {
       database.close();
     }
   };
+}
+
+function acquireDatabaseFileLock(databasePath, suffix, label) {
+  return acquireDatabaseFileLockAtPath(lockPathFor(databasePath, suffix), label);
+}
+
+const LOCK_SUFFIX = Object.freeze({ runtime: '.runtime.lock', maintenance: '.maintenance.lock' });
+const LOCK_RANK = Object.freeze({ runtime: 0, maintenance: 1 });
+
+function compareOrdinal(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function normalizedDatabasePath(databasePath) {
+  return process.platform === 'win32' ? databasePath.toLowerCase() : databasePath;
+}
+
+/**
+ * Acquire a complete, deterministically ordered set of per-database reservations.
+ * The returned guard owns every lock until release() and never exposes raw callbacks.
+ */
+export function acquireDatabaseReservationSet(requests) {
+  if (!Array.isArray(requests) || requests.length === 0) {
+    throw new Error('At least one database reservation is required');
+  }
+
+  const unique = new Map();
+  for (const request of requests) {
+    if (!request || typeof request !== 'object' || !Object.hasOwn(LOCK_SUFFIX, request.lockClass)) {
+      throw new Error('Reservation request must specify runtime or maintenance lockClass');
+    }
+    const databasePath = canonicalDatabasePath(request.databasePath);
+    const keyPath = normalizedDatabasePath(databasePath);
+    const key = keyPath + String.fromCharCode(0) + request.lockClass;
+    if (!unique.has(key)) unique.set(key, {
+      databasePath,
+      normalizedPath: keyPath,
+      lockClass: request.lockClass
+    });
+  }
+
+  const ordered = [...unique.values()].sort((left, right) =>
+    compareOrdinal(left.normalizedPath, right.normalizedPath)
+      || LOCK_RANK[left.lockClass] - LOCK_RANK[right.lockClass]
+  );
+
+  const releases = [];
+  try {
+    for (const item of ordered) {
+      const lockPath = item.databasePath + LOCK_SUFFIX[item.lockClass];
+      releases.push(acquireDatabaseFileLockAtPath(lockPath, item.lockClass));
+    }
+  } catch (error) {
+    const releaseErrors = [];
+    for (const release of releases.reverse()) {
+      try { release(); } catch (releaseError) { releaseErrors.push(releaseError); }
+    }
+    if (releaseErrors.length) throw new AggregateError([error, ...releaseErrors], 'Reservation acquisition failed and one or more partial reservations could not be released');
+    throw error;
+  }
+
+  let released = false;
+  return Object.freeze({
+    keys: Object.freeze(ordered.map(({ databasePath, lockClass }) => Object.freeze({ databasePath, lockClass }))),
+    assertHeld() {
+      if (released) throw new Error('Database reservation guard has already been released');
+      return true;
+    },
+    release() {
+      if (released) return;
+      released = true;
+      const errors = [];
+      for (const release of [...releases].reverse()) {
+        try { release(); } catch (error) { errors.push(error); }
+      }
+      if (errors.length) throw new AggregateError(errors, 'One or more database reservations could not be released cleanly');
+    }
+  });
 }
 
 export function inspectDatabaseFileLock(lockPath) {

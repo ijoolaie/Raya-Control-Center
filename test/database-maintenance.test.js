@@ -11,7 +11,7 @@ import { LATEST_SCHEMA_VERSION, openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
 import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
 import { startControlCenter } from '../src/server-runtime.js';
-import { acquireDatabaseMaintenanceLock, inspectDatabaseFileLock, inspectDatabaseRuntimeLocks } from '../src/database-runtime-lock.js';
+import { acquireDatabaseMaintenanceLock, acquireDatabaseReservationSet, inspectDatabaseFileLock, inspectDatabaseRuntimeLocks } from '../src/database-runtime-lock.js';
 import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
 import { bootstrapOperatorToken, rotateOperatorToken } from '../src/operator-auth.js';
 import { recoverOperatorToken } from '../src/rotate-operator-token.js';
@@ -65,6 +65,69 @@ test('Restore recovery state model never treats a lock as proof of a live or sta
   assert.equal(result.state, 'blocked-lock-present');
   assert.equal(result.observations.maintenanceLock, true);
   assert.match(result.guidance, /not classified as stale/);
+});
+
+test('database reservation sets canonicalize, deduplicate, sort, and release in reverse ownership order', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-set-'));
+  const first = join(directory, 'a.sqlite');
+  const second = join(directory, 'b.sqlite');
+  let guard;
+  try {
+    guard = acquireDatabaseReservationSet([
+      { databasePath: second, lockClass: 'maintenance' },
+      { databasePath: first, lockClass: 'maintenance' },
+      { databasePath: first, lockClass: 'runtime' },
+      { databasePath: first, lockClass: 'runtime' }
+    ]);
+    assert.deepEqual(guard.keys.map(key => [key.databasePath, key.lockClass]), [
+      [first, 'runtime'], [first, 'maintenance'], [second, 'maintenance']
+    ]);
+    assert.equal(inspectDatabaseFileLock(first + '.runtime.lock').active, true);
+    assert.equal(inspectDatabaseFileLock(first + '.maintenance.lock').active, true);
+    assert.equal(inspectDatabaseFileLock(second + '.maintenance.lock').active, true);
+    assert.equal(guard.assertHeld(), true);
+    guard.release();
+    guard.release();
+    assert.throws(() => guard.assertHeld(), /already been released/);
+    assert.equal(inspectDatabaseFileLock(first + '.runtime.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(first + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(second + '.maintenance.lock').active, false);
+  } finally {
+    guard?.release();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('database reservation set releases partial acquisitions when a later sorted key is busy', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-partial-'));
+  const first = join(directory, 'a.sqlite');
+  const second = join(directory, 'b.sqlite');
+  let busy;
+  try {
+    busy = acquireDatabaseMaintenanceLock(second);
+    assert.throws(() => acquireDatabaseReservationSet([
+      { databasePath: second, lockClass: 'maintenance' },
+      { databasePath: first, lockClass: 'maintenance' }
+    ]), /maintenance lock prevents access/);
+    assert.equal(inspectDatabaseFileLock(first + '.maintenance.lock').active, false,
+      'the earlier sorted key must be released after the later key fails');
+    assert.equal(inspectDatabaseFileLock(second + '.maintenance.lock').active, true,
+      'the pre-existing owner must remain untouched');
+    busy();
+    busy = null;
+    assert.equal(inspectDatabaseFileLock(second + '.maintenance.lock').active, false);
+  } finally {
+    busy?.();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('database reservation set rejects invalid lock classes and file-backed memory aliases', () => {
+  assert.throws(() => acquireDatabaseReservationSet([]), /At least one/);
+  assert.throws(() => acquireDatabaseReservationSet([{ databasePath: 'x.sqlite', lockClass: 'unknown' }]), /runtime or maintenance/);
+  assert.throws(() => acquireDatabaseReservationSet([{ databasePath: ':memory:', lockClass: 'runtime' }]), /file-backed/);
+  const releaseMemoryMaintenance = acquireDatabaseMaintenanceLock(':memory:');
+  assert.doesNotThrow(() => releaseMemoryMaintenance());
 });
 
 test('restore inspect refuses symlinked parent paths before reading recovery journals', () => {
@@ -1142,6 +1205,42 @@ test('maintenance lock excludes concurrent backup and restore operations', () =>
     assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
   } finally {
     release?.();
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('Restore reserves source and destination in one ordered set and releases partial locks on conflict', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-source-reservation-'));
+  const database = join(directory, 'a-live.sqlite');
+  const backup = join(directory, 'z-backup.sqlite');
+  let db;
+  let releaseSource;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.source.reservation' });
+    db.close();
+    db = null;
+    createDatabaseBackup(database, backup);
+
+    releaseSource = acquireDatabaseMaintenanceLock(backup);
+    assert.throws(() => restoreDatabaseBackup(backup, database), /maintenance lock prevents access/);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false,
+      'destination runtime reservation must be released after source acquisition fails');
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false,
+      'destination maintenance reservation must be released after source acquisition fails');
+    assert.equal(existsSync(database + '.restore-journal.json'), false,
+      'Restore must not publish intent until every reservation is held');
+    releaseSource();
+    releaseSource = null;
+
+    const restored = restoreDatabaseBackup(backup, database);
+    assert.equal(restored.schemaVersion, LATEST_SCHEMA_VERSION);
+    assert.equal(inspectDatabaseFileLock(backup + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(database + '.runtime.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(database + '.maintenance.lock').active, false);
+  } finally {
+    releaseSource?.();
     if (db) db.close();
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
