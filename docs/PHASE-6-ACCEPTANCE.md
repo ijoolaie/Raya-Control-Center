@@ -173,3 +173,28 @@ The two “candidate” v2 rows describe the only narrow classes worth proving i
 6. Preserve rollback indefinitely until a separate, verified retention/backup policy authorizes cleanup. Recovery must never delete rollback merely because the journal is absent or installation appears complete.
 
 **Decision:** no observed crash state is currently approved for automatic continuation or automatic rollback. The current runtime remains operator-led and read-only for recovery inspection. This review changes documentation only; it does not implement Journal v2, alter Restore behavior, or start Phase 5.
+
+### Multi-database reservation protocol (proposed; design only)
+
+Source review confirms that the current Backup flow acquires maintenance reservations in call order (source first, destination second), while Restore acquires the destination runtime reservation and then its maintenance reservation. The current Restore path does not reserve the backup source. These are distinct lock classes; a persistent sidecar file is only a rendezvous point, while the live SQLite BEGIN IMMEDIATE transaction is the reservation.
+
+For any future operation that must reserve more than one database, use one shared acquisition helper and a single total order:
+
+1. Resolve each database path using the same canonical-parent rules as databaseRuntimeLockPath: reject symlink/junction parent components, resolve the parent directory, and combine it with the basename. Revalidate the parent and database entry immediately before lock acquisition. Canonicalization failure is a hard failure, not a fallback to the caller's spelling.
+2. Reject source/destination aliases after canonicalization. On Windows compare using the platform's case-insensitive path semantics; on POSIX preserve case sensitivity. Do not use locale-sensitive sorting.
+3. Convert requested reservations into unique keys (canonical database path, lock class). Sort by canonical path using a deterministic ordinal comparison over the platform-normalized representation, then by a fixed lock-class rank (runtime before maintenance). The same helper and comparator must be used by every multi-lock caller.
+4. Acquire in ascending order. If any acquisition fails, release every acquired reservation in exact reverse order before returning the original error. Release after success in reverse order as well. Release must be idempotent and must not unlink persistent sidecar files.
+5. Keep single-lock runtime users unchanged unless they participate in a multi-lock operation. No code path may acquire a lower-ranked key while already holding a higher-ranked key. If an operation discovers it needs another key after acquisition begins, release all keys and restart with the complete sorted set.
+6. For Restore, reserve destination runtime plus source and destination maintenance keys as one ordered set before hashing or validating mutable database files. For Backup, reserve source and destination maintenance keys as one ordered set. Existing source/destination equality checks remain mandatory.
+7. Reservation success proves exclusion only against processes using the same lock protocol and canonical path. It does not prove absence of external file handles, direct filesystem mutation, older binaries with different lock naming, or aliases on unsupported filesystems. Those conditions remain separate eligibility gates for automatic recovery.
+
+#### Required concurrency tests
+
+- Two child processes request the same pair of maintenance locks in opposite argument order. Both must terminate deterministically: one may acquire while the other receives the documented busy result; neither may hang, leak a reservation, or leave a partially held set.
+- Repeat with duplicate canonical paths expressed through dot/dot-dot, parent aliases, and Windows case variants; aliases must collapse or be rejected before acquisition.
+- Inject failure on the second lock acquisition and assert the first reservation is released, the original failure is preserved, and a subsequent process can acquire both keys.
+- Exercise Restore's runtime-plus-maintenance key set against server startup and token rotation; confirm existing single-runtime ownership still blocks Restore and no lock-order inversion is introduced.
+- Crash a child while it holds multiple reservations; after process exit, verify SQLite releases the transactions and a new process can acquire them without deleting or recreating sidecar files.
+- Run the same tests on supported Windows and POSIX CI. Filesystems with unreliable SQLite locking or unsupported canonicalization remain outside the automatic-recovery support matrix.
+
+**Implementation boundary:** this is a proposed protocol, not a claim that current Backup/Restore already use sorted multi-lock acquisition. No lock code or runtime behavior is changed in this step.
