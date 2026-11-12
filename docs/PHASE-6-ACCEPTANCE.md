@@ -163,6 +163,18 @@ The current implementation was inspected in `src/database-runtime-lock.js`, `src
 
 The two “candidate” v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
 
+#### Mutual-exclusion rule for future eligibility
+
+The two candidate rows above are hypotheses, not a complete truth table. They are not authorization to act and are not currently reachable from v1 evidence. The rollback candidate can overlap the continuation candidate: if the live destination is absent while both a valid staged object and a valid rollback object exist, both forward installation and rollback publication may appear plausible. The evaluator must not resolve this by preference, timestamps, PID, filename order, or an implicit 'finish what was started' policy. That overlap is manual-review unless a separately specified, durable, immutable transition record proves which single transition was committed to before the crash.
+
+- Evaluate continuation and rollback as independent predicates over one complete evidence projection. Do not use `else-if` ordering to manufacture uniqueness.
+- Each predicate must name exactly one source object, destination name, expected prior destination state, operation UUID, and one namespace primitive. Return an eligible descriptor only when exactly one predicate is true; zero or two true predicates means `manual-review`.
+- The intent's `destinationExisted` value is mandatory. If false, any pre-existing live destination or rollback object not explained by the immutable intent is a collision/contradiction. If true, the exact original destination must be bound to the rollback role before any install candidate can be considered. A missing or mismatched rollback is not equivalent to an absent original.
+- A staged object matching the source digest is not by itself proof that continuation is the correct recovery direction. An original rollback object matching its recorded digest is not by itself proof that rollback is the correct direction. When both are verified and either could be published into the absent live name, the result is ambiguous and manual-review unless a future append-only, durably published transition record uniquely selects one transition.
+- Do not introduce that transition record implicitly in the evaluator. Its schema, publication ordering, crash semantics, durability requirements, and cross-platform evidence must be separately designed and accepted before it can disambiguate candidates.
+- A live destination that exists is never overwritten by an eligible recovery transition. If the live object is not exactly bound to the expected installed/staged/original role through the same retained handles and directory-entry evidence, manual-review.
+- Cleanup is excluded from both predicates. A successful continuation or rollback decision cannot authorize journal, temporary, staged, or rollback deletion.
+
 #### Required protocol corrections before any automatic action
 
 1. Define multi-file reservation ordering for both Restore source and destination. The current Restore path reserves only the destination; source path identity is checked by pathname snapshots. Acquire source and destination maintenance reservations in a deterministic canonical order to avoid cross-operation deadlocks, while preserving destination runtime exclusion. If a source cannot participate in the reservation protocol, automatic recovery is ineligible.
