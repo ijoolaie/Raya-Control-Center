@@ -401,6 +401,14 @@ The evidence bundle is immutable as a value, but its authority is valid only whi
 
 The pure evaluator operates only on the immutable projection; the executor owns resource-lifetime checks and mutation. If the architecture cannot preserve the operation-scoped context across this boundary, return manual-review.
 
+#### Decision transport, context identity, and one-shot use
+
+The evaluator's returned value is a decision descriptor, not an authorization token. It may contain only the bounded outcome, operation UUID, exact transition identifier, evidence-projection digest, supported adapter/evaluator versions, and diagnostic preconditions/expiry metadata. Serializing, persisting, logging, copying to another process, or replaying this descriptor must never preserve or recreate authority. A descriptor read back from JSON or reconstructed from its fields is always non-authoritative and can be used only for diagnostics.
+
+The executor must receive the exact operation-scoped context object that owns the live guard and retained handles, and must verify object identity against the context that produced the evidence/decision. A matching operation UUID, digest, path set, or newly acquired equivalent guard is not a substitute for that same in-process context. If evaluator and executor cannot share that exact context without serialization or process transfer, the result is manual-review; no IPC protocol or bearer capability is implied by this design.
+
+Treat each eligible decision as one-shot and transition-scoped. The executor atomically marks it consumed before beginning the protected transition; concurrent or repeated use is rejected. Its validity ends at the earliest of: the named transition attempt, explicit context invalidation/release, any anchor/capability/evidence drift, or the bounded expiry/revalidation boundary. A failed or ambiguous transition attempt does not make the old decision reusable. Any subsequent transition—including cleanup—requires a newly collected evidence projection and a fresh evaluation under the still-valid or newly acquired complete context. A new context always requires new evidence and a new decision. The implementation must test duplicate, concurrent, delayed, serialized/replayed, cross-context, and post-release submissions as no-mutation rejections.
+
 #### Required evaluator/executor tests
 
 - Present-journal and absent-journal inventories include every directory entry, including unknown names and non-regular entries; an unreadable entry, partial enumeration, or directory mutation during enumeration yields `complete=false`.
