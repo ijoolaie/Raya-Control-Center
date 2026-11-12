@@ -619,3 +619,84 @@ The protocol must state explicitly which layer each field represents. A lexical 
 - Run native tests on every claimed OS/filesystem profile. Mock-only path tests do not establish filesystem comparison, volume identity, reparse behavior, or cross-process reservation semantics.
 
 **Acceptance boundary:** until the adapter can prove a stable namespace key and the complete reservation guard remains live, v2 automatic recovery is ineligible for that operation. A lexical path match, case-insensitive string comparison, PID, sidecar pathname, or opened file ID alone is insufficient. Phase 5 remains deferred and no remote path or transport is introduced by this contract.
+
+### Reservation guard lifecycle, acquisition failure, and release semantics (design only)
+
+This section defines the future operation-scoped guard lifecycle. It does not introduce a runtime guard or change the current fail-fast SQLite lock behavior.
+
+#### Current lifecycle behavior and limits
+
+- Each current lock acquisition opens a separate SQLite sidecar connection and starts BEGIN IMMEDIATE. The live transaction, not the persistent sidecar file, represents ownership.
+- The returned release closure is idempotent: it marks itself released before attempting ROLLBACK, then closes the connection in a finally block. A second invocation is a no-op.
+- If ROLLBACK throws, connection close is still attempted. The release closure does not retry rollback; connection close is the final release attempt available to that closure. A close failure may still propagate.
+- Backup acquires source Maintenance and then destination Maintenance; its finally block releases destination then source. If destination acquisition fails, the optional destination release is skipped and source is released.
+- Restore acquires destination Runtime and then destination Maintenance; its finally block releases Maintenance then Runtime. If Maintenance acquisition fails, Runtime is released.
+- These nested try/finally structures provide reverse release for the current fixed two-lock paths. They do not provide a shared guard, a globally ordered acquisition set, or proof that all future call paths use the same order.
+- SQLite busy acquisition currently fails rather than establishing a waiting queue contract. Opposite-order operations can therefore fail fast under contention; they must not be described as proven deadlocks in the current implementation. A future wait/retry policy without a global order could turn the same pattern into a deadlock.
+- Current tests cover exclusive cross-process ownership, crash release, and lock release on success/failure paths. They do not yet prove a general multi-resource guard state machine, acquisition-order invariance, or injected failure at every release boundary.
+
+#### Required guard state machine
+
+The future guard must have explicit, monotonic states:
+
+1. new: request set is immutable and validated; no reservation is owned.
+2. acquiring: resources are acquired in the one global total order. Only the successfully acquired prefix is owned.
+3. held: the entire deduplicated reservation set is owned, every underlying transaction is live, and the guard is bound to the exact resource identities and adapter context.
+4. releasing: no new acquisition or protected operation may begin; owned reservations are released in reverse acquisition order.
+5. released: all owned transactions have been closed successfully, or the guard is terminally invalidated with a recorded release failure. It can never be reused.
+6. invalid: a transaction, connection, handle, or parent identity was lost, replaced, or found inconsistent. No evaluator/executor action or cleanup may use this guard.
+
+The implementation may represent terminal release failure separately from released, but it must never report a fully successful release when any close/release operation failed. Repeated release calls must be safe and must return or retain the same terminal outcome rather than re-running ownership transitions.
+
+#### Acquisition algorithm and partial failure
+
+- Freeze the complete request set before acquiring anything. Each item contains the proven namespace identity, reservation class, adapter/version context, and a stable sort key.
+- Deduplicate exact (namespace identity, reservation class) duplicates. Reject unresolved alias ambiguity before acquisition.
+- Sort once using the single global total order. No operation may acquire a subset in caller order and then append another resource.
+- Acquire sequentially and record each successful acquisition in a private guard-owned stack. Do not publish a partially acquired guard to callers, inspectors, evaluators, or executors.
+- If acquisition N fails, stop immediately. Release only the acquired prefix N-1 through 1 in exact reverse order, then return the original acquisition failure with bounded release-failure metadata. Do not continue to later resources, inspect mutable content, create artifacts, or perform cleanup.
+- If acquisition fails partway, release only the acquired prefix. A failed acquisition must not trigger stale temp/orphan reconciliation. Cleanup authority exists only after the complete guard reaches held, and only for artifacts whose exact ownership is separately established.
+- If a release in the partial-failure unwind fails, continue attempting to release the remaining earlier acquisitions in reverse order. Preserve every failure in a bounded structured outcome; do not replace the original acquisition error with the first cleanup error.
+- A guard with uncertain ownership after any release failure is terminally invalid. It cannot be passed to an evaluator or reused for another attempt. The caller must stop and preserve evidence.
+
+#### Held lifetime and invalidation
+
+- The guard remains held for the full interval in which any protected evidence or transition depends on those resources. For Restore v2 this includes source/destination inspection, hashing, immutable intent publication, staging, rollback/install transitions, and separately authorized cleanup.
+- The guard exposes only safe assertions such as isHeld() and immutable resource descriptors. It must not expose raw release callbacks, transaction objects, mutable internal arrays, or a caller-controlled partial-release method.
+- isHeld() must verify the actual live transaction/connection anchors, not merely a boolean set at acquisition time. A closed connection, rolled-back transaction, lost parent/file handle, changed namespace identity, or adapter profile drift invalidates the guard.
+- Invalidation is monotonic. Reopening an equivalent lock, reacquiring the same sidecar, or reconstructing a guard from a path/PID does not restore the original evidence lifetime.
+- The guard must be released exactly once by its owning operation. A different process or later invocation cannot inherit release or cleanup authority from a journal, lock pathname, operation UUID, or PID.
+- No asynchronous gap may permit the guard to be silently replaced between a successful held assertion and a protected synchronous namespace transition. If asynchronous operations are later introduced, cancellation and ownership checks are required at every await boundary.
+
+#### Release protocol and error handling
+
+- Release all owned resources in exact reverse acquisition order, attempting every release even if an earlier release fails.
+- Each individual reservation release remains idempotent. It must attempt transaction rollback and always attempt connection close. It must report whether the transaction was rolled back, whether close succeeded, and whether ownership is now known to be gone; unknown is not success.
+- A rollback failure followed by successful connection close may establish that this connection no longer owns the SQLite transaction, but must not erase the rollback error from the operation outcome. A close failure leaves ownership uncertain and invalidates the guard.
+- Preserve the primary operation error. Attach bounded release outcome codes without leaking raw SQLite messages, tokens, database paths, or database content. If the main operation succeeded but release failed, report the overall operation as failed/uncertain; never return success while a reservation may remain held.
+- After release begins, no protected transition, retry, cleanup, or evaluator action may start. If release is incomplete or uncertain, preserve journal and artifacts for operator inspection.
+- A process crash is handled by SQLite/OS connection teardown as today; the persistent sidecar remains. Sidecar existence is not a live guard and must never be used to reconstruct one.
+
+#### Deadlock and liveness requirements
+
+- Global ordering must be shared by Backup, Restore, runtime startup, and every maintenance path. It must include namespace identity and lock class in a documented total order.
+- No nested acquisition is allowed outside the guard. A helper that already owns one reservation may not call another helper that independently acquires a second resource in an order unknown to the guard.
+- The guard must be the sole owner of acquisition/release. Domain operations receive a held guard/context and cannot independently acquire or release its members.
+- Prefer fail-fast busy behavior for the initial implementation. If bounded waiting or retry is later introduced, it must use the same global ordering, a bounded deadline, cancellation semantics, and tests proving no resource is held while waiting for a resource that sorts earlier.
+- Retries must restart the entire acquisition attempt from an empty set after complete unwind. Never continue from a partial prefix after contention.
+- No fairness guarantee should be claimed unless the underlying mechanism and scheduling behavior are explicitly tested. Liveness failure or repeated contention remains a bounded operational error, not permission to bypass a reservation.
+
+#### Required tests before guard implementation is accepted
+
+- Unit state-machine tests for every valid transition and rejection of invalid/repeated transitions.
+- Inject acquisition failure at every position in a multi-resource sorted set; assert exact reverse unwind, no later acquisition, no content inspection, no artifact creation, and no cleanup.
+- Inject rollback and close failures independently at every release position; verify all remaining releases are attempted, original operation/acquisition error is retained, uncertain ownership invalidates the guard, and success is never reported.
+- Verify duplicate request deduplication and exact one-time release; verify no raw partial release capability is exposed.
+- Use child processes and barriers to run opposite caller-order requests. Verify the guard sorts identically, serializes or fails boundedly, and never enters a wait cycle.
+- Race Backup source/destination reservations with Restore destination Runtime/source Maintenance/destination Maintenance reservations. Verify shared database identity across lock classes and one common ordering.
+- Verify losing acquisition performs no mutable reads, stale cleanup, journal publication, staging, or namespace mutation.
+- Verify guard invalidation after connection close, transaction rollback, parent replacement, handle close, adapter-version change, and namespace-profile drift. Previously derived evidence must become unusable.
+- Verify repeated release after success, partial unwind, rollback failure, and close failure is deterministic and never re-enters a completed release.
+- Run native cross-process tests on each claimed supported OS/filesystem profile. In-process mocks alone do not establish SQLite/OS lock lifetime or process-death behavior.
+
+**Acceptance boundary:** until the complete operation-scoped guard, global ordering, reverse unwind, terminal error semantics, and adversarial child-process tests exist, current per-file lock closures remain the only implemented mechanism. They are not a v2 guard. Automatic Restore recovery remains disabled and operator-led. Phase 5 remains deferred.
