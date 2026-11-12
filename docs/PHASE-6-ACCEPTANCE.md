@@ -560,3 +560,62 @@ This section defines how the future Restore v2 protocol must reason about compet
 - Record operation-level outcomes without exposing tokens, database content, arbitrary paths, or raw exception messages.
 
 **Current implementation gap:** the Restore path's source reservation and external mutation exclusion are not implemented. The current tests and cooperating SQLite locks cannot prove arbitrary external handles are absent. These remain Phase 6 implementation prerequisites; current automatic recovery remains disabled.
+
+### Canonical path identity and reservation-key equivalence (design only)
+
+This section separates lexical path normalization, filesystem namespace identity, and opened-object identity. It records the current implementation boundary and defines fail-closed requirements; it does not change runtime lock behavior.
+
+#### Current implementation boundary
+
+- The runtime-lock path helper applies Node path resolution, rejects symlink/junction parent components, creates the parent directory, resolves the parent with realpath, retains the leaf basename, and appends the lock suffix.
+- The lock rendezvous path is based on a canonicalized parent pathname plus the original leaf spelling. It is not a stable physical file identifier.
+- Relative/absolute forms and dot segments are normalized by the host path API. Parent aliases that are real symlinks/junctions are rejected rather than treated as equivalent. A database leaf that is a symbolic link is rejected.
+- The current implementation does not establish general equivalence for case variants, hard links, volume aliases, mount aliases, per-directory case-sensitivity settings, or filesystem-specific namespace behavior.
+- Restore journal inspection uses case-insensitive string comparisons for some path-shape checks. Those checks are validation heuristics, not proof that two paths identify the same filesystem object or reservation key.
+- Current lock acquisition remains caller-ordered and uses separate runtime/maintenance sidecars. It does not yet provide one operation-scoped guard that globally sorts and atomically owns a complete multi-resource reservation set.
+- These observations do not establish future v2 reservation-key or object-identity guarantees.
+
+#### Three identity layers
+
+1. **Lexical path form:** an absolute normalized path after resolving relative segments and separators according to the host path API. This removes simple spelling differences but does not prove namespace equivalence.
+2. **Namespace entry identity:** the entry reached under a retained, trusted parent-directory handle, including parent identity, leaf name under that filesystem's actual comparison rules, and a revalidated parent-entry observation. This is required to reason about races and aliases.
+3. **Opened object identity:** identity obtained from the retained file handle (for example POSIX device/inode or Windows volume serial/file ID), together with regular-file type and link-count evidence. This can identify an opened object but cannot, by itself, tell the reservation protocol which path key to acquire before opening or make distinct hard-link names share one path-derived key.
+
+The protocol must state explicitly which layer each field represents. A lexical canonical path must never be labelled a physical identity; an opened-object ID must not be retroactively treated as proof that the correct reservation was acquired before inspection.
+
+#### Platform and filesystem equivalence rules
+
+- Do not lowercase all Windows paths. Windows is commonly case-preserving and often case-insensitive, but case sensitivity can be enabled for particular directories and filesystem/provider behavior varies. Case folding is permitted only when a tested adapter can establish comparison semantics for the exact parent namespace and keeps that evidence live for the operation.
+- Do not lowercase POSIX paths. POSIX path case behavior is filesystem-dependent; some filesystems or mounted volumes may be case-insensitive or have additional normalization behavior.
+- Normalize separators, repeated separators, dot and dot-dot segments only through the platform path implementation and only as lexical normalization. Do not infer physical equivalence from this alone.
+- Drive-letter spelling, volume GUID paths, UNC paths, device paths, mount points, bind mounts, and provider-specific aliases require explicit adapter support and tests. Until then, unsupported forms must be rejected or remain ineligible for v2 automatic transitions. Network/remote filesystems remain outside this local-first scope and do not authorize Phase 5.
+- Trailing separators and root paths must be handled according to path type; do not strip or fold them with ad hoc string operations.
+- Long-path prefixes and alternate namespace spellings must either be normalized by a tested platform adapter or rejected. Do not silently create a second lock key for an alias that the filesystem treats as the same namespace.
+- Hard links are distinct directory entries that can identify the same opened object. A path-key protocol cannot claim that all hard-link aliases serialize unless it has an explicit, tested object-identity reservation scheme. Selected hard-link rejection paths are not a general proof that every future source/destination alias has been excluded.
+- Parent symlink/junction/reparse traversal remains rejected unless a future adapter provides retained-handle, no-follow resolution with equivalent tested guarantees. A check-then-open path walk is not a race-free substitute.
+- If the adapter cannot establish relevant volume/filesystem comparison and namespace semantics, it must fail closed for automatic eligibility. It may still provide a diagnostic lexical key for operator inspection, clearly labelled non-authoritative.
+
+#### Future reservation-key contract
+
+- Derive every requested resource key before acquiring any member of the reservation set. Each key must include a versioned adapter namespace identifier, a stable parent namespace identity, the filesystem-appropriate leaf comparison representation, and the reservation class.
+- Keep the database namespace identity common across Runtime and Maintenance classes. Lock class is a separate sort component, not a way to make aliases of the same database appear unrelated.
+- Define one global total ordering over namespace identity, leaf identity, and lock class. Every operation, including Restore, Backup, runtime startup, and maintenance, must use that same ordering. No caller-supplied order and no nested acquisition that can invert it.
+- Deduplicate identical database-identity/lock-class requests before acquisition. If two lexical inputs resolve to the same proven namespace entry, they must not produce two independent reservations for that same class.
+- If two inputs may alias but the adapter cannot prove either equivalence or distinction, abort before mutable content inspection. Do not guess by case folding or comparing path strings.
+- Acquire the complete sorted set under one operation-scoped guard. On partial failure, release only the acquired prefix in exact reverse order and abort. Do not expose partial ownership to an evaluator/executor.
+- Bind the guard to exact resolved namespace identities, adapter version, filesystem profile, and live reservation transactions. A parent replacement, changed comparison semantics, closed transaction, lost handle, or changed identity invalidates the guard and all evidence derived from it.
+- Revalidate the parent and leaf entry through retained handles before each namespace transition. A key computed during preflight is not permanent authority if the namespace can change.
+- Keep diagnostic path spellings separate from reservation keys. Avoid logging arbitrary full paths or secret-bearing path components in operational output.
+
+#### Required test matrix before v2 implementation
+
+- Lexical normalization: relative versus absolute paths, dot/dot-dot, repeated separators, trailing separators, and platform root handling.
+- Windows: drive-letter case variants, UNC and volume aliases where supported, long-path prefixes, case-sensitive directory behavior, and two names differing only by case on both case-sensitive and case-insensitive directories.
+- POSIX: case-sensitive names, case-insensitive filesystem profiles where available, mount/bind-mount aliases where supported, and Unicode/name-normalization behavior where the filesystem exposes it.
+- Parent aliases: symlink, junction, reparse point, renamed/replaced parent, and parent handle identity changes. Unsupported alias forms must fail closed.
+- Object aliases: hard links to the same database object, replacement of a leaf between key derivation and open, and file-ID/inode reuse or mismatch scenarios within adapter limits.
+- Reservation behavior: same proven namespace entry through different accepted spellings yields one key; distinct entries remain distinct; ambiguous aliases abort; duplicate requests are deduplicated; all operations sort identically; partial acquisition releases in reverse order; two child processes cannot deadlock through inverse caller order.
+- Cross-class behavior: Runtime and Maintenance keys for one database share the same namespace identity and sort deterministically; Backup source versus Restore destination conflicts are covered even when supplied through different accepted path spellings.
+- Run native tests on every claimed OS/filesystem profile. Mock-only path tests do not establish filesystem comparison, volume identity, reparse behavior, or cross-process reservation semantics.
+
+**Acceptance boundary:** until the adapter can prove a stable namespace key and the complete reservation guard remains live, v2 automatic recovery is ineligible for that operation. A lexical path match, case-insensitive string comparison, PID, sidecar pathname, or opened file ID alone is insufficient. Phase 5 remains deferred and no remote path or transport is introduced by this contract.
