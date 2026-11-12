@@ -499,3 +499,64 @@ Each injected failure below must assert (a) no subsequent destructive namespace 
 - Run the failure matrix in child processes on every claimed OS/filesystem adapter profile. Mock-only tests are unit evidence and cannot establish native flush, share-mode, no-replace, or namespace durability semantics.
 
 **Current implementation note:** the existing Restore catch path has best-effort cleanup branches for the staged file and journal, and the current implementation does not expose the v2 outcome/guard/handle contracts above. This subsection therefore records required future behavior and a concrete implementation gap; it does not claim that current Restore already preserves evidence for every ambiguous adapter failure. Until those implementation changes and native tests exist, no automatic recovery action is eligible.
+
+### Concurrent-operation interleavings and cleanup ownership (design only)
+
+This section defines how the future Restore v2 protocol must reason about competing cooperating operations and non-cooperating namespace actors. It records current coordination gaps; it does not authorize runtime implementation or claim that current path-based operations are race-free.
+
+#### Current coordination boundary
+
+- Backup acquires source-maintenance and destination-maintenance reservations.
+- Restore currently acquires destination-runtime and destination-maintenance reservations only. It does not reserve the source Backup for maintenance.
+- Therefore, a cooperating Backup operation targeting the same source path can overlap a Restore that is reading/copying that source. Path identity snapshots do not exclude in-place writes through another handle.
+- Restore's preflight observations (source validation, WAL/SHM checks, journal/orphan checks, destination kind) are path-based. A successful preflight does not freeze the namespace against a non-cooperating actor.
+- Destination reservations serialize cooperating Restore/Backup operations only when they use the same canonical reservation key. They do not prevent arbitrary filesystem mutation or handles held by unrelated software.
+- The process-local flags in the current Restore implementation describe only the current call stack. They are not durable transition evidence and cannot arbitrate a competing process after a crash.
+
+#### Required v2 reservation and lock ordering
+
+- Before hashing, validating mutable content, or creating a journal, Restore must acquire one complete deterministic reservation set: destination Runtime, source Maintenance, and destination Maintenance. Backup must acquire source Maintenance and destination Maintenance.
+- All operations must derive canonical reservation keys before acquisition and use one documented global sort order. No caller-supplied ordering and no nested acquisition that can invert the order.
+- The operation-scoped guard owns the complete set. Partial acquisition failure releases only the acquired prefix in reverse order and aborts before mutable content inspection. No partial guard may be exposed to the evaluator or executor.
+- The guard remains live across source hashing, intent publication, staging, rollback publication, installation, and any transition that depends on the protected database identities. Losing any member invalidates the operation context.
+- A Restore that cannot reserve its source must fail before inspecting/copying it. It must not downgrade to destination-only locking.
+- The lock protocol serializes only cooperating Control Center operations. It must never be described as external-handle exclusion; that is a separate adapter capability and may remain unsupported.
+
+#### Interleaving matrix
+
+| Competing interleaving | Current evidence/behavior | Future required disposition |
+|---|---|---|
+| Two Restore calls target the same destination | Destination runtime/maintenance reservations should serialize cooperating calls; second acquisition fails busy while first owns them | Keep the second call outside mutable inspection. No journal/temp cleanup by the losing call. Verify canonical-key equivalence and release order in child-process tests. |
+| Backup writes the selected Restore source while Restore validates/copies it | Restore currently has no source-maintenance reservation; path identity does not detect all in-place writes | Future Restore must hold source Maintenance for the full evidence lifetime. Without it, no v2 intent or automatic eligibility. |
+| Backup destination equals Restore destination | Shared destination-maintenance key should serialize cooperating operations; runtime reservation additionally protects Restore destination | Prove both operations canonicalize to the same key and that a busy acquisition causes no artifact cleanup or content inspection. |
+| Backup source equals Restore destination | Backup's source-maintenance reservation and Restore's destination-maintenance/runtime reservations overlap by key class only if key canonicalization is deliberately shared | Define one canonical database identity namespace across reservation classes; otherwise document and test the non-overlap as a conflict requiring a stronger protocol. Never assume different lock classes coordinate. |
+| Two Backup operations share a destination but use different sources | Destination-maintenance reservation serializes cooperating publishers | Losing operation must not run stale-temp cleanup until it owns the complete reservation set. No destination overwrite; no deletion of the winner's artifacts. |
+| A second process observes a temp/journal name while the first process is active | Filename and PID do not establish ownership; sidecar existence is not live ownership proof | Preserve candidate names. Require complete reservation acquisition and live guard before any cleanup; if ownership cannot be proven, manual-review. |
+| A non-cooperating process replaces or mutates source/destination after preflight | Current path checks may detect some replacements but not all in-place writes or retained external handles | Adapter must report transition-specific external mutation exclusion. If unsupported or unproven, evaluator returns manual-review. |
+| A destination appears between absence check and no-replace publication | No-replace hard-link publication should fail rather than overwrite | Treat collision as a terminal conflict. Never unlink the competing destination or retry with replacing rename. Preserve staged/journal/rollback evidence. |
+| A process crashes after publishing rollback but before updating local flags/returning | Local booleans disappear; both live and rollback names may remain or one may be absent | Reconstruct only from immutable intent and fresh complete evidence. Do not infer the transition from a flag, PID, path presence, or sidecar. |
+| A process crashes during cleanup while another operation starts | Cleanup may have removed some names while directory durability is uncertain | The next operation must acquire the complete reservation set, inventory all entries, and preserve all ambiguous artifacts. Cleanup is never inferred complete from the prior process exit. |
+
+#### Cleanup ownership rules
+
+- Only the operation that created a temporary artifact may propose its cleanup, and only while it still holds the complete reservation guard and can prove the exact object identity and expected parent entry. A matching filename/UUID is not ownership proof.
+- A process that fails reservation acquisition must not run cleanupStaleMaintenanceTemps, Restore orphan cleanup, journal cleanup, or any other reconciliation against that destination.
+- Reconciliation is not a generic preflight side effect. In v2 it must be a separately specified, auditable transition with a complete inventory, explicit artifact class, exact identity binding, no-follow semantics, and a successful namespace durability step.
+- Never delete a journal, rollback, or unknown entry merely because another process appears inactive or because a lock sidecar is present/absent.
+- A cleanup warning means the operation did not fully clean up. The warning must identify only a bounded artifact category and error code; it must not invite a caller to retry deletion without reacquiring and revalidating the full context.
+- If the publishing operation loses its guard after creating an artifact, it stops. A later operation may inspect the artifact but cannot inherit the former operation's cleanup authority from its filename or journal PID.
+- If two candidate owners or operation identifiers appear to claim one artifact, preserve it and require manual review.
+
+#### Required concurrency and adversarial tests
+
+- Run two child processes with barriers at each reservation acquisition point. Verify that same-key operations serialize, partial acquisition is released in reverse order, and the losing process performs no content read, staging, or cleanup.
+- Race Restore against Backup with the Restore source equal to the Backup source. Verify that the future complete reservation set blocks the competing Backup for the entire source evidence lifetime.
+- Exercise source/destination key alias cases (relative versus absolute paths, case behavior on Windows, parent normalization, and equivalent database paths). Verify one canonical key or an explicit fail-closed collision.
+- Race two Backup operations with distinct sources and the same destination. Verify one publisher wins, the other preserves its own evidence, and neither deletes the winner's staging directory.
+- Inject destination creation/replacement between preflight, rollback publication, original unlink, install publication, and cleanup. Verify no replacing rename, no unlink of an unowned object, and no blind retry.
+- Kill the owner after each artifact creation/publication and start a second process. Verify the second process does not treat PID/sidecar/name as stale ownership and does not clean artifacts before complete reservations and inventory.
+- Mutate source bytes in place while a Restore is validating/copying. Verify that path-only identity is insufficient and that v2 either excludes the external mutation through a tested adapter capability or returns manual-review.
+- Lose the reservation guard immediately before each cleanup step. Verify cleanup is skipped and the stale context cannot be reused.
+- Record operation-level outcomes without exposing tokens, database content, arbitrary paths, or raw exception messages.
+
+**Current implementation gap:** the Restore path's source reservation and external mutation exclusion are not implemented. The current tests and cooperating SQLite locks cannot prove arbitrary external handles are absent. These remain Phase 6 implementation prerequisites; current automatic recovery remains disabled.
