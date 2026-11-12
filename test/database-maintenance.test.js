@@ -71,14 +71,18 @@ test('database reservation sets canonicalize, deduplicate, sort, and release in 
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-set-'));
   const first = join(directory, 'a.sqlite');
   const second = join(directory, 'b.sqlite');
+  mkdirSync(join(directory, 'sub'));
+  const dotDotAlias = join(directory, 'sub', '..', 'a.sqlite');
   let guard;
   try {
-    guard = acquireDatabaseReservationSet([
+    const requests = [
       { databasePath: second, lockClass: 'maintenance' },
       { databasePath: first, lockClass: 'maintenance' },
-      { databasePath: first, lockClass: 'runtime' },
+      { databasePath: dotDotAlias, lockClass: 'runtime' },
       { databasePath: first, lockClass: 'runtime' }
-    ]);
+    ];
+    if (process.platform === 'win32') requests.push({ databasePath: first.toUpperCase(), lockClass: 'runtime' });
+    guard = acquireDatabaseReservationSet(requests);
     assert.deepEqual(guard.keys.map(key => [key.databasePath, key.lockClass]), [
       [first, 'runtime'], [first, 'maintenance'], [second, 'maintenance']
     ]);
@@ -122,12 +126,123 @@ test('database reservation set releases partial acquisitions when a later sorted
   }
 });
 
+test('opposite-order child-process reservation requests terminate without deadlock or partial lock leaks', { timeout: 15000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-process-order-'));
+  const first = join(directory, 'a.sqlite');
+  const second = join(directory, 'b.sqlite');
+  const worker = fileURLToPath(new URL('../test-support/reservation-set-worker.js', import.meta.url));
+  let holder;
+  let contender;
+  try {
+    holder = spawn(process.execPath, [worker, 'forward', first, second, '1500'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let holderOutput = '';
+    holder.stdout.setEncoding('utf8').on('data', chunk => { holderOutput += chunk; });
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('reservation holder did not acquire both keys')), 5000);
+      const check = () => {
+        if (holderOutput.includes('LOCKED')) { clearTimeout(timeout); resolve(); }
+      };
+      holder.stdout.on('data', check);
+      holder.once('error', error => { clearTimeout(timeout); reject(error); });
+      holder.once('exit', code => { clearTimeout(timeout); reject(new Error('holder exited before acquiring keys: ' + code)); });
+    });
+
+    contender = spawn(process.execPath, [worker, 'reverse', first, second, '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let contenderOutput = '';
+    let contenderError = '';
+    contender.stdout.setEncoding('utf8').on('data', chunk => { contenderOutput += chunk; });
+    contender.stderr.setEncoding('utf8').on('data', chunk => { contenderError += chunk; });
+    const [[contenderCode]] = await Promise.all([once(contender, 'exit'), once(contender.stderr, 'end')]);
+    assert.equal(contenderCode, 0, contenderError);
+    assert.equal(contenderOutput.trim(), 'BLOCKED');
+    const [[holderCode]] = await Promise.all([once(holder, 'exit'), once(holder.stderr, 'end')]);
+    assert.equal(holderCode, 0, holderOutput);
+    holder = null;
+    assert.equal(inspectDatabaseFileLock(first + '.maintenance.lock').active, false);
+    assert.equal(inspectDatabaseFileLock(second + '.maintenance.lock').active, false);
+
+    const recovered = acquireDatabaseReservationSet([
+      { databasePath: second, lockClass: 'maintenance' },
+      { databasePath: first, lockClass: 'maintenance' }
+    ]);
+    recovered.release();
+  } finally {
+    for (const child of [holder, contender]) {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await once(child, 'exit');
+      }
+    }
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('process death releases a multi-database reservation guard without deleting sidecars', { timeout: 15000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-process-crash-'));
+  const first = join(directory, 'a.sqlite');
+  const second = join(directory, 'b.sqlite');
+  const worker = fileURLToPath(new URL('../test-support/reservation-set-worker.js', import.meta.url));
+  let child;
+  try {
+    child = spawn(process.execPath, [worker, 'crash', first, second], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => { output += chunk; });
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('crash worker did not acquire reservation set')), 5000);
+      child.stdout.on('data', () => {
+        if (output.includes('LOCKED')) { clearTimeout(timeout); resolve(); }
+      });
+      child.once('error', error => { clearTimeout(timeout); reject(error); });
+      child.once('exit', code => {
+        if (!output.includes('LOCKED')) { clearTimeout(timeout); reject(new Error('crash worker exited before acquisition: ' + code)); }
+      });
+    });
+    const [code] = await once(child, 'exit');
+    assert.notEqual(code, 0);
+    child = null;
+
+    for (const path of [first + '.maintenance.lock', second + '.maintenance.lock']) {
+      assert.equal(existsSync(path), true, 'persistent sidecar must remain after owner death');
+      assert.equal(inspectDatabaseFileLock(path).active, false, 'SQLite must release the dead process reservation');
+    }
+    const recovered = acquireDatabaseReservationSet([
+      { databasePath: first, lockClass: 'maintenance' },
+      { databasePath: second, lockClass: 'maintenance' }
+    ]);
+    recovered.release();
+    assert.equal(existsSync(first + '.maintenance.lock'), true);
+    assert.equal(existsSync(second + '.maintenance.lock'), true);
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await once(child, 'exit');
+    }
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('database reservation set rejects invalid lock classes and file-backed memory aliases', () => {
   assert.throws(() => acquireDatabaseReservationSet([]), /At least one/);
   assert.throws(() => acquireDatabaseReservationSet([{ databasePath: 'x.sqlite', lockClass: 'unknown' }]), /runtime or maintenance/);
   assert.throws(() => acquireDatabaseReservationSet([{ databasePath: ':memory:', lockClass: 'runtime' }]), /file-backed/);
   const releaseMemoryMaintenance = acquireDatabaseMaintenanceLock(':memory:');
   assert.doesNotThrow(() => releaseMemoryMaintenance());
+});
+
+test('database reservation sets reject parent-directory aliases instead of acquiring through them', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-reservation-parent-alias-'));
+  const real = join(directory, 'real');
+  const alias = join(directory, 'alias');
+  try {
+    mkdirSync(real);
+    symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => acquireDatabaseReservationSet([
+      { databasePath: join(alias, 'database.sqlite'), lockClass: 'maintenance' }
+    ]), /symbolic link or junction/);
+    assert.equal(existsSync(join(real, 'database.sqlite.maintenance.lock')), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 test('restore inspect refuses symlinked parent paths before reading recovery journals', () => {

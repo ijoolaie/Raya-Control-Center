@@ -258,7 +258,7 @@ For any future operation that must reserve more than one database, use one share
 - acquireDatabaseReservationSet now canonicalizes database parents, deduplicates identical (database, lock-class) keys, orders by canonical path and then runtime-before-maintenance, and returns one operation-scoped guard. Raw release callbacks do not escape the helper.
 - Partial acquisition failure releases every acquired key in reverse order. Successful guard release is reverse-ordered and idempotent; assertHeld rejects use after release.
 - Backup now reserves source and destination maintenance keys through the shared guard. Restore reserves destination runtime plus source and destination maintenance keys before it inspects or publishes Restore intent.
-- Regression tests verify deterministic order, duplicate-key collapse, partial-release after a busy later key, and that a Restore source-lock conflict leaves no destination reservation and publishes no journal. The complete database-maintenance test file passes on the local Windows host. Full suite: 181 passed, 4 skipped, 0 failed; npm run check and git diff --check pass.
+- Regression tests verify deterministic order, duplicate-key collapse, dot-dot aliases, Windows case variants, rejection of symlink/junction parent aliases, partial-release after a busy later key, opposite-order child-process contention, process-death release without sidecar deletion, and that a Restore source-lock conflict leaves no destination reservation and publishes no journal. The complete database-maintenance test file passes on the local Windows host.
 - These SQLite reservations coordinate only cooperating processes. They do not satisfy the still-open native handle identity, external-mutation exclusion, or platform durability gates and do not make any recovery state eligible for automatic action.
 #### Required concurrency tests
 
@@ -269,7 +269,7 @@ For any future operation that must reserve more than one database, use one share
 - Crash a child while it holds multiple reservations; after process exit, verify SQLite releases the transactions and a new process can acquire them without deleting or recreating sidecar files.
 - Run the same tests on supported Windows and POSIX CI. Filesystems with unreliable SQLite locking or unsupported canonicalization remain outside the automatic-recovery support matrix.
 
-**Implementation boundary:** this is a proposed protocol, not a claim that current Backup/Restore already use sorted multi-lock acquisition. No lock code or runtime behavior is changed in this step.
+**Implementation boundary:** Backup and Restore now use the shared sorted multi-lock guard. This is only the cooperating-process reservation prerequisite; it does not satisfy native handle identity, non-cooperating mutation exclusion, or platform durability, and it does not enable automatic recovery.
 
 ### Handle-based file identity adapters (proposed; design only)
 
