@@ -797,3 +797,35 @@ The implementation may represent terminal release failure separately from releas
 - Run native cross-process tests on each claimed supported OS/filesystem profile. In-process mocks alone do not establish SQLite/OS lock lifetime or process-death behavior.
 
 **Acceptance boundary:** until the complete operation-scoped guard, global ordering, reverse unwind, terminal error semantics, and adversarial child-process tests exist, current per-file lock closures remain the only implemented mechanism. They are not a v2 guard. Automatic Restore recovery remains disabled and operator-led. Phase 5 remains deferred.
+
+### Artifact classification and Journal/operation binding (design only)
+
+#### Current implementation boundary
+- The current v1 journal contains four paths but no operation UUID. UUID-shaped filename tokens are checked independently for staged and rollback names; this is a naming-shape check, not proof that either object was created by the journal's operation.
+- The inspector's artifacts object is populated from paths read from the journal. It reports path existence/kind/size, but does not prove that the journal path, journal temporary hard link, staged file, rollback file, or live destination are the same objects observed during one stable inventory.
+- The journal-present path currently inventories only UUID-shaped journal temporary names in the destination directory. The journal-absent path recognizes selected filename patterns. Neither path classifies every directory entry or establishes ownership of an artifact.
+- The v1 journal has no strict canonical schema/checksum or operation UUID binding. A valid-looking path and UUID token therefore cannot be promoted into provenance or cleanup authority.
+
+#### Required v2 artifact identity model
+- Define one immutable operation UUID at operation creation. Every artifact role has one exact canonical basename grammar derived from that UUID and the intended destination namespace; the grammar is versioned and case-sensitive only where the tested filesystem adapter can prove that comparison rule.
+- The immutable journal must bind, by role, the exact canonical path, expected parent identity, artifact name, expected object type, content digest/length where applicable, and publication semantics. It must also bind the operation UUID, operation kind, schema version, and reservation-set digest.
+- Artifact roles are distinct and non-interchangeable: journal, journal-publication temporary, staged database, rollback/original database, and installed live database. A matching UUID token never makes one role valid as another role.
+- Every observed entry is classified independently of its name. The classification result must include the bounded entry name, role candidate, object kind, stable object identity and link count where supported, exact parent identity, open/inspection result, and whether it matches exactly one journal role. Unknown, duplicate-role, multiply-matched, aliased, malformed, or unclassifiable entries make the inventory incomplete and the operation manual-review.
+- Journal path agreement is exact under the active adapter's proven namespace comparison rules. Do not use unconditional lowercasing as a substitute for filesystem semantics. A case/normalization collision, alternate path spelling that cannot be proven equivalent, cross-parent artifact, or UUID disagreement is a contradiction, not a candidate to repair.
+- A journal's presence or valid checksum does not establish that its listed artifacts exist, are operation-owned, or have expected content. Conversely, a recognized artifact without a valid journal remains unowned evidence and must be preserved.
+- A journal temporary hard link may be treated as the same journal object only after handle-derived object identity and link-count evidence establish the relationship under the tested adapter. Name resemblance or equal contents are insufficient.
+- The inventory projection and journal binding are immutable for one evaluation attempt and are tied to the same retained parent handles, complete reservation guard, adapter profile, and operation context. Re-enumeration or any identity/content/path change invalidates the projection; a new attempt must collect fresh evidence.
+- A role match is not cleanup permission. Cleanup requires the exact object identity, proof that the current operation created/owns that object, complete live guard, fresh same-context evidence, no aliases outside the approved namespace, and a separately accepted no-replace/durability transition. Otherwise preserve it for operator review.
+- Never infer operation ownership from PID, timestamp, UUID-shaped name, file content alone, journal path alone, or the fact that the current process can open the file.
+
+#### Required adversarial tests
+- Correct UUID but wrong role suffix; correct role suffix but wrong UUID; journal path points outside the declared parent; duplicate candidates for one role; two roles resolving to one object; and one entry matching multiple roles.
+- Journal UUID differs from staged/rollback/temp tokens; malformed/noncanonical UUID; unknown journal fields/version; checksum-valid but contradictory paths; checksum mismatch; and journal replacement between read and evidence binding.
+- Journal temporary name and published journal name are hard links to one object, then to distinct equal-content objects; verify only the former can satisfy the alias relation when identity/link evidence is complete.
+- Case-folding and Unicode-normalization collisions on filesystems with differing semantics; never assume the same comparison behavior across Windows and POSIX.
+- A valid-looking artifact located in another directory, a parent renamed/replaced after enumeration, and an artifact moved between enumeration and handle inspection.
+- Regular file replaced by directory, symlink/reparse point, hard link, device/FIFO/socket where supported, or another non-regular object; all unsupported kinds remain incomplete/manual-review.
+- Unknown filename, duplicate name under adapter comparison rules, unreadable entry, partial enumeration, concurrent add/remove/replace, identity reuse, and adapter capability loss.
+- Prove that no cleanup occurs on filename/UUID match alone, on a stale serialized decision, after guard/handle release, or when an artifact's exact operation ownership cannot be established.
+
+**Acceptance boundary:** current v1 inspection remains diagnostic and operator-led. This section defines future v2 evidence requirements only; it adds no runtime artifact ownership, no cleanup authority, and no automatic recovery. Phase 6 remains Planned — not started; Phase 5 remains deferred.
