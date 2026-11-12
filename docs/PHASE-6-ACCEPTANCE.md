@@ -133,3 +133,43 @@ The following items were listed in the Architecture Deferred section when Phase 
 - Keep the existing local-first and loopback-only security boundary until that authorization and its acceptance gates are satisfied.
 - Each workstream must have implementation, tests, documentation, and operational evidence recorded before its checkbox is marked complete.
 - At Phase 6 exit, every item in the Deferred inventory captured at Phase 6 creation must be completed and verified; none may remain Deferred, merely undocumented, or be silently dropped/re-labelled. The remote/multi-machine workstream remains subject to the separate explicit authorization gate; until that authorization is given, Phase 6 cannot be declared complete while that item is still pending.
+
+### Restore recovery eligibility: implementation feasibility review (source-derived; design only)
+
+The current implementation was inspected in `src/database-runtime-lock.js`, `src/database-maintenance.js`, and `src/file-system-durability.js`, together with `test/file-system-durability.test.js`.
+
+#### Verified primitives and their limits
+
+- Runtime and maintenance reservations are separate persistent SQLite sidecar databases. Ownership is the live `BEGIN IMMEDIATE` transaction, not sidecar existence. Acquisition fails closed on SQLite busy; release rolls back and closes the connection. Restore acquires the destination runtime reservation and then destination maintenance reservation, releasing in reverse order.
+- These reservations serialize Control Center operations that use the same protocol. They do not prove that arbitrary external processes, old binaries, or direct filesystem actors have no open handles or are not replacing paths. Recovery must require a trusted parent/ACL boundary and must not infer exclusive ownership from a free sidecar alone.
+- Current Restore source identity is sampled with `lstatSync(path, { bigint: true })` before and after copying. The snapshot includes device, inode, size, mtimeNs, and ctimeNs, but it is pathname-based, not a stable opened-handle identity. The staged copy is SQLite-validated and file-flushed, but current journal v1 does not bind it to a durable digest.
+- Current journal publication uses exclusive temporary creation, file flush, hard-link no-replace publication, and parent-directory sync. Restore's later namespace transitions also use hard links and directory sync. This is a useful protocol baseline, not sufficient recovery evidence by itself.
+- `syncDirectory` performs directory fsync on supported POSIX runtimes. On Windows it explicitly returns unsupported because Node does not expose a portable directory-handle flush. Tests verify both behaviors. Therefore a Windows recovery protocol cannot claim the same namespace durability boundary as POSIX using the current primitive.
+- The current API surface does not provide a portable, cross-platform way to open a file without following all relevant reparse/symlink cases and then prove stable native file identity from that same handle. POSIX and Windows need separately specified, tested native adapters before either platform can be marked eligible for automatic recovery.
+
+#### State eligibility matrix
+
+| Observed state / evidence | Safe continuation | Safe rollback | Required outcome today |
+|---|---:|---:|---|
+| No journal; no recognized artifacts; inventory complete; no active/unknown locks | No | No | Manual/operator-led normal startup; absence is not a recovery transaction |
+| Unpublished journal temp exists, or inventory is incomplete | No | No | Manual review; preserve every artifact |
+| Journal malformed, unknown version/fields, unreadable, or destination mismatch | No | No | Manual review; preserve journal and artifacts |
+| Valid v1 journal with any artifact combination | No | No | Manual review; v1 lacks content and object-identity binding |
+| Valid future v2 intent; staged bytes exactly match source digest/size and SQLite validation; destination still in the explicitly recorded initial state; rollback evidence matches; all relevant ownership and platform gates pass | Candidate only | No | Not eligible until v2 implementation and crash-injection tests prove the exact transition |
+| Valid future v2 intent; original rollback object is verified against recorded identity/content; install is absent or provably not published; destination is safely absent; ownership and durability gates pass | No | Candidate only | Not eligible until v2 implementation and crash-injection tests prove the exact transition |
+| Live and rollback both exist, but identity relationship is uncertain; staged and live both exist without proven same-object identity; destination collision; unexpected hard links | No | No | Manual review |
+| Any active/unknown runtime or maintenance reservation, open/unknown handle, untrusted/aliased parent, symlink/reparse uncertainty, permission error, digest mismatch, unsupported filesystem, or failed durability operation | No | No | Manual review |
+| Journal absent after a completed install, with rollback still present | No | No | Preserve rollback; journal absence never authorizes rollback deletion |
+
+The two “candidate” v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
+
+#### Required protocol corrections before any automatic action
+
+1. Define multi-file reservation ordering for both Restore source and destination. The current Restore path reserves only the destination; source path identity is checked by pathname snapshots. Acquire source and destination maintenance reservations in a deterministic canonical order to avoid cross-operation deadlocks, while preserving destination runtime exclusion. If a source cannot participate in the reservation protocol, automatic recovery is ineligible.
+2. Define handle-based file identity adapters separately for POSIX and Windows. Capture identity, type, size, link count, and relevant timestamps from the opened handle, then verify the directory entry still names that same object. Path-based `lstat` snapshots remain useful diagnostics but cannot satisfy this gate.
+3. Define reparse-point/no-follow behavior and trusted-parent validation using platform-native APIs. If the implementation cannot prove these properties on a filesystem, that platform/filesystem combination remains manual-review-only.
+4. Specify what “no active handles” means operationally. SQLite reservation release is necessary for cooperating Control Center processes but is not a universal proof against external handles. Do not use PID liveness or lock-file presence as a substitute.
+5. Keep the durability contract platform-specific. POSIX directory fsync may support a stronger namespace boundary where tested; Windows must remain manual-review-only for transitions whose correctness depends on directory flush until a native, tested flush implementation exists. Do not downgrade a failed flush into a successful recovery result.
+6. Preserve rollback indefinitely until a separate, verified retention/backup policy authorizes cleanup. Recovery must never delete rollback merely because the journal is absent or installation appears complete.
+
+**Decision:** no observed crash state is currently approved for automatic continuation or automatic rollback. The current runtime remains operator-led and read-only for recovery inspection. This review changes documentation only; it does not implement Journal v2, alter Restore behavior, or start Phase 5.
