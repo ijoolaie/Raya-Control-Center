@@ -1,0 +1,145 @@
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { restoreDatabaseBackup } from '../src/database-maintenance.js';
+
+const [mode, backup, destination] = process.argv.slice(2);
+const originalLink = fs.linkSync;
+const originalCopy = fs.copyFileSync;
+const originalRm = fs.rmSync;
+const originalUnlink = fs.unlinkSync;
+
+fs.linkSync = (source, target) => {
+  if (target === destination && !source.startsWith(destination + '.pre-restore-') && !['crash-after-install', 'crash-after-temp-cleanup', 'crash-after-journal-cleanup', 'journal-cleanup-failure', 'destination-race', 'rollback-failure', 'source-replaced-before-copy'].includes(mode) && !mode.startsWith('directory-sync-failure-')) throw new Error('injected-install-failure');
+  if (mode === 'crash-before-journal-publish' && target === destination + '.restore-journal.json') process.exit(82);
+  if (mode === 'destination-race' && target === destination) fs.writeFileSync(destination, 'concurrent destination');
+  const result = originalLink(source, target);
+  if (mode === 'crash-after-journal' && target === destination + '.restore-journal.json') process.exit(77);
+  return result;
+};
+
+if (mode === 'source-replaced-before-copy') {
+  fs.copyFileSync = (source, target, flags) => {
+    fs.renameSync(source, source + '.original');
+    fs.renameSync(source + '.replacement', source);
+    return originalCopy(source, target, flags);
+  };
+}
+if (mode === 'crash-after-stage') {
+  fs.copyFileSync = (source, target, flags) => {
+    const result = originalCopy(source, target, flags);
+    if (target.endsWith('.restore')) process.exit(76);
+    return result;
+  };
+} else if (mode === 'crash-before-original-move') {
+  fs.linkSync = (source, target) => {
+    if (source === destination && target.startsWith(destination + '.pre-restore-')) process.exit(75);
+    return originalLink(source, target);
+  };
+} else if (mode === 'crash-after-original-move') {
+  fs.unlinkSync = target => {
+    const result = originalUnlink(target);
+    if (target === destination) process.exit(78);
+    return result;
+  };
+ } else if (mode === 'crash-after-rollback-link') {
+  fs.linkSync = (source, target) => {
+    const result = originalLink(source, target);
+    if (source === destination && target.startsWith(destination + '.pre-restore-')) process.exit(74);
+    return result;
+  };
+} else if (mode === 'crash-after-install') {
+  fs.linkSync = (source, target) => {
+    if (target === destination) {
+      originalLink(source, target);
+      process.exit(79);
+    }
+    return originalLink(source, target);
+  };
+} else if (mode === 'crash-after-temp-cleanup') {
+  fs.rmSync = (target, options) => {
+    const result = originalRm(target, options);
+    const journal = JSON.parse(fs.readFileSync(destination + '.restore-journal.json', 'utf8'));
+    if (target === journal.temporary) process.exit(80);
+    return result;
+  };
+} else if (mode === 'crash-after-journal-cleanup') {
+  fs.unlinkSync = target => {
+    const result = originalUnlink(target);
+    if (target === destination + '.restore-journal.json') process.exit(81);
+    return result;
+  };
+} else if (mode === 'journal-cleanup-failure') {
+  fs.rmSync = (target, options) => {
+    if (typeof target === 'string' && target.endsWith('.restore')) throw Object.assign(new Error('injected-temporary-cleanup-failure'), { code: 'EBUSY' });
+    return originalRm(target, options);
+  };
+  fs.unlinkSync = target => {
+    if (target === destination + '.restore-journal.json') throw Object.assign(new Error('injected-journal-cleanup-failure'), { code: 'EIO' });
+    return originalUnlink(target);
+  };
+} else if (mode === 'rollback-failure') {
+  let destinationLinkCount = 0;
+  fs.linkSync = (source, target) => {
+    if (target === destination) {
+      destinationLinkCount += 1;
+      if (destinationLinkCount === 1) throw new Error('injected-install-failure');
+      if (destinationLinkCount === 2) throw new Error('injected-rollback-failure');
+    }
+    return originalLink(source, target);
+  };
+}
+
+if (mode === 'sync-failure') {
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const tracked = new Set();
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string' && target.endsWith('.restore')) tracked.add(descriptor);
+    return descriptor;
+  };
+  fs.fsyncSync = descriptor => {
+    if (tracked.has(descriptor)) throw Object.assign(new Error('injected-restore-fsync-failure'), { code: 'EIO' });
+    return originalFsync(descriptor);
+  };
+}
+if (mode.startsWith('directory-sync-failure-')) {
+  const failureAt = Number(mode.slice('directory-sync-failure-'.length));
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const originalClose = fs.closeSync;
+  const directories = new Set();
+  let directorySyncCount = 0;
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string') {
+      try { if (fs.statSync(target).isDirectory()) directories.add(descriptor); } catch {}
+    }
+    return descriptor;
+  };
+  fs.closeSync = descriptor => {
+    directories.delete(descriptor);
+    return originalClose(descriptor);
+  };
+  fs.fsyncSync = descriptor => {
+    if (directories.has(descriptor)) {
+      directorySyncCount += 1;
+      if (directorySyncCount === failureAt) {
+        throw Object.assign(new Error('injected-directory-fsync-failure-' + failureAt), { code: 'EIO' });
+      }
+    }
+    return originalFsync(descriptor);
+  };
+}
+syncBuiltinESMExports();
+try {
+  const result = restoreDatabaseBackup(backup, destination);
+  process.stdout.write(JSON.stringify({ ok: true, result }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({
+    ok: false,
+    name: error.name,
+    message: error.message,
+    errors: error.errors?.map(item => item.message) ?? []
+  }));
+}
