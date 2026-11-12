@@ -325,7 +325,8 @@ test('server startup reconciles expired leases before accepting requests', { tim
     const result = await response.json();
     assert.equal(result.task.status, 'blocked');
     assert.equal(result.task.leaseId, null);
-    assert.match(stderr, /Blocked 1 task\(s\) after expired leases/);
+    assert.match(stderr, /"eventName":"lease\.reconciliation_completed"/);
+    assert.match(stderr, /"blockedTaskCount":1/);
   } finally {
     if (db) db.close();
     if (portServer?.listening) await new Promise(resolve => portServer.close(resolve));

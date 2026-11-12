@@ -1,6 +1,6 @@
-# Phase 6 — Deferred Capability Closure: Acceptance Plan
+# Phase 6 Ã¢â‚¬â€ Deferred Capability Closure: Acceptance Plan
 
-**Status:** Planned; no Phase 6 implementation is authorized or started by this document.
+**Status:** In progress; operator authorization received 2026-11-12. Workstream 1 (Structured Operational Logs) implementation has started.
 **Parent plan:** `docs/ROADMAP.md`.
 **Boundary:** Phase 5 remains Deferred. This plan does not authorize remote binding, tunnels, proxies, port forwarding, external repository changes, or arbitrary code execution.
 
@@ -11,7 +11,7 @@ Phase 6 closes the Deferred inventory recorded when it was added. A workstream i
 ### Current baseline
 - The application currently emits a small number of human-readable startup, shutdown, lease-reconciliation, and maintenance messages.
 - CLI JSON/stdout responses and one-time credential displays are command interfaces, not operational logs; they must remain separate.
-- No shared structured operational event schema is currently established.
+- No shared structured operational event schema was established at Phase 6 start; the initial implementation is tracked below.
 
 ### Required design
 - Use a versioned schema with a fixed event-name allowlist and per-event field allowlists.
@@ -21,6 +21,14 @@ Phase 6 closes the Deferred inventory recorded when it was added. A workstream i
 - Error reporting must map failures to bounded error codes/categories. Do not serialize stack traces or error messages unless a separately reviewed sanitizer proves they contain no secrets or user data.
 - Define output destination, encoding, maximum event size, behavior when the sink fails, and operator retention/rotation responsibilities. Logging failure must not silently change task/lease/authorization outcomes; security-critical failure behavior must be explicit.
 - Keep CLI contract output and one-time secret output out of the operational logger.
+
+### Initial implementation (2026-11-12)
+- `src/operational-logger.js` implements schema version 1 with a fixed event allowlist, exact per-event field allowlists, typed values, UTC timestamps, severity, process-instance UUID, and event UUID.
+- Events cover server start/startup failure/shutdown, lease reconciliation, Backup/Restore completion/failure/inspection, and Operator token recovery outcomes. Event fields are restricted to a listener port, bounded counts/schema version, booleans, fixed journal-status enums, or bounded error codes; raw error messages and exception objects are never serialized.
+- Records are UTF-8 NDJSON written to stderr and capped at 2 KiB. The logger accepts at most 100 events per event name and 1,000 events per process. Invalid, unknown, or over-limit events are dropped.
+- Sink write exceptions are contained and events dropped; logging does not change task, lease, authorization, or shutdown outcomes. CLI stdout/JSON and one-time token display remain separate.
+- Retention and rotation belong to the local process supervisor/terminal capture policy. The application creates no log files and performs no rotation. Protect captured stderr as operational data; avoid transcript capture of the separate one-time credential display.
+- This is an initial runtime and maintenance-CLI slice, not workstream completion. Further adversarial field/bounds tests and broader operational verification remain pending.
 
 ### Acceptance evidence
 - Unit tests reject unknown event names and unknown fields.
@@ -131,7 +139,7 @@ The following items cover the Architecture Deferred inventory captured when Phas
 
 ### Cross-workstream boundaries and minimum acceptance
 
-The following boundaries prevent the remaining workstreams from expanding into overlapping control-plane features. They are planning constraints, not authorization to start Phase 6.
+The following boundaries prevent the remaining workstreams from expanding into overlapping control-plane features. They remain binding implementation constraints throughout the now-authorized Phase 6 work.
 
 | Workstream | Owns | Explicitly does not own |
 |---|---|---|
@@ -148,9 +156,9 @@ Minimum acceptance evidence for the remaining workstreams:
 - **Dashboard analytics:** publish a metric dictionary with numerator/denominator, population, time window, freshness/update semantics, and known limitations for every metric. Queries must be Operator-authorized, read-only, payload/result/credential-free, bounded by explicit time-range and result limits, and tested against query-cost limits. Tests must prove analytics cannot mutate Task/Participant/Lease state and that stale/empty data is labeled rather than presented as current. Aggregate counts for routing availability belong here only if useful; they do not replace the per-Task diagnostic.
 - **Per-Task capability mismatch diagnostics:** return a bounded explanation computed from current state at query time using the exact atomic-claim eligibility predicate. Tests must cover empty requirements, zero eligible Participants, partial and full coverage, revocation/capability changes, and concurrent updates. The endpoint/UI must not expose Task payload/results or credentials and must never feed back into claim selection or authorization. This workstream is per-Task and point-in-time, not a dashboard metric or historical analytics engine.
 - **Automatic retries:** define a versioned opt-in retry contract per task type, including idempotency key semantics, maximum attempts, bounded backoff/jitter, deadline, retryable versus terminal outcomes, and how uncertain external side effects are reconciled. A retry transition must be audited and revalidate Task/Lease state; no active or uncertain prior execution may be replayed. Tests must cover duplicate retry requests, process restart, exhausted budget, cancellation, terminal errors, uncertain side effects, and idempotency conflicts. Tasks without a proven contract remain blocked for Operator review. Scheduler timing must not itself imply retry eligibility.
-### Recommended dependency order (planning only)
+### Recommended dependency order
 
-This order is a dependency guide, not a start signal or an expansion of Phase 6 authorization. Work may proceed in parallel only where the stated prerequisites and shared-state boundaries remain satisfied.
+This order is a dependency guide for the authorized Phase 6 work; it does not remove per-workstream prerequisites or separately gated authorizations. Work may proceed in parallel only where the stated prerequisites and shared-state boundaries remain satisfied.
 
 1. **Establish shared foundations:** settle the bounded event vocabulary/redaction policy for Structured Operational Logs, and settle the trust-root, artifact, permission, and isolation decisions for the Plugin Marketplace. These are separate designs; neither grants permission to execute extensions or emit sensitive operational data.
 2. **Close safety-critical persistence recovery:** implement and verify Automatic Restore Recovery only after its complete Journal v2, reservation guard, native adapter, inventory, durability, and crash-injection prerequisites are met. This workstream is independent of marketplace delivery and must not be weakened to fit another workstream's schedule.
@@ -169,7 +177,7 @@ Cross-workstream constraints:
 - No dependency or sequence in this section authorizes Phase 5, remote exposure, or the start of Phase 6 implementation.
 ## 4. Phase 6 governance and exit
 
-- Phase 6 work must not begin until explicitly scheduled/authorized by the operator; this document is planning evidence only.
+- Phase 6 is authorized and In Progress as of 2026-11-12. Each workstream must still satisfy its own prerequisites and acceptance evidence.
 - Phase 5 remote work requires its own explicit authorization even while Phase 6 is active.
 - Keep the existing local-first and loopback-only security boundary until that authorization and its acceptance gates are satisfied.
 - Each workstream must have implementation, tests, documentation, and operational evidence recorded before its checkbox is marked complete.
@@ -202,7 +210,7 @@ The current implementation was inspected in `src/database-runtime-lock.js`, `src
 | Any active/unknown runtime or maintenance reservation, open/unknown handle, untrusted/aliased parent, symlink/reparse uncertainty, permission error, digest mismatch, unsupported filesystem, or failed durability operation | No | No | Manual review |
 | Journal absent after a completed install, with rollback still present | No | No | Preserve rollback; journal absence never authorizes rollback deletion |
 
-The two “candidate” v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
+The two Ã¢â‚¬Å“candidateÃ¢â‚¬Â v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
 
 #### Mutual-exclusion rule for future eligibility
 
@@ -221,7 +229,7 @@ The two candidate rows above are hypotheses, not a complete truth table. They ar
 1. Define multi-file reservation ordering for both Restore source and destination. The current Restore path reserves only the destination; source path identity is checked by pathname snapshots. Acquire source and destination maintenance reservations in a deterministic canonical order to avoid cross-operation deadlocks, while preserving destination runtime exclusion. If a source cannot participate in the reservation protocol, automatic recovery is ineligible.
 2. Define handle-based file identity adapters separately for POSIX and Windows. Capture identity, type, size, link count, and relevant timestamps from the opened handle, then verify the directory entry still names that same object. Path-based `lstat` snapshots remain useful diagnostics but cannot satisfy this gate.
 3. Define reparse-point/no-follow behavior and trusted-parent validation using platform-native APIs. If the implementation cannot prove these properties on a filesystem, that platform/filesystem combination remains manual-review-only.
-4. Specify what “no active handles” means operationally. SQLite reservation release is necessary for cooperating Control Center processes but is not a universal proof against external handles. Do not use PID liveness or lock-file presence as a substitute.
+4. Specify what Ã¢â‚¬Å“no active handlesÃ¢â‚¬Â means operationally. SQLite reservation release is necessary for cooperating Control Center processes but is not a universal proof against external handles. Do not use PID liveness or lock-file presence as a substitute.
 5. Keep the durability contract platform-specific. POSIX directory fsync may support a stronger namespace boundary where tested; Windows must remain manual-review-only for transitions whose correctness depends on directory flush until a native, tested flush implementation exists. Do not downgrade a failed flush into a successful recovery result.
 6. Preserve rollback indefinitely until a separate, verified retention/backup policy authorizes cleanup. Recovery must never delete rollback merely because the journal is absent or installation appears complete.
 
@@ -351,7 +359,7 @@ A successful open of a candidate handle proves only that this operation holds th
 - Bind every recognized artifact to an exact expected role, canonical relative name, operation UUID, journal record, parent identity, opened object identity, link count, size, and digest as applicable. A UUID-shaped filename is only a candidate label; it does not prove ownership, operation association, content, or permission to delete.
 - Inventory completeness requires a platform-specific race protocol: enumerate and inspect entries relative to retained parent handles; capture stable entry/object identity; detect additions, removals, replacements, and parent changes over the full interval using a tested directory change/version primitive or equivalent adapter mechanism. A before/after listing is only supplemental unless native tests prove it detects all relevant races for that filesystem. If the platform cannot provide a sufficiently strong snapshot/change-detection guarantee, report incomplete/unsupported and remain operator-led.
 - Where multiple roots are involved, bind each root's parent identity and inventory result into one canonical aggregate evidence digest. Any root omitted, enumeration truncated, resource limit reached, or root identity changed invalidates the aggregate. The journal's recorded paths must resolve under the exact inventoried roots; a path outside them is a contradiction, not an implicit additional root.
-- In the no-journal case, absence of the journal does not narrow the scan: inventory all entries in every configured Restore artifact root, including unknown names and all candidate rollback/staged/temp entries. Do not infer “no artifacts” from an empty filtered allowlist.
+- In the no-journal case, absence of the journal does not narrow the scan: inventory all entries in every configured Restore artifact root, including unknown names and all candidate rollback/staged/temp entries. Do not infer Ã¢â‚¬Å“no artifactsÃ¢â‚¬Â from an empty filtered allowlist.
 - In the journal-present case, inventory the same complete namespace, not merely journal temporary names. Compare every observed candidate with the exact journal operation and expected artifact role. Unexpected extra candidates, duplicate role claims, cross-operation UUIDs, or unassociated artifacts make the evidence incomplete/contradictory.
 - Inventory is a read-only evidence operation. It must not repair names, delete unknown files, follow links, normalize away aliases, or perform cleanup while enumerating. Cleanup remains a separate transition requiring the same live complete guard/context, exact operation-owned object identity, fresh evidence, and its own no-replace/durability checks. Filename matching alone never authorizes cleanup.
 - A published journal plus a complete inventory does not itself authorize recovery. Journal validity, content digests, retained handles, reservation guard, external-mutation exclusion, platform capabilities, and one-shot evaluator/executor checks remain independent mandatory gates.
@@ -525,7 +533,7 @@ The evaluator's returned value is a decision descriptor, not an authorization to
 
 The executor must receive the exact operation-scoped context object that owns the live guard and retained handles, and must verify object identity against the context that produced the evidence/decision. A matching operation UUID, digest, path set, or newly acquired equivalent guard is not a substitute for that same in-process context. If evaluator and executor cannot share that exact context without serialization or process transfer, the result is manual-review; no IPC protocol or bearer capability is implied by this design.
 
-Treat each eligible decision as one-shot and transition-scoped. The executor atomically marks it consumed before beginning the protected transition; concurrent or repeated use is rejected. Its validity ends at the earliest of: the named transition attempt, explicit context invalidation/release, any anchor/capability/evidence drift, or the bounded expiry/revalidation boundary. A failed or ambiguous transition attempt does not make the old decision reusable. Any subsequent transition—including cleanup—requires a newly collected evidence projection and a fresh evaluation under the still-valid or newly acquired complete context. A new context always requires new evidence and a new decision. The implementation must test duplicate, concurrent, delayed, serialized/replayed, cross-context, and post-release submissions as no-mutation rejections.
+Treat each eligible decision as one-shot and transition-scoped. The executor atomically marks it consumed before beginning the protected transition; concurrent or repeated use is rejected. Its validity ends at the earliest of: the named transition attempt, explicit context invalidation/release, any anchor/capability/evidence drift, or the bounded expiry/revalidation boundary. A failed or ambiguous transition attempt does not make the old decision reusable. Any subsequent transitionÃ¢â‚¬â€including cleanupÃ¢â‚¬â€requires a newly collected evidence projection and a fresh evaluation under the still-valid or newly acquired complete context. A new context always requires new evidence and a new decision. The implementation must test duplicate, concurrent, delayed, serialized/replayed, cross-context, and post-release submissions as no-mutation rejections.
 
 #### Required evaluator/executor tests
 
@@ -542,9 +550,9 @@ No evaluator input may be assembled by promoting the current inspector's exists,
 #### Bounded output
 
 The evaluator returns exactly one of:
-- manual-review — preserve every journal/artifact; no automatic mutation.
-- eligible-continuation — a candidate authorization for one precisely named, non-destructive/forward namespace transition, with evidence digest, operation UUID, required preconditions, and expiry/revalidation boundary.
-- eligible-rollback — a candidate authorization for one precisely named rollback transition, with the same binding and revalidation requirements.
+- manual-review Ã¢â‚¬â€ preserve every journal/artifact; no automatic mutation.
+- eligible-continuation Ã¢â‚¬â€ a candidate authorization for one precisely named, non-destructive/forward namespace transition, with evidence digest, operation UUID, required preconditions, and expiry/revalidation boundary.
+- eligible-rollback Ã¢â‚¬â€ a candidate authorization for one precisely named rollback transition, with the same binding and revalidation requirements.
 
 no-pending-restore is an inspector/classifier diagnostic state, not an evaluator action or recovery authorization. The evaluator must not return generic success, recover, cleanup, delete, or retry decisions.
 
@@ -774,7 +782,7 @@ The protocol must state explicitly which layer each field represents. A lexical 
 - The source Maintenance reservation is a coordination boundary for cooperating Control Center maintenance operations only. It does not prove arbitrary external writers or handles are absent. A separate transition-specific `externalMutationExclusion` capability is mandatory; if the adapter cannot prove the required exclusion for the source-read/stage interval, Restore is ineligible for automatic recovery and must remain operator-led.
 - Retain the exact opened source handle and trusted source/destination parent handles. Derive source identity, link count, size, and digest from that handle; verify its directory entry still names the same object. Bind the immutable intent to the source digest/length and source identity, not merely its path. Do not reopen by path and treat that as the same source.
 - Stage bytes from the retained source handle (or an adapter primitive with an equally explicit same-object guarantee). Hash the staged object independently and require exact digest and byte-length equality with the intent source. Run SQLite integrity, foreign-key, and supported-schema validation against that exact staged object. The installed object must remain the same staged object whose digest and validation were recorded.
-- Bind destination state at intent time explicitly (`destinationExisted` plus exact original destination digest/identity when present). A destination appearing when intent said absent, or changing identity/content when it said present, is a collision/contradiction—not permission to overwrite. Rollback publication and install each require fresh same-context evidence and no-replace semantics.
+- Bind destination state at intent time explicitly (`destinationExisted` plus exact original destination digest/identity when present). A destination appearing when intent said absent, or changing identity/content when it said present, is a collision/contradictionÃ¢â‚¬â€not permission to overwrite. Rollback publication and install each require fresh same-context evidence and no-replace semantics.
 - Publish the immutable v2 intent only after the complete guard, retained parent/source handles, capability profile, and source/destination evidence have been established, but before creating staged or rollback artifacts and before any destructive namespace transition. The journal binds operation UUID, canonical reservation-set digest, source/staged expected digest and length, destination initial state, parent/file identities, adapter/evaluator versions, and required durability capabilities. It contains no bearer authority and no mutable phase flag.
 - The journal's publication result must distinguish not-published, published-and-durable, and possibly-published. Only published-and-durable permits staging. Possibly-published is terminal for that attempt: preserve journal and every artifact, invalidate the context, and require operator review; do not guess publication success or clean up.
 
@@ -895,4 +903,4 @@ The implementation may represent terminal release failure separately from releas
 - Unknown filename, duplicate name under adapter comparison rules, unreadable entry, partial enumeration, concurrent add/remove/replace, identity reuse, and adapter capability loss.
 - Prove that no cleanup occurs on filename/UUID match alone, on a stale serialized decision, after guard/handle release, or when an artifact's exact operation ownership cannot be established.
 
-**Acceptance boundary:** current v1 inspection remains diagnostic and operator-led. This section defines future v2 evidence requirements only; it adds no runtime artifact ownership, no cleanup authority, and no automatic recovery. Phase 6 remains Planned — not started; Phase 5 remains deferred.
+**Acceptance boundary:** current v1 inspection remains diagnostic and operator-led. This section defines future v2 evidence requirements only; it adds no runtime artifact ownership, no cleanup authority, and no automatic recovery. Phase 6 implementation is in progress, but this section remains design-only; Phase 5 remains deferred.

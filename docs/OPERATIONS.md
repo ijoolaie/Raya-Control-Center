@@ -50,6 +50,15 @@ A blocked task can be returned to `queued` only through the Operator-only requeu
 
 The reason is stored in the append-only `task.requeued` audit event. Requeue clears the old assignment, Lease reference, progress, result, and attempt timestamps but preserves the old Lease record and event history. The next eligible Worker receives a new Lease; the previous Lease token cannot heartbeat or complete the task. Repeating the requeue after it has left `blocked` is rejected. This action is a controlled replay of the same task payload, so it is appropriate only when the external state has been verified safe or the operation is independently idempotent.
 
+## Structured operational logs
+
+The server and maintenance CLIs emit versioned JSON Lines records to standard error. Each record uses schema version 1 and a fixed event/field allowlist. The current events cover server lifecycle, lease reconciliation, Backup/Restore outcomes and inspection, and offline Operator-token recovery. Records include UTC time, severity, process-instance UUID, and a unique event UUID. They do not include database paths, request data, task payloads/results, credentials, credential hashes, raw exception messages, or stack traces.
+
+The logger caps each record at 2 KiB, limits each event name to 100 records, and limits each process to 1,000 records. Invalid or over-limit records are dropped. A logging sink failure does not change application state transitions or command outcomes. CLI JSON/result output remains on standard output; one-time credentials remain separate secret-bearing command output and must not be captured or forwarded with ordinary logs.
+
+Schema evolution is explicit: increment `schemaVersion` when the envelope or an existing event field meaning changes; do not silently change an event name's meaning. A new event may be added under the current schema only when the envelope and existing event contracts remain unchanged. Consumers must reject or quarantine unsupported schema versions rather than guessing.
+
+The application does not create log files or rotate them. If a process supervisor captures standard error, configure restricted access, retention, and rotation there. Treat captured logs as operational data and do not send them to public or untrusted destinations.
 ## Configuration
 
 - `RAYA_CC_PORT`: TCP port, default `4317`.
