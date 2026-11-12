@@ -499,7 +499,19 @@ no-pending-restore is an inspector/classifier diagnostic state, not an evaluator
 2. If the evidence bundle does not prove one unique transition from the immutable intent and observed file identities/content, => manual-review.
 3. If more than one candidate action could apply, or continuation and rollback both appear plausible, => manual-review.
 4. Only after all general gates pass may a narrowly enumerated v2 transition rule return one candidate authorization. Candidate rules remain disabled until implementation, adversarial tests, and platform-specific acceptance evidence are complete.
-5. The executor must reacquire/retain the complete reservations and handles and revalidate the evidence binding immediately before mutation. Any drift, stale decision, or failed revalidation cancels authorization and returns to manual review. A decision object is never a reusable bearer capability.
+5. The executor must use the exact same still-live operation context, reservation guard, and retained handles that anchored evidence collection and evaluation; it must not release and reacquire an equivalent guard. Immediately before mutation it revalidates the evidence binding and all transition preconditions from those same anchors. Any drift, stale decision, lost resource, or failed revalidation cancels eligibility and returns to manual review. A decision object is never a reusable bearer capability.
+
+#### Decision lifecycle and transition boundary
+
+The future implementation must enforce this in-process lifecycle; these labels are design vocabulary, not persisted journal phases:
+
+1. `evidence-collected`: one immutable projection has been produced while the complete guard and all retained handles are live. No mutation is authorized.
+2. `evaluated`: the pure evaluator has returned a bounded descriptor for either `manual-review` or one exact transition. Evaluation itself has no side effects.
+3. `eligible-pending`: only an eligible descriptor may enter this transient state, and only while attached to the exact originating context. It is not serializable authority and cannot be exposed as an operator command or generic recovery permission.
+4. `consumed`: the executor atomically consumes the descriptor before the first namespace mutation attempt. Consumption is terminal even if the OS call fails, throws, or has an ambiguous result.
+5. `invalid`: any guard/handle/parent/inventory/capability drift, context mismatch, expiry, or failed precondition invalidates the descriptor before mutation. Invalid is terminal.
+
+There is no transition from `consumed` or `invalid` back to `eligible-pending`. A later attempt must start with a new evidence collection and evaluation; if the previous transition may have changed the namespace, the new inventory must account for that ambiguity and normally yields manual-review unless the adapter can prove one exact resulting state. A transition descriptor names one operation (for example, publish this exact staged object at this exact absent destination), not a sequence, goal, recovery plan, cleanup bundle, or permission to choose a fallback. Every subsequent namespace change, including alias/temp/journal cleanup, is a separate transition with separate evidence and evaluation. Operator-facing output must describe the bounded result without exposing a replayable mutation handle.
 
 #### Current status and compatibility
 
