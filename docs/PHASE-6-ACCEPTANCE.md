@@ -314,3 +314,19 @@ This section resolves ordering dependencies between immutable Journal v2 evidenc
 #### Current implementation gap
 
 The current Restore wrapper reserves destination Runtime and destination Maintenance only; it does not reserve source Maintenance. Current source validation and staging use path-based operations, and Journal v1 does not bind source/original/staged content with digests or stable handle identity. The ordered multi-reservation protocol, Journal v2 record, and native identity adapters are prerequisites, not descriptions of current behavior. No automatic recovery state is approved by this design.
+
+### Crash matrix and classifier consistency review (design only)
+
+The current source-derived matrix, recovery eligibility matrix, and runtime classifier agree on the governing safety decision: every classifier result has automaticAction = none, and no current crash state is approved for automatic continuation or rollback. The two future v2 candidate rows in the eligibility matrix remain design candidates only; they are not reachable from Journal v1 and are not implemented actions.
+
+The classifier is intentionally coarser than the crash matrix. In particular:
+- It records source and journal-temporary existence in observations, but valid-journal classification does not use those fields to distinguish every crash boundary.
+- It does not compare object identity, content digests, journal operation paths, parent identity, filesystem capabilities, or handle ownership.
+- A valid journal with a journal-temp alias, a staged file, or a particular rollback/install boundary can therefore map to a broad live/rollback state rather than a unique transition row.
+- The classifier's output is an operator diagnostic summary, not a one-to-one encoding of the crash transition matrix and not an eligibility evaluator.
+
+This is safe only because the classifier never authorizes an action. Do not expand it to automatic continuation/rollback by adding artifact-presence branches. Any future v2 evaluator must consume validated immutable journal evidence, per-handle identity and digest results, parent-entry comparisons, the complete reservation set, external-handle exclusion evidence, and platform/filesystem durability capabilities. Missing, unknown, contradictory, or untested evidence must map to manual review.
+
+The existing tests in test/database-maintenance.test.js assert conservative classification for representative artifact combinations and assert automaticAction = none. They do not prove exhaustive coverage of every row in the crash matrix, nor do they test v2 evidence because v2 is not implemented. Before any classifier/evaluator expansion, add a table-driven crosswalk test that maps every documented crash boundary to its expected coarse classifier state and separately asserts that every case remains automaticAction = none. Add explicit cases for valid journal plus journal-temp alias, source missing/present, incomplete artifact inventory, and lock inspection unknown/error. Keep this crosswalk as documentation/test consistency evidence only; it must not turn candidate states into approved actions.
+
+**Decision:** no contradiction currently authorizes recovery, but the documentation must not imply that the runtime classifier uniquely recognizes all crash boundaries. The matrix is the detailed forensic model; the classifier is a deliberately lossy, fail-closed summary. This review changes documentation only.
