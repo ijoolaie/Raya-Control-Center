@@ -62,6 +62,36 @@ The current Restore sequence in `src/database-maintenance.js` is ordered as foll
 Additional interpretation constraints:
 
 - The journal currently records version, operation, PID, timestamp, and four paths. It does **not** record a cryptographic digest, stable file-object identity, source/staged content binding, or a durable transition marker. The current schema is therefore insufficient to authorize automatic continuation or rollback.
+
+### Journal v2 evidence contract (proposed; design only)
+
+Journal v2 should be an immutable intent record published before any destructive namespace transition. Its minimum logical content should be:
+
+| Field group | Required evidence | Purpose and limits |
+|---|---|---|
+| Envelope | Exact schema version, operation identifier (UUID), operation kind, UTC creation timestamp | Reject unknown versions/operations; operation ID binds all artifact names to one attempt. PID is diagnostic only, never an ownership proof. |
+| Paths | Canonical absolute source, destination, staged, and rollback paths; expected parent identity/trust boundary | Prevent path substitution and cross-directory ambiguity. Re-resolve and revalidate every path at recovery time; stored paths are not authority. |
+| Source content | Digest algorithm identifier (initially SHA-256), byte length, digest of source bytes captured from a stable opened file | Binds the requested backup content. Capture from an opened handle and verify file identity/metadata before and after hashing; abort if it changes. |
+| Staged content | Expected byte length and digest, equal to the validated source content digest | Proves the exact staged bytes match the selected source. Re-hash staged bytes during recovery; SQLite integrity/schema checks remain separate requirements. |
+| Original/rollback content | Whether a live destination existed at intent time; if so, its byte length and SHA-256 digest captured before publishing the rollback name | Distinguishes the original database from the staged replacement by content. If no original existed, record that fact explicitly; do not infer it from a later missing path. |
+| File-object observations | Best-effort platform file identity for source, staged, destination, and rollback (device/inode where meaningful, or platform-specific file ID if safely available); observed link count where available | Supplemental evidence for hard-link relationships and path replacement. Never treat inode/device values alone as portable or durable across reboot, volume remount, or filesystems. |
+| Parent and platform | Platform identifier, filesystem capability profile, and validated parent-directory identity/ACL assumptions | Recovery must refuse automatic actions when the runtime platform or filesystem is outside the tested support matrix. |
+| Integrity envelope | Bounded record size, strict field allowlist, canonical serialization rules, and checksum over the serialized record | Detect accidental truncation/corruption and reject unknown fields. A checksum is not authentication: same-privilege modification of both record and checksum remains possible. Trusted directory permissions remain essential. |
+
+Evidence capture and ordering requirements:
+
+1. Acquire the existing runtime/maintenance reservations before inspecting or hashing mutable database files. Prove exclusive ownership using the established reservation protocol; do not use PID liveness or sidecar existence as a substitute.
+2. Open each candidate without following symlinks/reparse points where the platform API permits. Validate regular-file type and trusted parent components. If safe handle-based identity cannot be obtained, mark the platform/filesystem combination unsupported for automatic recovery.
+3. Hash the source and any pre-existing live destination from opened handles. Compare handle identity and relevant metadata before and after hashing; any change aborts before destructive work.
+4. Publish the complete immutable intent record with no-replace semantics and the documented file/directory durability sequence. Only after publication may staging begin.
+5. Copy the source to the staged path using exclusive creation. Flush it, hash it from an opened handle, validate SQLite integrity/foreign keys/schema, and require its size and digest to match the intent before publishing rollback or changing the live name.
+6. Before rollback publication and before install publication, revalidate the relevant file-object identity and content digest, parent trust, destination absence/presence expectation, and exclusive reservation. Any mismatch or collision is manual review.
+7. File-object IDs are correlation evidence, not content proof. Content digests are content proof, not provenance/authentication. Both are required for the narrow hard-link transitions; neither alone authorizes recovery.
+8. Do not put credentials, task data, user-controlled strings, or raw exception messages in the journal. The journal is operational metadata and must have restrictive permissions/ACLs and bounded size.
+
+A mutable `phase` field is deliberately **not** part of the initial v2 proposal. Updating a journal in place introduces its own torn-write, replacement, and durability protocol and can create a second source of truth. Prefer deriving a candidate transition from immutable intent plus verified file identities/content and exclusive ownership. If later evidence shows that derivation is insufficient, design an append-only, checksummed transition ledger as a separate versioned protocol; do not add ad-hoc phase writes.
+
+The SHA-256 digest and checksum do not protect against a malicious actor who can rewrite both the journal and its artifacts. This design assumes the database parent and journal are protected by the documented trusted-user/administrator boundary. A stronger adversarial local-user threat model would require a separately protected signing key or OS-backed integrity boundary and is outside this proposal.
 - The process-local booleans `temporaryCreated`, `rollbackPublished`, `movedOriginal`, and `installPublished` are not persisted and disappear on process death. They cannot be reconstructed from the journal's current fields alone.
 - A successful `linkSync` followed by a failed or interrupted `unlinkSync` can leave two names for one file object. Conversely, path presence alone cannot prove that two names still identify the same object after external mutation.
 - The current inspector checks path kind/existence and journal shape, but does not hash database contents or prove object identity between journal artifacts. Its output is evidence for an operator, not an authority decision.
