@@ -314,6 +314,39 @@ A successful open of a candidate handle proves only that this operation holds th
 - Run native tests for each claimed OS/filesystem profile. Mocks may validate aggregation and evaluator logic but cannot establish race-free enumeration or parent-handle semantics.
 
 **Acceptance boundary:** the existing inspector's filtered path scans remain operator diagnostics only. The v2 inventory contract is not implemented, and no current `artifactInventoryComplete` value is sufficient evidence for automatic recovery. This is a design clarification only; it does not authorize Phase 6 implementation or Phase 5.
+#### Exact artifact-role and operation binding (Journal v2; design only)
+
+The v2 naming scheme must use one immutable operation UUID for every artifact created by a single Restore attempt. The current v1 implementation does **not** satisfy this: it generates independent UUIDs for the journal temporary, staged file, and rollback name, and the v1 journal has no operation UUID. Do not infer a v1 operation identity by correlating timestamps, PID, filename tokens, or proximity.
+
+For a v2 destination whose canonical basename is D and operation UUID is U, the initial same-parent namespace contract is:
+
+| Role | Exact relative name | Required binding |
+|---|---|---|
+| Published intent journal | D.restore-journal.json | Exactly one strict v2 record; operationId=U; destination and parent identity match this inventory root |
+| Journal publication temporary | D.restore-journal.json.U.tmp | Same immutable bytes/object as the journal only during the narrowly defined no-replace hard-link publication/temporary-unlink boundary; otherwise absent |
+| Staged Restore object | .D.U.restore | Exact staged digest/length equals the intent source digest/length; SQLite validation is bound to this same object |
+| Original-destination rollback | D.pre-restore-U | Exists only if destinationExisted=true; identity/content equal the original destination evidence recorded by the intent |
+
+The strings above are a proposed v2 contract, not a description of current v1 names or behavior. Canonicalization and case comparison must be delegated to the selected filesystem adapter; do not lowercase paths as a universal rule. The journal's path fields must equal the canonical paths derived from (destination, U, role) under that adapter. A path that merely shares a prefix or contains a valid-looking UUID is not a match.
+
+Inventory must build a one-to-one role map for each operation:
+- Exactly one published journal may claim an operation UUID in a root. Duplicate journals, multiple candidates for one role, one object claimed under incompatible roles, cross-root paths without a declared root, or a candidate whose UUID differs from the journal UUID are contradictions.
+- Every observed entry is accounted for as one exact expected artifact role or as an unrelated/unknown entry. Unknown entries remain visible and force manual review; they are never silently ignored as harmless noise.
+- A journal record cannot claim an artifact that is absent from the complete inventory, and an inventoried candidate cannot be attached to a journal solely because its filename parses. Require agreement among exact derived name, canonical path, operation UUID, parent identity, opened object identity, content digest/length, and role-specific intent fields.
+- destinationExisted=false prohibits a rollback role. destinationExisted=true requires the original-object evidence and constrains the rollback candidate to that exact object. A staged candidate is not interchangeable with live destination or rollback even when SQLite validation succeeds.
+- The operation UUID is a correlation identifier, not a secret or authorization capability. It does not establish ownership, prove that the current process created an artifact, or authorize cleanup.
+
+**Hard-link alias handling must be transition-specific, not a blanket exception.** The current implementation intentionally uses hard links for no-replace publication: journal temp and published journal can briefly name the same object; rollback and original destination can briefly name the same object; staged and installed destination can briefly name the same object. For v2, any such alias is acceptable only when the exact pair of names is prescribed for the single transition under evaluation, both names resolve through retained parent/file handles to the same stable object identity, the observed link count equals the exact expected count for that pair, no third alias exists in the complete inventory, and the adapter proves the transition-specific publication/flush ordering. Otherwise any link count above one, alias, or unexplained shared identity is manual review. Since the immutable intent deliberately has no mutable phase field, the evaluator must prove the transition from live handle/inventory evidence; it must not infer a phase from file presence or link count alone.
+
+Role/alias tests must cover:
+- v1 independent UUID tokens and v1 records with no operation UUID are never upgraded into a v2 operation binding;
+- wrong UUID, wrong destination basename, wrong parent, wrong role suffix, case/normalization collision, duplicate role, duplicate journal, and path outside declared roots all fail closed;
+- each allowed hard-link pair at its exact publication boundary, plus missing peer, extra third link, same-size different object, and link-count mismatch;
+- journal temp, staged, rollback, and live entries appearing in every pairwise combination, including impossible combinations that must remain manual review;
+- journal claims staged/rollback but inventory omits it, and inventory finds unclaimed candidate, both treated as contradictions;
+- cleanup rejects a valid-looking filename with wrong object identity, wrong operation UUID, lost context, or any unexplained alias.
+
+This is a documentation-only contract. No v2 naming, operation UUID, role mapper, hard-link transition evaluator, or automatic cleanup is implemented today.
 
 Capability reporting must distinguish at least `handleIdentity`, `parentEntryMatch`, `noFollow`, `externalMutationExclusion`, `noReplacePublication`, `fileDataDurability`, `namespaceDurability`, and `completeDirectoryInventory`. Each field carries the adapter version, primitive/flags, filesystem profile, and test evidence identifier; unavailable or untested is false/unknown and therefore ineligible. A single aggregate `supported` value is prohibited.
 
