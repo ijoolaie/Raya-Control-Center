@@ -84,7 +84,9 @@ function openLockDatabase(lockPath) {
 }
 
 function acquireDatabaseFileLockAtPath(lockPath, label) {
-  if (!lockPath) return () => {};
+  if (!lockPath) {
+    return Object.freeze({ assertHeld: () => true, release: () => {} });
+  }
   let database;
   try {
     database = openLockDatabase(lockPath);
@@ -97,19 +99,26 @@ function acquireDatabaseFileLockAtPath(lockPath, label) {
   }
 
   let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      database.exec('ROLLBACK');
-    } finally {
-      database.close();
+  return Object.freeze({
+    assertHeld() {
+      if (released) throw new Error('Database reservation has already been released');
+      database.prepare('PRAGMA schema_version').get();
+      return true;
+    },
+    release() {
+      if (released) return;
+      released = true;
+      try {
+        database.exec('ROLLBACK');
+      } finally {
+        database.close();
+      }
     }
-  };
+  });
 }
 
 function acquireDatabaseFileLock(databasePath, suffix, label) {
-  return acquireDatabaseFileLockAtPath(lockPathFor(databasePath, suffix), label);
+  return acquireDatabaseFileLockAtPath(lockPathFor(databasePath, suffix), label).release;
 }
 
 const LOCK_SUFFIX = Object.freeze({ runtime: '.runtime.lock', maintenance: '.maintenance.lock' });
@@ -152,16 +161,16 @@ export function acquireDatabaseReservationSet(requests) {
       || LOCK_RANK[left.lockClass] - LOCK_RANK[right.lockClass]
   );
 
-  const releases = [];
+  const reservations = [];
   try {
     for (const item of ordered) {
       const lockPath = item.databasePath + LOCK_SUFFIX[item.lockClass];
-      releases.push(acquireDatabaseFileLockAtPath(lockPath, item.lockClass));
+      reservations.push(acquireDatabaseFileLockAtPath(lockPath, item.lockClass));
     }
   } catch (error) {
     const releaseErrors = [];
-    for (const release of releases.reverse()) {
-      try { release(); } catch (releaseError) { releaseErrors.push(releaseError); }
+    for (const reservation of reservations.reverse()) {
+      try { reservation.release(); } catch (releaseError) { releaseErrors.push(releaseError); }
     }
     if (releaseErrors.length) throw new AggregateError([error, ...releaseErrors], 'Reservation acquisition failed and one or more partial reservations could not be released');
     throw error;
@@ -172,14 +181,15 @@ export function acquireDatabaseReservationSet(requests) {
     keys: Object.freeze(ordered.map(({ databasePath, lockClass }) => Object.freeze({ databasePath, lockClass }))),
     assertHeld() {
       if (released) throw new Error('Database reservation guard has already been released');
+      for (const reservation of reservations) reservation.assertHeld();
       return true;
     },
     release() {
       if (released) return;
       released = true;
       const errors = [];
-      for (const release of [...releases].reverse()) {
-        try { release(); } catch (error) { errors.push(error); }
+      for (const reservation of [...reservations].reverse()) {
+        try { reservation.release(); } catch (error) { errors.push(error); }
       }
       if (errors.length) throw new AggregateError(errors, 'One or more database reservations could not be released cleanly');
     }
