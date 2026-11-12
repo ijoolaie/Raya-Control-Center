@@ -38,6 +38,36 @@ Phase 6 closes the Deferred inventory recorded when it was added. A workstream i
 - Crash-injection coverage already exercises journal publication, staging, rollback publication/original move, installation, temporary cleanup, and journal cleanup.
 - The current classifier intentionally returns `automaticAction: none` for every state. It is diagnostic, not a recovery executor.
 
+### Source-derived crash transition matrix (design baseline; not an implementation authorization)
+
+The current Restore sequence in `src/database-maintenance.js` is ordered as follows. The table describes the durable names that may be observed after process death; it does not assert that any observed file is authoritative or safe to install.
+
+| Boundary / operation | Possible observed names after interruption | Required recovery interpretation |
+|---|---|---|
+| Journal temp created/written/flushed, before journal hard-link publication | Journal absent; UUID `.tmp` may be absent or present, possibly partial | No published intent is proven. Preserve any temp file; do not infer that Restore did or did not proceed from its absence. Manual review if any unexpected artifact exists. |
+| Journal hard link published, before temp unlink | Journal and journal `.tmp` both present; both names may refer to the same file object | Published intent exists if the journal independently validates. Preserve both names; only remove the temp alias after identity is verified and exclusive ownership is proven. |
+| Journal temp unlink and directory sync complete | Journal present; journal temp absent | Intent is published. No staged database is implied yet. |
+| Staged copy created, while copy is in progress | Journal present; temporary `.restore` may be partial or absent | Preserve staged file. Never install it based on path existence. Validate exact staged bytes and match them to a durable content identity before any continuation. |
+| Staged copy completed, source identity rechecked, SQLite validation and file flush complete | Journal + staged file; live destination may still exist; rollback absent | Candidate is prepared, but this state alone does not authorize replacement. Recheck source/staged identity, integrity, trusted paths, and exclusive ownership. |
+| Rollback hard link published, before original destination unlink | Journal + staged file + live destination + rollback name | Live and rollback may be two names for the same original file object. Do not treat this as an already-moved original or delete either name without identity proof. |
+| Original destination unlinked, before directory sync | Journal + staged file + rollback; live destination absent | Rollback name should preserve the original object, but the namespace transition's durability may be uncertain. Verify rollback identity/content and filesystem durability semantics; otherwise manual review. |
+| Original removal and directory sync complete | Journal + staged file + rollback; live absent | This is the intended pre-install state. Install only if staged bytes and rollback identity match the journal and destination remains absent under exclusive ownership. |
+| Staged hard link published at destination, before directory sync | Journal + staged file + rollback + live destination | Live and staged may be the same file object. Publication durability is uncertain until the directory sync succeeds. Do not repeat publication blindly; verify identities and fail closed if uncertain. |
+| Install directory sync complete | Journal + live destination + rollback; staged name may still exist | New destination publication completed at the API level. Verify live bytes against the staged object and preserve rollback until cleanup policy is proven. |
+| Temporary unlink, before/after directory sync | Journal + live + rollback; staged name may be present or absent | Cleanup may be incomplete or durability uncertain. Cleanup is not permission to delete rollback. |
+| Journal unlink, before/after directory sync | Journal may be present or absent; live and rollback may remain | Journal absence is not proof that rollback is disposable. Verify installed database and preserve rollback according to the documented retention/backup policy. |
+| Exception path before installation, with rollback not published or safely restored | Journal may be removed; live may remain; staged temp may be removed | A caught exception path is distinct from process-crash recovery. If journal removal or cleanup failed, inspect all artifacts; never assume cleanup succeeded. |
+| Exception path after rollback publication where original cannot be safely restored | Journal retained; rollback present; live may be absent or concurrently occupied | Manual review. Preserve journal and every candidate; no automated overwrite or rollback rename. |
+
+Additional interpretation constraints:
+
+- The journal currently records version, operation, PID, timestamp, and four paths. It does **not** record a cryptographic digest, stable file-object identity, source/staged content binding, or a durable transition marker. The current schema is therefore insufficient to authorize automatic continuation or rollback.
+- The process-local booleans `temporaryCreated`, `rollbackPublished`, `movedOriginal`, and `installPublished` are not persisted and disappear on process death. They cannot be reconstructed from the journal's current fields alone.
+- A successful `linkSync` followed by a failed or interrupted `unlinkSync` can leave two names for one file object. Conversely, path presence alone cannot prove that two names still identify the same object after external mutation.
+- The current inspector checks path kind/existence and journal shape, but does not hash database contents or prove object identity between journal artifacts. Its output is evidence for an operator, not an authority decision.
+- The current implementation removes the journal after install cleanup, but retains the rollback file on successful Restore. A later policy for rollback retention/deletion must be explicit and must not be inferred from journal absence.
+- Any uncertainty about active handles, SQLite reservations, directory-sync completion, hard-link identity, or concurrent path replacement maps to manual review. A PID value or persistent lock sidecar alone is not proof of liveness or staleness.
+
 ### Required design before implementation
 - Specify a transition table for every crash boundary, including journal-temp publication, journal publication, staged-copy completion, rollback-link publication, original-name removal, installed-name publication, temporary cleanup, and journal cleanup.
 - Record sufficient durable evidence to identify the exact intended source, destination, staged bytes, and rollback object. A path name or artifact-presence observation alone is not proof of file identity, content validity, or authority.
