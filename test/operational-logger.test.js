@@ -73,6 +73,26 @@ test('operational logger bounds event volume per process and per event name', ()
   assert.equal(lines.length, 100);
 });
 
+test('operational logger enforces the aggregate per-process event ceiling across event names', () => {
+  const lines = [];
+  const logger = createOperationalLogger({ write: line => lines.push(line) });
+  const events = [
+    ['server.shutdown_completed', {}], ['server.shutdown_started', {}],
+    ['operator.token_recovery_completed', {}],
+    ['database.restore_inspection_completed', { journalStatus: 'absent', manualReview: false }],
+    ['database.backup_completed', { schemaVersion: 1, cleanupWarningCount: 0 }],
+    ['database.restore_completed', { schemaVersion: 1, rollbackRetained: true, cleanupWarningCount: 0 }],
+    ['server.started', { port: 4317 }], ['lease.reconciliation_completed', { blockedTaskCount: 0 }],
+    ['database.backup_failed', { errorCode: 'operation-failed', publishedArtifact: false }],
+    ['database.restore_failed', { errorCode: 'operation-failed', journalMayRemain: false }]
+  ];
+  for (const [eventName, fields] of events) {
+    for (let index = 0; index < 100; index++) assert.equal(logger.emit(eventName, fields), true);
+  }
+  assert.equal(logger.emit('server.startup_failed', { errorCode: 'EADDRINUSE' }), false);
+  assert.equal(lines.length, 1000);
+});
+
 test('child process emits lifecycle events without including the bootstrap token in event records', { timeout: 15000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-operational-log-process-'));
   const databasePath = join(directory, 'server.sqlite');
