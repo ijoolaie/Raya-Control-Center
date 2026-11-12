@@ -330,3 +330,23 @@ This is safe only because the classifier never authorizes an action. Do not expa
 The existing tests in test/database-maintenance.test.js assert conservative classification for representative artifact combinations and assert automaticAction = none. They do not prove exhaustive coverage of every row in the crash matrix, nor do they test v2 evidence because v2 is not implemented. Before any classifier/evaluator expansion, add a table-driven crosswalk test that maps every documented crash boundary to its expected coarse classifier state and separately asserts that every case remains automaticAction = none. Add explicit cases for valid journal plus journal-temp alias, source missing/present, incomplete artifact inventory, and lock inspection unknown/error. Keep this crosswalk as documentation/test consistency evidence only; it must not turn candidate states into approved actions.
 
 **Decision:** no contradiction currently authorizes recovery, but the documentation must not imply that the runtime classifier uniquely recognizes all crash boundaries. The matrix is the detailed forensic model; the classifier is a deliberately lossy, fail-closed summary. This review changes documentation only.
+
+### Crash-boundary to current-classifier crosswalk (diagnostic only)
+
+The following mapping makes the classifier's information loss explicit. It assumes complete inventory and no active/unknown locks; lock-present and lock-unknown branches take precedence in the actual classifier.
+
+| Crash boundary from source matrix | Typical observed inputs | Current coarse classifier result | Why this is not an eligibility decision |
+|---|---|---|---|
+| Journal temp exists before publication | Journal absent; journalTemporary=true | no-journal-recovery-artifacts-present | Temp may be partial; it is preserved, never parsed as intent |
+| Journal published while temp alias remains | Journal valid; journalTemporary=true | One of the broad valid-journal live/rollback states | The valid-journal branch does not distinguish the alias or prove both names identify one object |
+| Staged copy in progress | Journal valid; temporary=true; live may exist | live-present-temporary-present-no-rollback, or another broad live/rollback state | Temporary existence does not prove completeness, digest, SQLite validity, or source relationship |
+| Staged copy complete, before rollback publication | Journal valid; temporary=true; live=true; rollback=false | live-present-temporary-present-no-rollback | Classifier cannot verify staged digest, identity, or validation evidence |
+| Rollback link published before original unlink | Journal valid; live=true; rollback=true | live-and-rollback-present-ambiguous | Two names may or may not still identify the same object |
+| Original unlinked before directory sync | Journal valid; live=false; rollback=true | live-missing-rollback-present | Namespace durability may be uncertain; rollback identity/content is not verified |
+| Original removal and directory sync complete | Journal valid; live=false; rollback=true | live-missing-rollback-present | Same path observation as the preceding boundary; classifier cannot distinguish durability completion |
+| Staged name published at live destination before directory sync | Journal valid; live=true; rollback=true | live-and-rollback-present-ambiguous | Classifier cannot prove live and staged are the same object or publication durability |
+| Install sync complete, before staged-name cleanup | Journal valid; live=true; rollback=true; temporary may vary | live-and-rollback-present-ambiguous | Successful namespace sync and content equality are not represented in classifier inputs |
+| Journal removed while live and rollback remain | Journal absent; rollback=true | no-journal-recovery-artifacts-present | Journal absence does not authorize rollback cleanup or establish installed DB validity |
+| Journal absent after all recognized artifacts are removed | Journal absent; no recognized artifacts; inventory complete | no-pending-restore | This is a normal diagnostic state, not proof of database integrity or historical Restore success |
+
+This table is intentionally many-to-one: several crash boundaries collapse into the same coarse state because the current inspector does not collect the evidence needed to distinguish them. Do not add inferred phase labels to the classifier. A future v2 evaluator must derive eligibility from verified evidence and explicit capabilities, not from this crosswalk. Until then, all rows remain operator-led and automaticAction remains none.
