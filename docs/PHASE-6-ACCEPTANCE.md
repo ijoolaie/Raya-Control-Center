@@ -431,3 +431,71 @@ no-pending-restore is an inspector/classifier diagnostic state, not an evaluator
 #### Current status and compatibility
 
 Today the evaluator does not exist; every state in the runtime classifier remains automaticAction: none. All v1 journals and all current crash states remain operator-led. The two v2 rows in the eligibility matrix are hypotheses for future rule design, not active rules. Phase 6 acceptance must be updated only after actual evaluator/executor implementation and tests; documentation alone cannot mark Automatic Restore Recovery complete.
+
+### Adapter failure semantics and evidence-preserving recovery (design only)
+
+This subsection closes the failure semantics left implicit by the crash matrix. It is a design constraint for a future Journal v2 implementation; it does not authorize runtime changes or automatic recovery today.
+
+#### Global fail-closed invariants
+
+- A failed, interrupted, or outcome-unknown durability/publication operation is never treated as success or as proof that the namespace change did not occur.
+- Preserve the journal, journal temporary, staged file, rollback name, live destination, and every unclassified neighboring entry whenever an operation outcome is uncertain. Do not perform best-effort cleanup after an uncertainty boundary.
+- A cleanup operation is itself a namespace transition: it requires its own verified preconditions, no-replace/identity-safe semantics where applicable, and successful required durability. Cleanup failure or uncertain durability preserves remaining evidence and returns manual-review.
+- Any lost/closed/replaced handle, invalidated reservation guard, failed reservation assertion, changed parent identity, inventory race, or capability-profile drift immediately invalidates the evidence snapshot and every evaluator decision derived from it.
+- Release only resources still owned by the operation, in reverse acquisition order, exactly once. A release failure is recorded as an error; it never authorizes file cleanup or a recovery transition. Do not release a partial member through a public per-lock callback.
+- A reservation busy result means the complete reservation set was not acquired. Do not inspect mutable content and do not proceed. A transaction rollback, connection close, or failed live-held assertion means the guard is lost and all prior evidence is stale.
+- Sidecar existence, PID values, successful open of one handle, and point-in-time lock inspection are never substitutes for live guard ownership or external-handle exclusion.
+- The current v1 implementation remains operator-led. These rules describe future v2 eligibility gates and do not change current classifier output (automaticAction: none).
+
+#### Failure-boundary disposition
+
+| Failure boundary | What may be true after the error | Required disposition |
+|---|---|---|
+| Staged-file flush fails or its result is unknown | Some or all staged bytes may have reached storage; the staged name may exist | Do not publish rollback or install. Preserve journal and staged candidate. Record bounded failure category; manual-review. |
+| File flush reports success but the handle closes/is lost before subsequent verification | The bytes may be durable, but the exact object can no longer be revalidated through the anchoring handle | Invalidate evidence and any decision. Preserve all artifacts; manual-review and recollect only as a new operator-led inspection. |
+| Parent-directory flush fails, is interrupted, or is unsupported | A preceding link/unlink may or may not survive a crash | Treat namespace outcome as uncertain. Do not repeat the operation blindly and do not remove aliases/rollback/journal. Manual-review. |
+| Journal file flush fails before publication | The temp record may be incomplete or its durability unknown | Preserve the temp candidate. Do not stage or mutate the destination. A fresh read-only inventory may report observations but cannot promote the temp to a valid intent. |
+| Journal no-replace publication returns collision | Another entry may already occupy the journal name | Never overwrite or unlink the colliding entry. Preserve both candidate names and inspect under fresh trusted handles; manual-review unless the operation can prove publication definitely did not occur and no conflicting entry exists. |
+| Journal publication call returns an ambiguous error or process interruption occurs around publication | The journal name may have been created even though the caller did not receive success | Treat publication as possibly completed. Do not stage, retry publication, or clean the temp. Preserve journal and temp names; perform a complete fresh namespace inventory and validate exact object identity. Without conclusive evidence, manual-review. |
+| Handle identity/path-entry revalidation fails | A path may now refer to another object or the retained object may no longer anchor the expected name | Invalidate the snapshot; no rename/link/unlink/install. Preserve all candidates and require manual-review. |
+| Reservation acquisition is busy or partially fails | Another cooperating operation may own one or more resources | Do not hash, inspect mutable content, stage, or mutate. Release only successfully acquired reservations in reverse order; report acquisition failure. Retry is a new operation after a fresh complete acquisition, not continuation with partial ownership. |
+| Reservation transaction rolls back, connection closes, or live-held assertion fails | The operation no longer owns the complete coordination set | Immediately invalidate all evidence and decisions. Do not mutate or clean artifacts. Release remaining owned reservations safely; manual-review. |
+| Complete directory inventory fails, races, or observes an unclassified entry | Relevant artifacts may be omitted or may have changed during enumeration | Set inventory complete=false. Preserve all entries; manual-review. Filename allowlists and a second path scan are not equivalent to a retained-parent, race-aware inventory. |
+| No-replace link/publication returns an ambiguous result | The destination may have been created by this operation or by a concurrent actor | Do not retry or unlink either name based on path presence. Re-open and compare through supported retained handles; if exact same-operation identity cannot be proven, manual-review. |
+| Any cleanup unlink or its following directory flush fails | The name may remain or reappear after a crash | Preserve all remaining evidence. Do not escalate cleanup to deleting rollback or journal. Report cleanup as incomplete and manual-review. |
+
+#### Journal publication outcome model
+
+The future adapter must distinguish only outcomes it can prove:
+
+1. not-published: the adapter proves the no-replace operation did not create the journal entry, the destination was not occupied by another object, and the relevant namespace observation is still anchored to the trusted parent. This result does not itself authorize staging; the caller must still preserve any temp evidence and handle the failure.
+2. published-and-durable: the journal entry is verified as the exact intended object and both required file-data and parent-namespace durability operations completed on a tested platform/filesystem profile.
+3. possibly-published: every ambiguous syscall result, interruption, failed/unknown flush, lost handle, collision with uncertain provenance, or inability to revalidate the parent entry.
+
+Only published-and-durable permits the next planned stage in a future v2 executor. possibly-published is terminal for that attempt: preserve the journal candidate, temp alias, and all other artifacts; do not retry publication, start staging, or delete either name. A later read-only inspection may establish facts for an operator, but it cannot retroactively turn an unknown flush result into a proven durability event. If the platform cannot distinguish these outcomes, it must report possibly-published.
+
+The not-published result must not be inferred merely from an exception code or from a subsequent path lookup. It requires adapter-specific tested semantics and parent-entry evidence. If an entry exists at the journal name but cannot be proven to be this operation's exact object, it is a collision/manual-review state.
+
+#### Decision invalidation and release ordering
+
+- The evidence context owns the complete reservation guard, retained parent handles, and retained candidate handles. No decision survives loss of any member.
+- A failed flush, failed identity check, failed inventory check, unexpected handle close, reservation loss, or adapter capability change marks the context invalid before any further callback can perform a mutation.
+- The executor must check context validity and the same live guard/handle anchors immediately before each individual namespace transition; a prior successful check does not cover a later transition.
+- On abort, stop mutation first. Preserve namespace artifacts. Then release still-owned reservations in reverse acquisition order and close remaining handles according to adapter-defined safe ordering. Never release/reacquire and then reuse the old evidence digest.
+- If cleanup/close/release itself reports an error, retain the diagnostic and remain manual-review. Do not run a second cleanup path to make the directory appear tidy.
+
+#### Bounded acceptance tests for future adapters
+
+Each injected failure below must assert (a) no subsequent destructive namespace transition occurs, (b) no unrelated or candidate artifact is deleted, (c) the evidence context/decision is invalidated where applicable, and (d) the result is manual-review or an explicitly non-authorizing operation error:
+
+- Inject file flush failure before and after staged-file validation; prove rollback publication and install are not attempted.
+- Inject parent-directory flush failure after journal publication, rollback publication, original-name removal, install publication, and cleanup; prove no blind replay or follow-on deletion occurs.
+- Inject journal publication collision and ambiguous publication outcomes; prove the adapter never overwrites the colliding object and never starts staging for possibly-published.
+- Close or replace each retained source, destination, staged, rollback, and parent handle between evidence collection and executor revalidation; prove the decision is rejected without mutation.
+- Force reservation acquisition failure at each member of the sorted set, then force transaction rollback/connection close after acquisition; prove reverse-order release, no partial public release, and stale-decision rejection.
+- Mutate the directory namespace during full inventory (addition, removal, replacement, unreadable entry, unknown name); prove complete=false and no candidate action.
+- Inject no-replace publication returning an ambiguous result; prove no retry, unlink, or overwrite is attempted.
+- Inject temp/journal cleanup unlink and directory-flush failures; prove rollback and all remaining evidence are retained.
+- Run the failure matrix in child processes on every claimed OS/filesystem adapter profile. Mock-only tests are unit evidence and cannot establish native flush, share-mode, no-replace, or namespace durability semantics.
+
+**Current implementation note:** the existing Restore catch path has best-effort cleanup branches for the staged file and journal, and the current implementation does not expose the v2 outcome/guard/handle contracts above. This subsection therefore records required future behavior and a concrete implementation gap; it does not claim that current Restore already preserves evidence for every ambiguous adapter failure. Until those implementation changes and native tests exist, no automatic recovery action is eligible.
