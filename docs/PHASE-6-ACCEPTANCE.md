@@ -39,7 +39,7 @@ Phase 6 closes the Deferred inventory recorded when it was added. A workstream i
 
 ## 2. Automatic Restore Recovery (carried from Phase 2)
 
-**Workstream status:** Design/feasibility review in progress. Do not enable a recovery executor or automatic file/lock action until the feasibility and acceptance gates below pass; current inspector remains read-only and all states remain operator-led.
+**Workstream status:** Design/feasibility review documented; implementation is blocked on the separately specified native filesystem-adapter prerequisites. Do not enable a recovery executor or automatic file/lock action until the feasibility and acceptance gates below pass; current inspector remains read-only and all states remain operator-led.
 
 ### Current baseline
 - Restore publishes a versioned intent journal atomically and refuses a second Restore while the journal exists.
@@ -110,19 +110,6 @@ The SHA-256 digest and checksum do not protect against a malicious actor who can
 - The current implementation removes the journal after install cleanup, but retains the rollback file on successful Restore. A later policy for rollback retention/deletion must be explicit and must not be inferred from journal absence.
 - Any uncertainty about active handles, SQLite reservations, directory-sync completion, hard-link identity, or concurrent path replacement maps to manual review. A PID value or persistent lock sidecar alone is not proof of liveness or staleness.
 
-### Source implementation feasibility gate (2026-11-12)
-
-**Decision: automatic recovery execution is not yet eligible on any platform.** The current code is a conservative read-only classifier plus an operator-led Restore transaction; the Phase 6 authorization does not waive the evidence requirements below.
-
-- `src/database-maintenance.js` currently uses path-based `lstatSync`, `readFileSync`, `copyFileSync`, `linkSync`, `unlinkSync`, and `rmSync`. The checks are useful diagnostics, but the code does not retain trusted parent-directory handles or prove that a path still names the same opened object immediately before each destructive transition. A check-then-use race remains possible under a concurrent path replacement.
-- The current journal v1 contains paths and process metadata, not source/staged/rollback byte lengths and SHA-256 digests bound to opened file handles. It cannot authorize continuation or rollback.
-- `src/file-system-durability.js` explicitly reports directory flush as unsupported on Windows. POSIX directory fsync is implemented, but directory durability alone does not prove no-follow path resolution, stable file identity, or exclusion of non-cooperating mutation.
-- The current runtime/maintenance reservations coordinate cooperating Control Center processes. They do not prove that an unrelated process has no open handle or cannot mutate a candidate file.
-- The current Restore inspector/classifier returns `automaticAction: none`; that fail-closed behavior is correct and must remain unchanged until all adapter and state-matrix gates pass.
-
-**Implementation prerequisite:** introduce a narrowly scoped, reviewed filesystem adapter with retained parent/file handles, no-follow leaf opens, handle-derived object identity, parent-relative no-replace namespace operations, tested external-mutation exclusion, and explicit file/directory durability outcomes. The adapter must expose a capability profile and return `unsupported/unknown` rather than emulate a missing guarantee with path checks. Windows requires a native, testable directory-flush and file-identity implementation before any Windows state can become eligible. POSIX also requires race-resistant parent-relative operations; successful directory fsync alone is insufficient.
-
-Until that adapter exists and passes the crash-injection matrix, the supported automatic-recovery set is empty: all v1 journals, v2 journals without proven adapter capabilities, unsupported filesystems, and ambiguous states resolve to manual review. Do not implement an executor that merely applies the existing path-based classifier decisions.
 ### Required design before implementation
 - Specify a transition table for every crash boundary, including journal-temp publication, journal publication, staged-copy completion, rollback-link publication, original-name removal, installed-name publication, temporary cleanup, and journal cleanup.
 - Record sufficient durable evidence to identify the exact intended source, destination, staged bytes, and rollback object. A path name or artifact-presence observation alone is not proof of file identity, content validity, or authority.
