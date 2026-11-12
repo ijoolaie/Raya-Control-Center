@@ -56,7 +56,7 @@ Reassess before 1.0; retain the option to move to a mature SQLite adapter if the
 - [x] Added an atomically published, fsynced Restore intent journal that blocks repeat Restore after a process crash; documented operator-led recovery. Automatic recovery remains deferred pending journal-state interpretation and Windows crash-state verification.
 - [x] Added read-only Restore inspection and a conservative recovery-state model covering journal validity, active/unrecognized SQLite lock reservations, persistent idle lock sidecars, and live/temporary/rollback artifact combinations; child-process crash simulations cover journal publication, staging, original move, install, temporary cleanup, and journal cleanup. Runtime and maintenance ownership now use SQLite `BEGIN IMMEDIATE` reservations that release automatically on process death; legacy JSON lock artifacts are preserved for operator review. No state performs automatic file or lock actions.
 - [x] Lease-bound task progress reporting, separate from heartbeat, with append-only audit events.
-- [ ] Structured operational logs (deferred until an allowlisted, redacted event schema is justified).
+- [x] Structured operational logs (deferred item closed in Phase 6 on 2026-11-12; see the verified Workstream 1 evidence below).
 
 ## Phase 3 — Integration contracts
 **Status: Verified**
