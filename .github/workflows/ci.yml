@@ -29,6 +29,9 @@ jobs:
       - name: Windows data ACL helper test
         shell: pwsh
         run: ./test-support/test-data-acl.ps1
+      - name: Windows SQLite share-mode integration probe
+        shell: pwsh
+        run: ./scripts/windows-sqlite-share-integration.ps1
 
   test-linux:
     name: Node ${{ matrix.node-version }} / Linux

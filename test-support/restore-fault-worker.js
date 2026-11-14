@@ -89,6 +89,21 @@ if (mode === 'crash-after-stage') {
   };
 }
 
+if (mode === 'crash-after-stage-fsync') {
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const stagedDescriptors = new Set();
+  fs.openSync = (target, flags, permissions) => {
+    const descriptor = originalOpen(target, flags, permissions);
+    if (typeof target === 'string' && target.endsWith('.restore')) stagedDescriptors.add(descriptor);
+    return descriptor;
+  };
+  fs.fsyncSync = descriptor => {
+    const result = originalFsync(descriptor);
+    if (stagedDescriptors.has(descriptor)) process.exit(83);
+    return result;
+  };
+}
 if (mode === 'sync-failure') {
   const originalOpen = fs.openSync;
   const originalFsync = fs.fsyncSync;

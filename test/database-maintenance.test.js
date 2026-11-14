@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LATEST_SCHEMA_VERSION, openDatabase } from '../src/db.js';
 import { ControlCenter } from '../src/control-center.js';
-import { createDatabaseBackup, inspectDatabaseRestore, restoreDatabaseBackup } from '../src/database-maintenance.js';
+import { buildRestoreArtifactInventory, createDatabaseBackup, inspectDatabaseRestore, readRestoreJournal, restoreDatabaseBackup } from '../src/database-maintenance.js';
+import { lstatSync as realLstatSync, readdirSync as realReaddirSync } from 'node:fs';
 import { startControlCenter } from '../src/server-runtime.js';
 import { acquireDatabaseMaintenanceLock, acquireDatabaseReservationSet, inspectDatabaseFileLock, inspectDatabaseRuntimeLocks } from '../src/database-runtime-lock.js';
 import { classifyRestoreRecoveryState } from '../src/restore-recovery-state.js';
@@ -18,6 +19,22 @@ import { recoverOperatorToken } from '../src/rotate-operator-token.js';
 
 
 
+test('Restore journal reader classifies injected read failures independently', () => {
+  const failure = Object.assign(new Error('injected read failure'), { code: 'EACCES' });
+  const result = readRestoreJournal('unused-journal-path', () => { throw failure; });
+  assert.equal(result.status, 'unreadable');
+  assert.equal(result.error, failure);
+  assert.equal(result.error.code, 'EACCES');
+});
+
+test('Restore journal reader distinguishes malformed JSON from successful reads', () => {
+  const malformed = readRestoreJournal('unused-journal-path', () => '{not-json');
+  assert.equal(malformed.status, 'malformed');
+  assert.equal(malformed.error.name, 'SyntaxError');
+  const valid = readRestoreJournal('unused-journal-path', () => '{"version":2}');
+  assert.equal(valid.status, 'read');
+  assert.deepEqual(valid.record, { version: 2 });
+});
 test('Restore recovery state model is conservative across observed artifact combinations', () => {
   const artifact = (exists) => ({ exists });
   const base = { journalStatus: 'valid', journalValid: true, locks: {}, artifacts: { source: artifact(true) } };
@@ -54,6 +71,18 @@ test('Restore recovery state model fails closed when lock inspection is unknown'
     artifacts: { destination: { exists: true }, rollback: { exists: false } }
   });
   assert.equal(validJournal.state, 'manual-review-lock-state-unknown');
+  const incompleteValidJournal = classifyRestoreRecoveryState({
+    journalStatus: 'valid', journalValid: true, locks: {},
+    artifacts: { destination: { exists: true }, rollback: { exists: false }, inventoryComplete: false }
+  });
+  assert.equal(incompleteValidJournal.state, 'manual-review-artifact-inventory-incomplete');
+  assert.equal(incompleteValidJournal.automaticAction, 'none');
+
+  const lockedAndIncomplete = classifyRestoreRecoveryState({
+    journalStatus: 'valid', journalValid: true, locks: { runtime: { exists: true } },
+    artifacts: { destination: { exists: true }, inventoryComplete: false }
+  });
+  assert.equal(lockedAndIncomplete.state, 'blocked-lock-present', 'active lock remains the higher-priority blocker');
   assert.equal(validJournal.severity, 'critical');
   assert.equal(validJournal.automaticAction, 'none');
 });
@@ -289,6 +318,7 @@ test('restore inspect reports an absent journal without creating or changing fil
   try {
     const report = inspectDatabaseRestore(database);
     assert.equal(report.readOnly, true);
+    assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
     assert.equal(report.journal.status, 'absent');
     assert.equal(report.recovery.state, 'no-pending-restore');
     assert.equal(report.database.exists, false);
@@ -299,6 +329,166 @@ test('restore inspect reports an absent journal without creating or changing fil
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('restore artifact inventory fails closed when directory enumeration fails', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-enumeration-error-'));
+  const database = join(directory, 'live.sqlite');
+  let calls = 0;
+  try {
+    const firstFailure = {
+      readdirSync() { const error = Object.assign(new Error('injected enumeration failure'), { code: 'EACCES' }); throw error; },
+      lstatSync: realLstatSync
+    };
+    assert.throws(() => buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, firstFailure), { code: 'EACCES' });
+    const secondFailure = {
+      readdirSync(path) {
+        if (++calls === 2) throw Object.assign(new Error('injected confirmation failure'), { code: 'EIO' });
+        return realReaddirSync(path);
+      },
+      lstatSync: realLstatSync
+    };
+    assert.throws(() => buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, secondFailure), { code: 'EIO' });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('restore artifact inventory marks unreadable entries unknown and unstable', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-entry-error-'));
+  const database = join(directory, 'live.sqlite');
+  const victim = join(directory, 'operator-evidence.bin');
+  try {
+    writeFileSync(victim, 'preserve-me');
+    const fsOps = {
+      readdirSync: realReaddirSync,
+      lstatSync(path, options) {
+        if (path === victim) throw Object.assign(new Error('injected stat failure'), { code: 'EACCES' });
+        return realLstatSync(path, options);
+      }
+    };
+    const inventory = buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, fsOps);
+    const evidence = inventory.entries.find(entry => entry.name === 'operator-evidence.bin');
+    assert.equal(inventory.stable, false);
+    assert.equal(inventory.complete, false);
+    assert.equal(evidence.exists, null);
+    assert.equal(evidence.status, 'unstable-inventory');
+    assert.equal(evidence.identityVerified, false);
+    assert.equal(readFileSync(victim, 'utf8'), 'preserve-me');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('restore artifact inventory detects same-name replacement during metadata revalidation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-replacement-'));
+  const database = join(directory, 'live.sqlite');
+  const victim = join(directory, 'operator-evidence.bin');
+  const displaced = join(directory, 'operator-evidence.original');
+  try {
+    writeFileSync(victim, 'original-content');
+    let lstatCalls = 0;
+    const fsOps = {
+      readdirSync: realReaddirSync,
+      lstatSync(path, options) {
+        const stat = realLstatSync(path, options);
+        if (path === victim && ++lstatCalls === 2) {
+          renameSync(victim, displaced);
+          writeFileSync(victim, 'replacement-content');
+          return realLstatSync(path, options);
+        }
+        return stat;
+      }
+    };
+    const inventory = buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, fsOps);
+    const evidence = inventory.entries.find(entry => entry.name === 'operator-evidence.bin');
+    assert.equal(inventory.stable, false);
+    assert.equal(inventory.complete, false);
+    assert.equal(evidence.status, 'unstable-inventory');
+    assert.equal(evidence.identityVerified, false);
+    assert.equal(readFileSync(displaced, 'utf8'), 'original-content');
+    assert.equal(readFileSync(victim, 'utf8'), 'replacement-content');
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('restore artifact inventory detects in-place content and metadata changes', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-metadata-'));
+  const database = join(directory, 'live.sqlite');
+  const victim = join(directory, 'operator-evidence.bin');
+  try {
+    writeFileSync(victim, 'before');
+    let lstatCalls = 0;
+    const fsOps = {
+      readdirSync: realReaddirSync,
+      lstatSync(path, options) {
+        const stat = realLstatSync(path, options);
+        if (path === victim && ++lstatCalls === 2) {
+          writeFileSync(victim, 'content changed in place with a larger size');
+          return realLstatSync(path, options);
+        }
+        return stat;
+      }
+    };
+    const inventory = buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, fsOps);
+    const evidence = inventory.entries.find(entry => entry.name === 'operator-evidence.bin');
+    assert.equal(inventory.stable, false);
+    assert.equal(inventory.complete, false);
+    assert.equal(evidence.status, 'unstable-inventory');
+    assert.equal(evidence.identityVerified, false);
+    assert.equal(readFileSync(victim, 'utf8'), 'content changed in place with a larger size');
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('restore artifact inventory cannot detect content changes hidden by unchanged metadata', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-same-metadata-'));
+  const database = join(directory, 'live.sqlite');
+  const victim = join(directory, 'operator-evidence.bin');
+  try {
+    writeFileSync(victim, 'before');
+    let lstatCalls = 0;
+    let baseline;
+    const fsOps = {
+      readdirSync: realReaddirSync,
+      lstatSync(path, options) {
+        const stat = realLstatSync(path, options);
+        if (path !== victim) return stat;
+        if (++lstatCalls === 1) baseline = stat;
+        if (lstatCalls === 2) writeFileSync(victim, 'after!');
+        // Model a filesystem/metadata view that exposes no change in the
+        // fingerprint fields; this is a limitation test, not host behavior.
+        return baseline;
+      }
+    };
+    const inventory = buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, fsOps);
+    const evidence = inventory.entries.find(entry => entry.name === 'operator-evidence.bin');
+    assert.equal(readFileSync(victim, 'utf8'), 'after!');
+    assert.equal(inventory.stable, true);
+    assert.equal(inventory.complete, true);
+    assert.equal(evidence.status, 'unknown');
+    assert.equal(evidence.identityVerified, false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('restore artifact inventory cannot detect mutation after its final revalidation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-inventory-post-check-'));
+  const database = join(directory, 'live.sqlite');
+  const victim = join(directory, 'operator-evidence.bin');
+  try {
+    writeFileSync(victim, 'before');
+    let lstatCalls = 0;
+    const fsOps = {
+      readdirSync: realReaddirSync,
+      lstatSync(path, options) {
+        const stat = realLstatSync(path, options);
+        if (path === victim && ++lstatCalls === 2) writeFileSync(victim, 'changed-after-final-check');
+        return stat;
+      }
+    };
+    const inventory = buildRestoreArtifactInventory(directory, database, database + '.restore-journal.json', null, fsOps);
+    assert.equal(inventory.stable, true);
+    assert.equal(inventory.complete, true);
+    assert.equal(readFileSync(victim, 'utf8'), 'changed-after-final-check');
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
 test('restore inspect inventories rollback and staged artifacts when the journal is absent', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inspect-orphans-'));
   const database = join(directory, 'live.sqlite');
@@ -310,11 +500,28 @@ test('restore inspect inventories rollback and staged artifacts when the journal
     writeFileSync(rollback, 'rollback-evidence');
     writeFileSync(temporary, 'staged-evidence');
     writeFileSync(journalTemporary, 'journal-intent-evidence');
+    writeFileSync(join(directory, 'operator-notes.txt'), 'unrelated evidence');
+    const malformedToken = '111111111111-1111-4111-8111-111111111111';
+    const malformedCandidate = join(directory, '.live.sqlite.' + malformedToken + '.restore');
+    writeFileSync(malformedCandidate, 'not a canonical UUID token');
     const before = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
     const report = inspectDatabaseRestore(database);
     const after = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
     assert.equal(report.journal.status, 'absent');
     assert.equal(report.journal.artifactInventoryComplete, true);
+    assert.equal(report.journal.artifactInventory.complete, true);
+    assert.equal(report.journal.artifactInventory.stable, true);
+    assert.equal(report.journal.artifactInventory.stabilityMethod, 'two-name-enumerations-plus-entry-metadata-revalidation');
+    assert.equal(report.journal.artifactInventory.entryCount, report.journal.artifactInventory.confirmationEntryCount);
+    assert.equal(report.journal.artifactInventory.identityVerified, false);
+    assert.equal(report.journal.artifactInventory.entries.every(entry => !Object.hasOwn(entry, 'fingerprint')), true);
+    assert.equal(report.journal.artifactInventory.entries.every(entry => entry.identityVerified === false), true);
+    assert.equal(report.journal.artifactInventory.entries.find(entry => entry.name === 'operator-notes.txt').role, 'unknown');
+    assert.equal(report.journal.artifactInventory.entries.find(entry => entry.name === malformedCandidate.split(/[\\\\/]/).pop()).role, 'unknown');
+    assert.equal(report.journal.orphanedRestoreTemporaryFiles.some(entry => entry.path === malformedCandidate), false);
+    assert.equal(report.journal.artifactInventory.entries.find(entry => entry.name === rollback.split(/[\\/]/).pop()).role, 'rollback-candidate');
+    assert.equal(report.journal.artifactInventory.entries.find(entry => entry.name === temporary.split(/[\\/]/).pop()).role, 'restore-stage-candidate');
+    assert.equal(report.journal.artifactInventory.entries.find(entry => entry.name === journalTemporary.split(/[\\/]/).pop()).role, 'journal-temp-candidate');
     assert.equal(report.journal.orphanedRollbackFiles.length, 1);
     assert.equal(report.journal.orphanedRollbackFiles[0].path, rollback);
     assert.equal(report.journal.orphanedRestoreTemporaryFiles.length, 1);
@@ -327,6 +534,55 @@ test('restore inspect inventories rollback and staged artifacts when the journal
     assert.equal(report.recovery.observations.temporary, true);
     assert.equal(report.recovery.observations.journalTemporary, true);
     assert.deepEqual(after, before, 'inspection must preserve every orphaned recovery artifact');
+  } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+test('restore artifact inventory marks directories over the detail limit incomplete without mutation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-inventory-limit-'));
+  const database = join(directory, 'live.sqlite');
+  try {
+    for (let index = 0; index < 4097; index += 1) {
+      writeFileSync(join(directory, `evidence-${String(index).padStart(4, '0')}.bin`), 'x');
+    }
+    const before = readdirSync(directory).sort();
+    const report = inspectDatabaseRestore(database);
+    const after = readdirSync(directory).sort();
+    assert.equal(report.journal.artifactInventory.entryCount, 4097);
+    assert.equal(report.journal.artifactInventory.confirmationEntryCount, 4097);
+    assert.equal(report.journal.artifactInventory.entries.length, 4096);
+    assert.equal(report.journal.artifactInventory.truncated, true);
+    assert.equal(report.journal.artifactInventory.stable, true);
+    assert.equal(report.journal.artifactInventory.complete, false);
+    assert.equal(report.journal.artifactInventoryComplete, false);
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.deepEqual(after, before, 'bounded inventory must not change directory entries');
+    assert.equal(existsSync(join(directory, 'evidence-4096.bin')), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+test('valid restore journal with truncated artifact inventory requires manual review', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-valid-journal-inventory-limit-'));
+  const database = join(directory, 'live.sqlite');
+  const source = join(directory, 'source.sqlite');
+  const operationId = '22222222-2222-4222-8222-222222222222';
+  const temporary = join(directory, '.live.sqlite.' + operationId + '.restore');
+  const rollback = database + '.pre-restore-' + operationId;
+  const journalPath = database + '.restore-journal.json';
+  const record = { version: 2, operation: 'restore', operationId, temporaryId: operationId, rollbackId: operationId, journalTemporaryId: operationId, pid: 1234, startedAt: '2026-11-07T10:00:00.000Z', source, destination: database, temporary, rollback };
+  try {
+    writeFileSync(database, 'live');
+    writeFileSync(source, 'source');
+    writeFileSync(journalPath, JSON.stringify(record));
+    for (let index = 0; index < 4094; index += 1) {
+      writeFileSync(join(directory, `evidence-${String(index).padStart(4, '0')}.bin`), 'x');
+    }
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.journal.artifactInventory.truncated, true);
+    assert.equal(report.journal.artifactInventoryComplete, false);
+    assert.equal(report.recovery.state, 'manual-review-artifact-inventory-incomplete');
+    assert.equal(report.recovery.automaticAction, 'none');
   } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
@@ -382,6 +638,18 @@ test('restore inspect flags unsupported journal versions and destination mismatc
   try {
     writeFileSync(journal, JSON.stringify({ ...base, version: 2 }));
     assert.equal(inspectDatabaseRestore(database).journal.status, 'invalid');
+    const operationId = '22222222-2222-4222-8222-222222222222';
+    const validV2 = { ...base, version: 2, operationId,
+      temporaryId: operationId, rollbackId: operationId, journalTemporaryId: operationId,
+      temporary: join(directory, '.live.sqlite.' + operationId + '.restore'),
+      rollback: database + '.pre-restore-' + operationId };
+    writeFileSync(journal, JSON.stringify(validV2));
+    assert.equal(inspectDatabaseRestore(database).journal.status, 'valid');
+    const malformedOperationId = '222222222222-2222-8222-2222-222222222222';
+    writeFileSync(journal, JSON.stringify({ ...validV2, operationId: malformedOperationId, temporaryId: malformedOperationId, rollbackId: malformedOperationId, journalTemporaryId: malformedOperationId, temporary: join(directory, '.live.sqlite.' + malformedOperationId + '.restore'), rollback: database + '.pre-restore-' + malformedOperationId }));
+    assert.equal(inspectDatabaseRestore(database).journal.status, 'invalid', 'UUID-shaped tokens with invalid group lengths must be rejected');
+    writeFileSync(journal, JSON.stringify({ ...validV2, temporaryId: '11111111-1111-4111-8111-111111111111' }));
+    assert.equal(inspectDatabaseRestore(database).journal.status, 'invalid', 'v2 role IDs must match their artifact names');
     writeFileSync(journal, JSON.stringify({ ...base, destination: otherDatabase, temporary: join(directory, '.other.sqlite.00000000-0000-4000-8000-000000000000.restore'), rollback: otherDatabase + '.pre-restore-00000000-0000-4000-8000-000000000000' }));
     const report = inspectDatabaseRestore(database);
     assert.equal(report.journal.status, 'invalid');
@@ -484,7 +752,7 @@ test('restore rollback publication never replaces a colliding rollback artifact'
     createDatabaseBackup(backupSource, backup);
     const result = spawnSync(process.execPath, [
       fileURLToPath(worker), 'restore-rollback-collision', database, backup,
-      JSON.stringify(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', rollbackUuid, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'])
+      JSON.stringify([rollbackUuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'])
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).ok, false);
@@ -544,7 +812,7 @@ test('maintenance temp collisions never delete artifacts not created by this ope
     writeFileSync(journalCollision, 'preserve-journal-temp');
     result = spawnSync(process.execPath, [
       fileURLToPath(worker), 'restore', journalTarget, restoreBackup,
-      JSON.stringify(['44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555', journalUuid])
+      JSON.stringify(['44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555', '66666666-6666-4666-8666-666666666666', journalUuid])
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).ok, false);
@@ -561,7 +829,7 @@ test('maintenance temp collisions never delete artifacts not created by this ope
     db = null;
     result = spawnSync(process.execPath, [
       fileURLToPath(worker), 'restore-stage-collision', stagedTarget, restoreBackup,
-      JSON.stringify([stagedUuid, '66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777'])
+      JSON.stringify([stagedUuid, '66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777', '88888888-8888-4888-8888-888888888888'])
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).ok, false);
@@ -838,6 +1106,7 @@ test('restore crash simulation classifies journal publication and staging bounda
   const scenarios = [
     { mode: 'crash-after-journal', status: 77, temporary: false, live: true },
     { mode: 'crash-after-stage', status: 76, temporary: true, live: true },
+    { mode: 'crash-after-stage-fsync', status: 83, temporary: true, live: true },
     { mode: 'crash-before-original-move', status: 75, temporary: true, live: true }
   ];
   for (const scenario of scenarios) {
@@ -861,6 +1130,9 @@ test('restore crash simulation classifies journal publication and staging bounda
       assert.equal(existsSync(journal.temporary), scenario.temporary);
       assert.equal(existsSync(journal.rollback), false);
 
+      const beforeInspection = scenario.mode === 'crash-after-journal'
+        ? readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')])
+        : null;
       const report = inspectDatabaseRestore(database);
       assert.equal(report.journal.status, 'valid');
       if (scenario.mode === 'crash-after-journal') {
@@ -878,12 +1150,67 @@ test('restore crash simulation classifies journal publication and staging bounda
       assert.equal(report.recovery.observations.temporary, scenario.temporary);
       assert.equal(report.recovery.observations.rollback, false);
       assert.equal(existsSync(journalPath), true, 'inspection must not mutate the journal');
+      if (beforeInspection) {
+        assert.deepEqual(
+          readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]),
+          beforeInspection,
+          'inspection after publication-before-directory-flush must preserve every entry and byte'
+        );
+      }
     } finally {
       if (db) db.close();
       rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
 });
+test('restore crash before journal publication leaves an inventoried orphan and inspection is read-only', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-before-journal-crash-'));
+  const database = join(directory, 'live.sqlite');
+  const backup = join(directory, 'backup.sqlite');
+  let db;
+  try {
+    db = openDatabase(database);
+    new ControlCenter(db).createTask({ type: 'restore.before.journal.original' });
+    createDatabaseBackup(database, backup);
+    db.close();
+    db = null;
+
+    const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(worker), 'crash-before-journal-publish', backup, database
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 82, result.stderr);
+
+    const journalPath = database + '.restore-journal.json';
+    assert.equal(existsSync(journalPath), false, 'journal publication did not occur');
+    assert.equal(existsSync(database), true, 'the original live database remains in place');
+    const before = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.readOnly, true);
+    assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
+    assert.equal(report.journal.status, 'absent');
+    assert.equal(report.journal.orphanedTemporaryFiles.length, 1,
+      'the fully written but unpublished journal temporary must be inventoried');
+    assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true);
+    assert.equal(report.recovery.state, 'no-journal-recovery-artifacts-present');
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.equal(report.recovery.observations.journalTemporary, true);
+    assert.deepEqual(
+      readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]),
+      before,
+      'inspection must preserve the live database and orphaned journal bytes'
+    );
+
+    assert.throws(() => restoreDatabaseBackup(backup, database), /Orphaned Restore journal temporary files exist/,
+      'a retry must not discard the orphaned journal evidence');
+    assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true);
+  } finally {
+    if (db) db.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test('restore refuses to delete orphaned staged files when the journal is absent', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-orphan-block-'));
   const database = join(directory, 'live.sqlite');
@@ -965,13 +1292,32 @@ test('restore can recover the original database after a crash between move and i
     const journalPath = database + '.restore-journal.json';
     assert.equal(existsSync(journalPath), true, 'the crash must leave a recovery journal');
     const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
-    assert.equal(journal.version, 1);
+    assert.equal(journal.version, 2);
     assert.equal(journal.destination, database);
-    assert.match(journal.rollback, /\.pre-restore-[0-9a-f-]{36}$/i);
+    assert.match(journal.operationId, /^[0-9a-f-]{36}$/i);
+    assert.equal(journal.journalTemporaryId, journal.operationId);
+    assert.equal(journal.temporaryId, journal.operationId);
+    assert.equal(journal.rollbackId, journal.operationId);
+    assert.ok(journal.rollback.endsWith('.pre-restore-' + journal.operationId));
+    assert.ok(journal.temporary.endsWith('.' + journal.operationId + '.restore'));
+    assert.match(journal.operationId, /^[0-9a-f-]{36}$/i);
+    assert.match(journal.journalTemporaryId, /^[0-9a-f-]{36}$/i);
     assert.equal(existsSync(journal.temporary), true, 'the journal identifies the staged snapshot');
     const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
     assert.ok(rollbackName, 'the original database must remain recoverable');
     const rollback = join(directory, rollbackName);
+    const inspectionBefore = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.readOnly, true);
+    assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.recovery.state, 'live-missing-rollback-present');
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.equal(report.recovery.observations.live, false);
+    assert.equal(report.recovery.observations.rollback, true);
+    assert.equal(report.recovery.observations.temporary, true);
+    assert.deepEqual(readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]), inspectionBefore,
+      'inspection after a process crash must preserve the journal and every database artifact');
     db = openDatabase(rollback);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 2);
     db.close();
@@ -1019,6 +1365,18 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     assert.equal(journal.destination, database);
     const rollbackName = readdirSync(directory).find(name => name.startsWith('live.sqlite.pre-restore-'));
     assert.ok(rollbackName, 'the pre-restore database must remain available');
+    const inspectionBefore = readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]);
+    const report = inspectDatabaseRestore(database);
+    assert.equal(report.readOnly, true);
+    assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
+    assert.equal(report.journal.status, 'valid');
+    assert.equal(report.recovery.state, 'live-and-rollback-present-ambiguous');
+    assert.equal(report.recovery.automaticAction, 'none');
+    assert.equal(report.recovery.observations.live, true);
+    assert.equal(report.recovery.observations.rollback, true);
+    assert.equal(report.recovery.observations.temporary, true);
+    assert.deepEqual(readdirSync(directory).sort().map(name => [name, readFileSync(join(directory, name), 'base64')]), inspectionBefore,
+      'inspection after installation crash must preserve live, rollback, staging, and journal bytes');
     db = openDatabase(database);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
     db.close();
@@ -2002,5 +2360,37 @@ test('restore handles directory fsync failures at journal, rollback, install, an
       if (db) db.close();
       rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
+  }
+});
+
+test('documented Restore crash boundaries map to conservative diagnostic states', () => {
+  const present = { exists: true };
+  const absent = { exists: false };
+  const valid = { journalStatus: 'valid', journalValid: true, locks: {}, artifacts: {} };
+  const cases = [
+    ['before journal publication: orphan journal temp', { journalStatus: 'absent', artifacts: { journalTemporary: present, inventoryComplete: true } }, 'no-journal-recovery-artifacts-present'],
+    ['after journal publication: temp alias', { ...valid, artifacts: { destination: present, journalTemporary: present } }, 'live-present-no-rollback'],
+    ['after stage copy: live and stage remain', { ...valid, artifacts: { destination: present, temporary: present, rollback: absent } }, 'live-present-temporary-present-no-rollback'],
+    ['after rollback link: live and rollback remain', { ...valid, artifacts: { destination: present, rollback: present, temporary: present } }, 'live-and-rollback-present-ambiguous'],
+    ['after original unlink: rollback remains', { ...valid, artifacts: { destination: absent, rollback: present, temporary: present } }, 'live-missing-rollback-present'],
+    ['after install publication: both live and rollback remain', { ...valid, artifacts: { destination: present, rollback: present, temporary: present } }, 'live-and-rollback-present-ambiguous'],
+    ['after stage cleanup: live and rollback remain', { ...valid, artifacts: { destination: present, rollback: present, temporary: absent } }, 'live-and-rollback-present-ambiguous'],
+    ['after journal cleanup: live remains', { ...valid, artifacts: { destination: present, rollback: absent, temporary: absent } }, 'live-present-no-rollback'],
+    ['destination absent before installation', { ...valid, artifacts: { destination: absent, rollback: absent, temporary: present } }, 'live-and-rollback-missing'],
+    ['source missing does not establish authority', { ...valid, artifacts: { source: absent, destination: present, rollback: present } }, 'live-and-rollback-present-ambiguous'],
+    ['incomplete inventory', { journalStatus: 'absent', artifacts: { inventoryComplete: false } }, 'no-pending-restore-artifact-state-unknown'],
+    ['valid journal with incomplete inventory', { ...valid, artifacts: { inventoryComplete: false, destination: present, rollback: absent } }, 'manual-review-artifact-inventory-incomplete'],
+    ['valid journal with an uninspectable recorded path', { ...valid, artifacts: { inventoryComplete: true, destination: { exists: null }, rollback: absent, temporary: absent } }, 'manual-review-artifact-state-unknown'],
+    ['valid journal with an uninspectable source path', { ...valid, artifacts: { inventoryComplete: true, source: { exists: null }, destination: present, rollback: absent, temporary: absent } }, 'manual-review-artifact-state-unknown'],
+    ['valid journal with a missing source remains classifiable', { ...valid, artifacts: { inventoryComplete: true, source: absent, destination: present, rollback: absent, temporary: absent } }, 'live-present-no-rollback'],
+    ['unknown lock state', { ...valid, locks: { runtime: { exists: null, active: null, error: 'inspection-failed' } }, artifacts: { destination: present, rollback: absent } }, 'manual-review-lock-state-unknown'],
+    ['present lock takes precedence', { ...valid, locks: { maintenance: present }, artifacts: { destination: absent, rollback: present } }, 'blocked-lock-present'],
+    ['malformed journal', { journalStatus: 'malformed', journalValid: false, artifacts: { destination: present, rollback: present } }, 'manual-review-invalid-journal']
+  ];
+  for (const [boundary, input, expected] of cases) {
+    const result = classifyRestoreRecoveryState(input);
+    assert.equal(result.state, expected, boundary);
+    assert.equal(result.automaticAction, 'none', boundary);
+    assert.ok(result.guidance.length > 0, boundary);
   }
 });

@@ -1,4 +1,13 @@
-# Phase 6 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Deferred Capability Closure: Acceptance Plan
+# Phase 6 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Deferred Capability Closure: Acceptance Plan
+
+Related implementation evidence and capability decisions:
+- [Restore filesystem capability matrix](FILESYSTEM-CAPABILITY-MATRIX.md)
+- [Native filesystem adapter contract](NATIVE-FILESYSTEM-ADAPTER-CONTRACT.md)
+- [Native adapter integration readiness plan](NATIVE-ADAPTER-INTEGRATION-PLAN.md)
+- [Restore crash consistency state machine](RESTORE-CRASH-CONSISTENCY-STATE-MACHINE.md)
+- [POSIX experimental probe](POSIX-EXPERIMENTAL-PROBE.md)
+- [Windows native adapter prototype](WINDOWS-NATIVE-ADAPTER-PROTOTYPE.md)
+- [Windows native handle feasibility probe](WINDOWS-NATIVE-HANDLE-PROBE.md)
 
 **Status:** In progress; operator authorization received 2026-11-12. Workstream 1 (Structured Operational Logs) is Verified; Workstream 2 (Automatic Restore Recovery) is in design/feasibility review.
 **Parent plan:** `docs/ROADMAP.md`.
@@ -212,7 +221,7 @@ The current implementation was inspected in `src/database-runtime-lock.js`, `src
 | Any active/unknown runtime or maintenance reservation, open/unknown handle, untrusted/aliased parent, symlink/reparse uncertainty, permission error, digest mismatch, unsupported filesystem, or failed durability operation | No | No | Manual review |
 | Journal absent after a completed install, with rollback still present | No | No | Preserve rollback; journal absence never authorizes rollback deletion |
 
-The two ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“candidateÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
+The two ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œcandidateÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â v2 rows describe the only narrow classes worth proving in implementation: (a) continuation when the exact staged object is verified and the recorded destination/rollback transition is unambiguous; (b) rollback when the exact original object is verified and the replacement is provably absent. They are **not** authorization to act and are not currently reachable from v1 evidence.
 
 #### Mutual-exclusion rule for future eligibility
 
@@ -231,7 +240,7 @@ The two candidate rows above are hypotheses, not a complete truth table. They ar
 1. Define multi-file reservation ordering for both Restore source and destination. The current Restore path reserves only the destination; source path identity is checked by pathname snapshots. Acquire source and destination maintenance reservations in a deterministic canonical order to avoid cross-operation deadlocks, while preserving destination runtime exclusion. If a source cannot participate in the reservation protocol, automatic recovery is ineligible.
 2. Define handle-based file identity adapters separately for POSIX and Windows. Capture identity, type, size, link count, and relevant timestamps from the opened handle, then verify the directory entry still names that same object. Path-based `lstat` snapshots remain useful diagnostics but cannot satisfy this gate.
 3. Define reparse-point/no-follow behavior and trusted-parent validation using platform-native APIs. If the implementation cannot prove these properties on a filesystem, that platform/filesystem combination remains manual-review-only.
-4. Specify what ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“no active handlesÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â means operationally. SQLite reservation release is necessary for cooperating Control Center processes but is not a universal proof against external handles. Do not use PID liveness or lock-file presence as a substitute.
+4. Specify what ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œno active handlesÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â means operationally. SQLite reservation release is necessary for cooperating Control Center processes but is not a universal proof against external handles. Do not use PID liveness or lock-file presence as a substitute.
 5. Keep the durability contract platform-specific. POSIX directory fsync may support a stronger namespace boundary where tested; Windows must remain manual-review-only for transitions whose correctness depends on directory flush until a native, tested flush implementation exists. Do not downgrade a failed flush into a successful recovery result.
 6. Preserve rollback indefinitely until a separate, verified retention/backup policy authorizes cleanup. Recovery must never delete rollback merely because the journal is absent or installation appears complete.
 
@@ -316,6 +325,19 @@ The adapter distinguishes unavailable fields from queried zero values. File IDs 
 - Directory fsync is a separate durability capability. Identity verification does not imply namespace durability. Unsupported statx, descriptor-relative operations, or directory fsync combinations remain manual-review-only.
 
 Node's portable node:fs API exposes file descriptors and handle metadata, but not a complete portable descriptor-relative openat/fstatat/renameat protocol. Do not assume lstat(path) followed by open(path) closes the race. A native addon/helper or narrower proven platform implementation is required for the full contract.
+##### POSIX feasibility decision: external mutation exclusion
+
+The POSIX adapter must distinguish namespace-race resistance from exclusion of concurrent content mutation. These are different guarantees:
+
+- Descriptor-relative openat/fstatat operations, retained parent descriptors, O_NOFOLLOW, and post-operation identity comparisons can close important pathname substitution races when their exact filesystem semantics are tested.
+- flock and traditional fcntl locks are advisory. They coordinate cooperating processes but do not prevent an unrelated process from writing through a descriptor it already holds. Rechecking size, timestamps, inode, or digest cannot close that race: a writer can mutate immediately after the final check.
+- POSIX record-lock behavior varies by lock family and filesystem; it must not be promoted to a mandatory exclusion guarantee without a narrowly specified kernel/filesystem contract and adversarial tests. Linux file leases are not a general solution for already-open writable descriptors and have break/permission semantics that require separate analysis. They are not accepted as proof of arbitrary-writer exclusion.
+- Therefore the baseline POSIX adapter capability profile MUST report externalHandleExclusion=false. It may report identity, no-follow, parent-entry comparison, no-replace publication, and file/directory durability independently when each is actually implemented and verified.
+- Under the current threat model, any recovery transition that requires exclusion of arbitrary external writers remains ineligible on POSIX. Do not implement a fake lock, PID scan, open-handle enumeration, or repeated digest check as a substitute.
+
+A future, separately approved restricted deployment profile may define a narrower trust boundary: the database parent is operator-owned, untrusted local users cannot write it, all supported Control Center writers honor the reservation protocol, and privileged administrators/processes that bypass that boundary are explicitly outside the threat model. Such a profile can support cooperative-process consistency, not a claim of protection from arbitrary same-user, privileged, or pre-existing external handles. It requires explicit product/security approval and must be named distinctly in capability reporting. It does not silently satisfy externalHandleExclusion.
+
+**Decision:** POSIX native work may proceed for handle identity, no-follow traversal, parent-entry binding, no-replace namespace operations, and durability evidence. Automatic Restore remains disabled unless the product's approved threat model and every transition-specific gate are satisfied. If arbitrary external mutation remains in scope, POSIX automatic recovery is a no-go absent a proven mandatory mechanism.
 
 #### Windows adapter requirements
 
@@ -326,6 +348,43 @@ Node's portable node:fs API exposes file descriptors and handle metadata, but no
 - Treat volume identity and file ID as filesystem-dependent. Validate NTFS and explicitly test or exclude ReFS, SMB/network shares, FAT/exFAT, cloud-synced folders, and other filesystems.
 - Windows ACL preflight is separate. The existing PowerShell ACL helper's handle-based hard-link count check does not implement the Restore runtime adapter, parent-relative no-reparse open protocol, or namespace durability.
 
+##### Windows feasibility decision: share-mode limits and durability
+
+Windows share modes are an admission-compatibility contract, not a mechanism that revokes access from an already-open handle. For each CreateFileW call, Windows checks both directions: the new desired access must be allowed by every existing handle's share flags, and the new share flags must allow every existing handle's desired access. Consequently:
+
+- A retained handle opened without FILE_SHARE_WRITE can prevent later write-capable opens while it remains open. If an existing handle already has write access and its sharing relationship conflicts with that request, acquisition fails with a sharing violation; the adapter must fail closed rather than retry with broader sharing.
+- If the adapter includes FILE_SHARE_WRITE to coexist with SQLite or another writer, compatible pre-existing and future write-capable handles may coexist. A successful open in that mode does not establish externalMutationExclusion.
+- FILE_SHARE_READ permits compatible read opens; omitting it can reject later read opens and may make the adapter incompatible with required readers. FILE_SHARE_DELETE permits compatible delete/rename opens; omitting it can block those opens while the handle is retained. These flags must be selected per role and tested against the actual SQLite/runtime access pattern, not applied as one generic policy.
+- Share modes are checked when handles are opened. They do not retroactively change the access rights or sharing flags of handles already acquired. The adapter must hold the restrictive handle continuously over the entire critical interval, and must report unsupported if it must broaden sharing or release/reopen the handle during that interval.
+- LockFileEx is a byte-range locking primitive, not a substitute for whole-object access/share exclusion. It does not establish a general guarantee against arbitrary writers that do not participate in the same locking protocol, nor does it cover every mutation path or memory-mapped access pattern.
+- FILE_FLAG_OPEN_REPARSE_POINT controls opening the final path component as a reparse point rather than following it; it does not by itself make traversal of earlier parent components race-free. Each parent must be opened and retained under a separately tested handle-relative/no-reparse strategy. Reject unknown reparse tags.
+- GetFileInformationByHandleEx(FileIdInfo) supplies volume-scoped file identity where supported; it is not a globally unique identifier and must be paired with the volume identity and tested filesystem profile. FileStandardInfo supplies size and link-count evidence. Identity and link count do not prove content immutability.
+- ReplaceFileW and MoveFileExW must be evaluated as distinct publication primitives, with exact flags, replacement/collision behavior, metadata behavior, and failure outcomes tested. MOVEFILE_WRITE_THROUGH or a successful file FlushFileBuffers must not be treated as proof that the containing directory entry is durably committed.
+- A directory handle and FlushFileBuffers attempt do not automatically establish portable directory durability. Required access rights, filesystem behavior, API success/failure, and crash outcomes must be tested per volume/filesystem. Until that evidence exists, namespaceDurability=false.
+
+Capability rule: Windows externalMutationExclusion may be true only for a narrowly defined transition where a retained handle's tested share policy rejects every conflicting write-capable open for the complete critical interval, the adapter refuses fallback to permissive sharing, and the supported access paths (including any mapped-I/O assumptions) are covered by native adversarial tests. If SQLite or another required participant necessitates FILE_SHARE_WRITE, if a compatible writer can remain active, or if the adapter cannot prove the complete access model, report externalMutationExclusion=false. Do not claim that CreateFileW, a successful identity query, LockFileEx, or a point-in-time handle scan alone proves exclusion.
+
+**Decision:** Windows may proceed with native handle-identity and share-mode experiments, but no Windows filesystem profile is eligible for automatic Restore today. A future eligible profile requires a declared NTFS/ReFS/etc. support boundary, per-role share-mode matrix, pre-existing-handle and mapped-I/O tests, parent-relative reparse-safe identity checks, tested no-replace publication, and separately proven namespace durability. Unknown, unsupported, or sharing-violation outcomes preserve all artifacts and require manual review.
+##### Windows share-mode probe: initial host evidence (not adapter acceptance)
+
+A repeatable, non-destructive Win32 probe is available at scripts/windows-share-mode-probe.ps1. It creates disposable files under the system temporary directory, calls CreateFileW directly, and removes its temporary directory in a finally block. It does not open or modify Control Center databases.
+
+Initial host run:
+- Host: Windows 11 Pro, build 26300; test volume: NTFS.
+- API: direct CreateFileW, MoveFileExW, and DeleteFileW P/Invoke from Windows PowerShell.
+- Coverage: all 8 existing share masks Ã— all 8 candidate share masks for read, write, and read/write desired-access pairs (192 combinations); same-process and separate PowerShell child-process tests for pre-existing permissive writers and restrictive retained handles; compatible child writer; rename and delete with/without FILE_SHARE_DELETE.
+- Result: 202 assertions passed. Expected incompatible opens and rename/delete attempts failed with Win32 sharing violation 32; compatible opens/operations succeeded, including the cross-process cases.
+
+Interpretation: this confirms the expected bilateral share-compatibility behavior on this one NTFS host. It demonstrates that a retained handle omitting FILE_SHARE_WRITE rejects later write opens, while a pre-existing permissive writer prevents a later restrictive handle from being acquired. It also confirms that omitting FILE_SHARE_DELETE blocks rename/delete while the handle remains open.
+
+Evidence boundary: this is a single-host API probe with both same-process handle pairs and separate PowerShell child-process opens. It is not a test of SQLite's actual handle/share pattern and does not prove exclusion against mapped writes, privileged actors, alternate filesystem drivers, SMB, or cloud-sync layers. It does not test parent-component traversal, reparse races, file-ID stability, ReplaceFileW, directory flush, power-loss durability, or a complete Restore transition. It is not CI evidence and does not promote NTFS to the supported automatic-recovery matrix. externalMutationExclusion and namespaceDurability remain false/unknown for the product adapter.
+A separate exploratory integration check held an actual Node node:sqlite DatabaseSync connection open on a disposable NTFS database and attempted child-process CreateFileW opens. With candidate desired access GENERIC_READ and share mode FILE_SHARE_READ, the child received sharing violation 32. With candidate GENERIC_READ|GENERIC_WRITE and FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, the child successfully acquired a write-capable handle. This establishes that the observed SQLite handle is compatible with a second write-capable open when the second opener also uses permissive sharing; it does not demonstrate that the child wrote database bytes or bypassed SQLite byte-range locks.
+
+Runtime caveat: this exploratory check used local Node v22.23.2 / SQLite 3.51.3, below the repository's declared Node >=24.15.0 requirement. It is not acceptance evidence for supported runtime versions and must be repeated under Node 24 and 26 CI/runtime environments before relying on it.
+
+Operational implication: a restrictive Windows guard cannot be layered on top of an already-open, write-capable SQLite handle. The Restore design must either prove all relevant SQLite handles are closed before acquiring and retaining a no-FILE_SHARE_WRITE guard, or remain manual-review-only. The successful permissive child open demonstrates why allowing FILE_SHARE_WRITE is not an external-writer exclusion strategy. The current Restore path rejects existing -wal/-shm sidecars and instructs operators to stop the server, but absence of those sidecars is not evidence that every external file handle is closed. A future native guard must acquire the restrictive handle itself and treat a sharing violation as an ineligible/manual-review result; it must not infer handle absence from the operator precondition or reservation database.
+
+**Next native test gate:** add separate-process races and a measured SQLite-compatible open profile; determine whether any restrictive share policy can be held across the complete source-read, stage, and publish intervals without requiring permissive write sharing. If not, the Windows profile remains manual-review-only.
 The current Node implementation cannot claim these native Windows guarantees. syncDirectory explicitly reports that portable Node directory-handle flush is unsupported on Windows. Until a native, tested directory durability primitive exists, Windows transitions depending on durable rename/link/unlink ordering remain manual-review-only even if handle identity is implemented.
 
 #### Capability and eligibility matrix
@@ -337,7 +396,7 @@ The current Node implementation cannot claim these native Windows guarantees. sy
 | Handle-derived stable identity | fstat device/inode | Native volume/file ID query | Manual review |
 | Parent-relative entry comparison | fstatat/statx no-follow | Native parent-relative query with tested semantics | Manual review |
 | Link-count verification | st_nlink | Native handle link count | Manual review |
-| Prevent conflicting mutation | Tested OS/filesystem locking policy | Tested CreateFileW share modes | Manual review |
+| Prevent conflicting mutation | Unsupported by baseline POSIX advisory locks; only a separately proven mandatory mechanism qualifies | Per-role retained CreateFileW share policy; may reject new conflicting opens and fail if pre-existing incompatible handles exist; false if compatible writers remain or mapped-I/O/access model is unproven | Manual review unless exact transition is proven |
 | Durable namespace transition | Tested directory fsync | Native directory flush on tested filesystems | Manual review |
 | Filesystem support profile | Per filesystem/mount | Per volume/filesystem | Manual review |
 
@@ -368,7 +427,7 @@ A successful open of a candidate handle proves only that this operation holds th
 - Bind every recognized artifact to an exact expected role, canonical relative name, operation UUID, journal record, parent identity, opened object identity, link count, size, and digest as applicable. A UUID-shaped filename is only a candidate label; it does not prove ownership, operation association, content, or permission to delete.
 - Inventory completeness requires a platform-specific race protocol: enumerate and inspect entries relative to retained parent handles; capture stable entry/object identity; detect additions, removals, replacements, and parent changes over the full interval using a tested directory change/version primitive or equivalent adapter mechanism. A before/after listing is only supplemental unless native tests prove it detects all relevant races for that filesystem. If the platform cannot provide a sufficiently strong snapshot/change-detection guarantee, report incomplete/unsupported and remain operator-led.
 - Where multiple roots are involved, bind each root's parent identity and inventory result into one canonical aggregate evidence digest. Any root omitted, enumeration truncated, resource limit reached, or root identity changed invalidates the aggregate. The journal's recorded paths must resolve under the exact inventoried roots; a path outside them is a contradiction, not an implicit additional root.
-- In the no-journal case, absence of the journal does not narrow the scan: inventory all entries in every configured Restore artifact root, including unknown names and all candidate rollback/staged/temp entries. Do not infer ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“no artifactsÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â from an empty filtered allowlist.
+- In the no-journal case, absence of the journal does not narrow the scan: inventory all entries in every configured Restore artifact root, including unknown names and all candidate rollback/staged/temp entries. Do not infer ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œno artifactsÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â from an empty filtered allowlist.
 - In the journal-present case, inventory the same complete namespace, not merely journal temporary names. Compare every observed candidate with the exact journal operation and expected artifact role. Unexpected extra candidates, duplicate role claims, cross-operation UUIDs, or unassociated artifacts make the evidence incomplete/contradictory.
 - Inventory is a read-only evidence operation. It must not repair names, delete unknown files, follow links, normalize away aliases, or perform cleanup while enumerating. Cleanup remains a separate transition requiring the same live complete guard/context, exact operation-owned object identity, fresh evidence, and its own no-replace/durability checks. Filename matching alone never authorizes cleanup.
 - A published journal plus a complete inventory does not itself authorize recovery. Journal validity, content digests, retained handles, reservation guard, external-mutation exclusion, platform capabilities, and one-shot evaluator/executor checks remain independent mandatory gates.
@@ -469,7 +528,7 @@ This section resolves ordering dependencies between immutable Journal v2 evidenc
 
 #### Current implementation gap
 
-The current Restore wrapper reserves destination Runtime and destination Maintenance only; it does not reserve source Maintenance. Current source validation and staging use path-based operations, and Journal v1 does not bind source/original/staged content with digests or stable handle identity. The ordered multi-reservation protocol, Journal v2 record, and native identity adapters are prerequisites, not descriptions of current behavior. No automatic recovery state is approved by this design.
+The current Restore wrapper acquires destination Runtime, source Maintenance, and destination Maintenance through the shared ordered reservation guard. This serializes cooperating Control Center operations, but does not exclude arbitrary external handles or namespace mutation. Source validation and staging remain path-based, and Journal v1 does not bind source/original/staged content with digests or stable handle identity. The shared ordered multi-reservation protocol is implemented for Backup and Restore and is exercised by local concurrency tests. Journal v2 evidence and native identity adapters remain prerequisites, not descriptions of current behavior. No automatic recovery state is approved by this design.
 
 ### Crash matrix and classifier consistency review (design only)
 
@@ -542,7 +601,7 @@ The evaluator's returned value is a decision descriptor, not an authorization to
 
 The executor must receive the exact operation-scoped context object that owns the live guard and retained handles, and must verify object identity against the context that produced the evidence/decision. A matching operation UUID, digest, path set, or newly acquired equivalent guard is not a substitute for that same in-process context. If evaluator and executor cannot share that exact context without serialization or process transfer, the result is manual-review; no IPC protocol or bearer capability is implied by this design.
 
-Treat each eligible decision as one-shot and transition-scoped. The executor atomically marks it consumed before beginning the protected transition; concurrent or repeated use is rejected. Its validity ends at the earliest of: the named transition attempt, explicit context invalidation/release, any anchor/capability/evidence drift, or the bounded expiry/revalidation boundary. A failed or ambiguous transition attempt does not make the old decision reusable. Any subsequent transitionÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Âincluding cleanupÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Ârequires a newly collected evidence projection and a fresh evaluation under the still-valid or newly acquired complete context. A new context always requires new evidence and a new decision. The implementation must test duplicate, concurrent, delayed, serialized/replayed, cross-context, and post-release submissions as no-mutation rejections.
+Treat each eligible decision as one-shot and transition-scoped. The executor atomically marks it consumed before beginning the protected transition; concurrent or repeated use is rejected. Its validity ends at the earliest of: the named transition attempt, explicit context invalidation/release, any anchor/capability/evidence drift, or the bounded expiry/revalidation boundary. A failed or ambiguous transition attempt does not make the old decision reusable. Any subsequent transitionÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âincluding cleanupÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Ârequires a newly collected evidence projection and a fresh evaluation under the still-valid or newly acquired complete context. A new context always requires new evidence and a new decision. The implementation must test duplicate, concurrent, delayed, serialized/replayed, cross-context, and post-release submissions as no-mutation rejections.
 
 #### Required evaluator/executor tests
 
@@ -559,9 +618,9 @@ No evaluator input may be assembled by promoting the current inspector's exists,
 #### Bounded output
 
 The evaluator returns exactly one of:
-- manual-review ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â preserve every journal/artifact; no automatic mutation.
-- eligible-continuation ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a candidate authorization for one precisely named, non-destructive/forward namespace transition, with evidence digest, operation UUID, required preconditions, and expiry/revalidation boundary.
-- eligible-rollback ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a candidate authorization for one precisely named rollback transition, with the same binding and revalidation requirements.
+- manual-review ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â preserve every journal/artifact; no automatic mutation.
+- eligible-continuation ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a candidate authorization for one precisely named, non-destructive/forward namespace transition, with evidence digest, operation UUID, required preconditions, and expiry/revalidation boundary.
+- eligible-rollback ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a candidate authorization for one precisely named rollback transition, with the same binding and revalidation requirements.
 
 no-pending-restore is an inspector/classifier diagnostic state, not an evaluator action or recovery authorization. The evaluator must not return generic success, recover, cleanup, delete, or retry decisions.
 
@@ -664,8 +723,8 @@ This section defines how the future Restore v2 protocol must reason about compet
 #### Current coordination boundary
 
 - Backup acquires source-maintenance and destination-maintenance reservations.
-- Restore currently acquires destination-runtime and destination-maintenance reservations only. It does not reserve the source Backup for maintenance.
-- Therefore, a cooperating Backup operation targeting the same source path can overlap a Restore that is reading/copying that source. Path identity snapshots do not exclude in-place writes through another handle.
+- Restore acquires destination-runtime, source-maintenance, and destination-maintenance reservations through the shared ordered reservation-set guard.
+- A cooperating Backup targeting the same selected source path conflicts on the source-maintenance key and cannot overlap the guarded Restore source-read interval. This coordinates only operations using the same reservation protocol; it does not exclude arbitrary external handles or namespace mutation.
 - Restore's preflight observations (source validation, WAL/SHM checks, journal/orphan checks, destination kind) are path-based. A successful preflight does not freeze the namespace against a non-cooperating actor.
 - Destination reservations serialize cooperating Restore/Backup operations only when they use the same canonical reservation key. They do not prevent arbitrary filesystem mutation or handles held by unrelated software.
 - The process-local flags in the current Restore implementation describe only the current call stack. They are not durable transition evidence and cannot arbitrate a competing process after a crash.
@@ -684,9 +743,9 @@ This section defines how the future Restore v2 protocol must reason about compet
 | Competing interleaving | Current evidence/behavior | Future required disposition |
 |---|---|---|
 | Two Restore calls target the same destination | Destination runtime/maintenance reservations should serialize cooperating calls; second acquisition fails busy while first owns them | Keep the second call outside mutable inspection. No journal/temp cleanup by the losing call. Verify canonical-key equivalence and release order in child-process tests. |
-| Backup writes the selected Restore source while Restore validates/copies it | Restore currently has no source-maintenance reservation; path identity does not detect all in-place writes | Future Restore must hold source Maintenance for the full evidence lifetime. Without it, no v2 intent or automatic eligibility. |
+| Backup writes the selected Restore source while Restore validates/copies it | The shared guard currently reserves source Maintenance for Restore, so cooperating Backup operations using the same key are serialized; external writers remain outside this boundary | Retain the source reservation for the complete evidence lifetime and separately prove transition-specific external mutation exclusion through the native adapter. Without the latter, no automatic eligibility. |
 | Backup destination equals Restore destination | Shared destination-maintenance key should serialize cooperating operations; runtime reservation additionally protects Restore destination | Prove both operations canonicalize to the same key and that a busy acquisition causes no artifact cleanup or content inspection. |
-| Backup source equals Restore destination | Backup's source-maintenance reservation and Restore's destination-maintenance/runtime reservations overlap by key class only if key canonicalization is deliberately shared | Define one canonical database identity namespace across reservation classes; otherwise document and test the non-overlap as a conflict requiring a stronger protocol. Never assume different lock classes coordinate. |
+| Backup source equals Restore destination | Backup source Maintenance and Restore destination Maintenance use the same canonical maintenance key and therefore conflict under the current shared guard | Keep canonical identity derivation consistent and retain cross-operation tests proving the conflict; the distinct Runtime reservation adds destination runtime coordination but does not replace Maintenance. |
 | Two Backup operations share a destination but use different sources | Destination-maintenance reservation serializes cooperating publishers | Losing operation must not run stale-temp cleanup until it owns the complete reservation set. No destination overwrite; no deletion of the winner's artifacts. |
 | A second process observes a temp/journal name while the first process is active | Filename and PID do not establish ownership; sidecar existence is not live ownership proof | Preserve candidate names. Require complete reservation acquisition and live guard before any cleanup; if ownership cannot be proven, manual-review. |
 | A non-cooperating process replaces or mutates source/destination after preflight | Current path checks may detect some replacements but not all in-place writes or retained external handles | Adapter must report transition-specific external mutation exclusion. If unsupported or unproven, evaluator returns manual-review. |
@@ -716,7 +775,7 @@ This section defines how the future Restore v2 protocol must reason about compet
 - Lose the reservation guard immediately before each cleanup step. Verify cleanup is skipped and the stale context cannot be reused.
 - Record operation-level outcomes without exposing tokens, database content, arbitrary paths, or raw exception messages.
 
-**Current implementation gap:** the Restore path's source reservation and external mutation exclusion are not implemented. The current tests and cooperating SQLite locks cannot prove arbitrary external handles are absent. These remain Phase 6 implementation prerequisites; current automatic recovery remains disabled.
+**Current implementation boundary:** Restore source Maintenance reservation is implemented and tested for cooperating Control Center operations. External mutation/handle exclusion is not established by SQLite reservations or pathname checks. Path-based evidence, incomplete namespace inventory, and missing Journal v2/native handle identity remain blockers; current automatic recovery remains disabled.
 
 ### Canonical path identity and reservation-key equivalence (design only)
 
@@ -782,7 +841,7 @@ The protocol must state explicitly which layer each field represents. A lexical 
 ### Restore source-to-install binding and journal publication boundary (design only)
 
 #### Current implementation boundary
-- `restoreDatabaseBackup()` currently acquires only the destination Runtime reservation followed by the destination Maintenance reservation. It does not reserve the selected backup source. The source is validated by path, copied by path, and compared before/after using `lstat`-derived device/inode/size/mtime/ctime snapshots; this detects several ordinary replacement or mutation cases but is not a retained-handle content binding and does not exclude a concurrent writer or namespace actor.
+- `restoreDatabaseBackup()` acquires destination Runtime, source Maintenance, and destination Maintenance reservations through the shared ordered reservation-set guard. This coordinates cooperating Control Center operations only. The source is validated by path, copied by path, and compared before/after using `lstat`-derived device/inode/size/mtime/ctime snapshots; this detects several ordinary replacement or mutation cases but is not a retained-handle content binding and does not exclude a concurrent writer or namespace actor.
 - The current v1 journal is published after source validation and before staging. It records PID, timestamp, and four paths only. It does not bind the selected source bytes, staged bytes, destination-at-intent state, parent identities, reservation ownership, or platform capabilities. A valid v1 journal therefore cannot authorize continuation or rollback.
 - The current Restore flow validates the source path, then `copyFileSync`s it to staging. A post-copy path metadata comparison is not proof that the copied bytes came from the exact validated source object if an actor can mutate/replace the source across the interval. Validation of the staged SQLite file protects the installed candidate's database structure, not its provenance or equality to the selected backup.
 
@@ -791,7 +850,7 @@ The protocol must state explicitly which layer each field represents. A lexical 
 - The source Maintenance reservation is a coordination boundary for cooperating Control Center maintenance operations only. It does not prove arbitrary external writers or handles are absent. A separate transition-specific `externalMutationExclusion` capability is mandatory; if the adapter cannot prove the required exclusion for the source-read/stage interval, Restore is ineligible for automatic recovery and must remain operator-led.
 - Retain the exact opened source handle and trusted source/destination parent handles. Derive source identity, link count, size, and digest from that handle; verify its directory entry still names the same object. Bind the immutable intent to the source digest/length and source identity, not merely its path. Do not reopen by path and treat that as the same source.
 - Stage bytes from the retained source handle (or an adapter primitive with an equally explicit same-object guarantee). Hash the staged object independently and require exact digest and byte-length equality with the intent source. Run SQLite integrity, foreign-key, and supported-schema validation against that exact staged object. The installed object must remain the same staged object whose digest and validation were recorded.
-- Bind destination state at intent time explicitly (`destinationExisted` plus exact original destination digest/identity when present). A destination appearing when intent said absent, or changing identity/content when it said present, is a collision/contradictionÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Ânot permission to overwrite. Rollback publication and install each require fresh same-context evidence and no-replace semantics.
+- Bind destination state at intent time explicitly (`destinationExisted` plus exact original destination digest/identity when present). A destination appearing when intent said absent, or changing identity/content when it said present, is a collision/contradictionÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Ânot permission to overwrite. Rollback publication and install each require fresh same-context evidence and no-replace semantics.
 - Publish the immutable v2 intent only after the complete guard, retained parent/source handles, capability profile, and source/destination evidence have been established, but before creating staged or rollback artifacts and before any destructive namespace transition. The journal binds operation UUID, canonical reservation-set digest, source/staged expected digest and length, destination initial state, parent/file identities, adapter/evaluator versions, and required durability capabilities. It contains no bearer authority and no mutable phase flag.
 - The journal's publication result must distinguish not-published, published-and-durable, and possibly-published. Only published-and-durable permits staging. Possibly-published is terminal for that attempt: preserve journal and every artifact, invalidate the context, and require operator review; do not guess publication success or clean up.
 
@@ -810,9 +869,9 @@ This section defines the future operation-scoped guard lifecycle. It does not in
 - Each current lock acquisition opens a separate SQLite sidecar connection and starts BEGIN IMMEDIATE. The live transaction, not the persistent sidecar file, represents ownership.
 - The returned release closure is idempotent: it marks itself released before attempting ROLLBACK, then closes the connection in a finally block. A second invocation is a no-op.
 - If ROLLBACK throws, connection close is still attempted. The release closure does not retry rollback; connection close is the final release attempt available to that closure. A close failure may still propagate.
-- Backup acquires source Maintenance and then destination Maintenance; its finally block releases destination then source. If destination acquisition fails, the optional destination release is skipped and source is released.
-- Restore acquires destination Runtime and then destination Maintenance; its finally block releases Maintenance then Runtime. If Maintenance acquisition fails, Runtime is released.
-- These nested try/finally structures provide reverse release for the current fixed two-lock paths. They do not provide a shared guard, a globally ordered acquisition set, or proof that all future call paths use the same order.
+- Backup acquires source and destination Maintenance reservations through the shared ordered reservation-set guard; the guard releases every acquired reservation in reverse order, including partial-acquisition unwind.
+- Restore acquires destination Runtime, source Maintenance, and destination Maintenance through the shared ordered reservation-set guard; the guard releases every acquired reservation in reverse order, including partial-acquisition unwind.
+- The current Backup and Restore wrappers use the shared ordered multi-reservation guard, which provides deterministic acquisition, partial-acquisition unwind, and reverse release for those call paths. This does not prove that every future maintenance/runtime path uses the same global protocol, nor does it establish external filesystem-handle exclusion.
 - SQLite busy acquisition currently fails rather than establishing a waiting queue contract. Opposite-order operations can therefore fail fast under contention; they must not be described as proven deadlocks in the current implementation. A future wait/retry policy without a global order could turn the same pattern into a deadlock.
 - Current tests cover exclusive cross-process ownership, crash release, and lock release on success/failure paths. They do not yet prove a general multi-resource guard state machine, acquisition-order invariance, or injected failure at every release boundary.
 
@@ -913,3 +972,471 @@ The implementation may represent terminal release failure separately from releas
 - Prove that no cleanup occurs on filename/UUID match alone, on a stale serialized decision, after guard/handle release, or when an artifact's exact operation ownership cannot be established.
 
 **Acceptance boundary:** current v1 inspection remains diagnostic and operator-led. This section defines future v2 evidence requirements only; it adds no runtime artifact ownership, no cleanup authority, and no automatic recovery. Phase 6 implementation is in progress, but this section remains design-only; Phase 5 remains deferred.
+
+### Windows Restore handle-gating review (2026-11-13)
+
+#### Supported-runtime availability and evidence
+- The local Windows host has only Node.js v22.23.2 installed. The project engine requirement is Node >=24.15.0, so local Node 22 observations are exploratory and cannot satisfy product acceptance.
+- The CI run for baseline commit 1a3930c582587ee6eb09d5bdd8fa2f981ec89934 completed successfully on Node 24 and Node 26 for both Windows and Linux. Its Windows jobs ran syntax checks, the existing test suite, and the Windows data ACL helper test. They did not run the dedicated SQLite/CreateFile share-mode integration probe; CI green is not evidence for that unrun probe.
+- A disposable Node 22.23.2 / SQLite 3.51.3 check created a temporary database and confirmed that WAL/SHM sidecars were absent after the connection was closed. This only confirms the expected clean-close state; it says nothing about other processes or pre-existing handles. No operational database was opened or modified.
+
+#### Restore implementation review
+- The current Restore path acquires the cooperating-process SQLite reservation set (destination Runtime, source Maintenance, destination Maintenance), then calls the path-based Restore implementation.
+- Before staging, it rejects existing destination `-wal` or `-shm` path entries and requires the operator to stop the server/close connections. This is a useful precondition but is not proof that no process retains an open database, WAL, or SHM handle. Sidecar absence is not a handle inventory.
+- The current implementation uses path-based `lstat`, `copyFileSync`, `linkSync`, `unlinkSync`, and directory sync operations for journal, staging, rollback, and publication. These are not handle-relative operations bound to retained parent and file handles, and do not provide the native handle identity / no-follow / external-writer exclusion contract required for automatic recovery.
+- Consequently, a Windows restrictive share-mode guard must be acquired against the actual target objects before any Restore journal publication or namespace transition. A sharing violation or any ambiguous identity/handle state must stop before mutation and leave the operation manual-review-only. A post-hoc path check or missing sidecar check cannot substitute for successful guard acquisition.
+- The native guard must independently bind the database main file and every relevant sidecar/namespace entry. Its contract must state which access/share modes it requests, what pre-existing handles cause acquisition to fail, and how rename/replace/delete and directory durability are handled. It must not claim protection against privileged actors, unsupported filesystems, remote redirectors, mapped writes, or other writers outside the proven OS contract.
+- No Windows filesystem profile is promoted to automatic-recovery eligible by this review. Automatic Restore remains disabled; current Restore remains operator-led. Phase 5 remains deferred.
+
+#### Required next verification
+- Add a dedicated Windows CI test using the exact supported Node 24 and Node 26 runtimes. It must hold a real Node SQLite connection open while a separate process attempts the native share-mode opens, and test both orderings: existing SQLite handle first, restrictive guard first.
+- Record Node, SQLite, Windows build, filesystem, access/share flags, Win32 error codes, and whether WAL/SHM handles are present. Test main DB and sidecars independently; do not mutate a production database.
+- Verify the test actually exercises the SQLite VFS handles used by those Node versions. A separate CreateFile handle test alone does not establish SQLite VFS behavior.
+- Keep the probe informational until it is part of CI and its semantics are reviewed. Passing it is necessary evidence only; it does not replace handle-relative identity, namespace-race, crash-consistency, durability, and security acceptance gates.
+
+### Windows SQLite VFS share-mode integration probe (2026-11-13)
+
+#### Probe implementation
+- Added `scripts/windows-sqlite-share-worker.mjs`, which opens a disposable database using the actual `node:sqlite` / `DatabaseSync` API, enables WAL, commits a write, reports runtime and sidecar presence, and keeps the connection alive until explicitly released.
+- Added `scripts/windows-sqlite-share-integration.ps1`, which uses a separate Node process and direct Win32 `CreateFileW` calls to exercise both orderings:
+  1. SQLite opens first and retains its main DB/WAL/SHM handles; a second process attempts a restrictive read handle that omits `FILE_SHARE_WRITE`.
+  2. A restrictive no-`FILE_SHARE_WRITE` handle is retained first; a separate Node process attempts to open and write through SQLite.
+- The probe checks that main DB, WAL, and SHM entries are present while the SQLite connection remains open and that restrictive opens fail with Win32 sharing violation 32. It also checks that SQLite cannot initialize against a file already guarded by the restrictive handle.
+- The script rejects Node versions other than 24/26 by default. `-AllowUnsupportedRuntime` exists only for explicitly labeled local exploratory runs. All files are created under a unique system temporary directory and removed in a finally block; no project database is opened.
+- Added the probe as a Windows CI step after the existing tests. The existing Windows matrix runs it independently on Node 24 and Node 26.
+
+#### Local exploratory result
+- Host: Windows 11 Pro build 26300, NTFS.
+- Runtime: Node v22.23.2 / SQLite 3.51.3 (below the project minimum; explicitly invoked with `-AllowUnsupportedRuntime`).
+- Result: 7 assertions passed, 0 failures. The actual SQLite VFS held handles that rejected restrictive opens for the main DB, WAL, and SHM with sharing violation 32; a restrictive pre-existing handle also prevented the SQLite writer process from opening the database.
+- This is exploratory evidence only. It is not supported-runtime acceptance and must not be used to claim Node 24/26 behavior until the new CI step passes on both matrix entries.
+
+#### Acceptance boundary
+- The probe tests ordinary SQLite VFS handles and a particular restrictive share policy on the tested Windows/NTFS host. It does not establish behavior for mapped I/O, privileged actors, remote/network filesystems, alternate drivers, reparse traversal, stable file identity, no-replace publication, directory durability, crash consistency, or complete Restore transitions.
+- A successful probe is one necessary compatibility input, not proof of an eligible Windows automatic-recovery profile. Native handle-relative identity, namespace-race resistance, publication semantics, durability, fault injection, and security review remain separate blockers.
+- Automatic Restore remains disabled and operator-led. Phase 5 remains deferred.
+
+### Native Filesystem Adapter contract (2026-11-13)
+
+- Added `docs/NATIVE-FILESYSTEM-ADAPTER-CONTRACT.md` as the normative Phase 6 design boundary for native filesystem evidence and namespace transitions.
+- The contract separates database reservation coordination from native filesystem handle evidence; the adapter receives an already-held operation guard and must not acquire SQLite locks itself.
+- It defines immutable, scoped capability reporting; retained parent/source handles; handle-derived identity; no-follow opens; same-object hashing/staging; no-replace publication; explicit durability outcomes; conservative `possibly-completed` handling; and ownership-gated cleanup.
+- POSIX advisory locks are explicitly insufficient to claim arbitrary external-writer exclusion. Windows share-mode compatibility probes are explicitly insufficient to claim identity, parent binding, publication, or directory durability.
+- The contract is design-only. No native addon, adapter runtime, or automatic Restore executor was added or enabled. Phase 5 remains deferred.
+### Restore crash-consistency state machine (2026-11-13)
+
+- Added `docs/RESTORE-CRASH-CONSISTENCY-STATE-MACHINE.md`, derived directly from `createRestoreJournal`, `restoreDatabaseBackupUnlocked`, the read-only recovery classifier, and the existing process-fault worker/tests.
+- The document distinguishes preflight, journal-temp creation/publication, staged copy/validation/flush, rollback-link publication, original-name removal, staged installation, temporary cleanup, journal cleanup, and returned success. It separately specifies caught-error compensation; process-crash states are not conflated with in-process rollback.
+- Added a recovery-classification crosswalk and mapped the existing fault-injection coverage to each tested boundary. It explicitly limits those tests to disposable application-level process-fault simulation, not real power-loss or universal filesystem durability evidence.
+- No runtime behavior or test harness was changed in this step. The state machine is a design/test-oracle artifact; the inspector remains read-only, every recovery state remains operator-led, Automatic Restore remains disabled, and Phase 5 remains deferred.
+
+### Fake-adapter Restore protocol harness (2026-11-13)
+
+- Added `test/restore-fake-adapter.test.js`, a test-only in-memory adapter and protocol model. It is deliberately not imported by production code and does not simulate native handles, fsync, filesystem atomicity, SQLite, process termination, or power-loss durability.
+- Injected a simulated crash after each of the nine modeled boundaries: journal temp, intent publication, stage creation, stage validation/flush, rollback publication, original-name removal, new-live publication, stage-name cleanup, and journal cleanup.
+- Each crash case asserts that original database bytes remain reachable through either the original destination or retained rollback name, the source backup remains unchanged, and published intent remains present until final cleanup.
+- Additional tests prove the model refuses to overwrite a destination created by a concurrent actor and refuses pre-existing journal/rollback evidence.
+- Targeted harness: 3/3 passed. Full suite: 191 tests, 187 passed, 4 skipped, 0 failed. `npm run check` and `git diff --check` passed on local Node v22.23.2 (below the project's >=24.15.0 requirement); supported-runtime CI evidence remains pending.
+- This harness validates protocol reasoning only. It does not close native adapter, real process-crash, power-loss, filesystem-specific durability, or arbitrary external-writer gates. Automatic Restore remains disabled and Phase 5 remains deferred.
+
+### Real process termination after staged-file fsync (2026-11-13)
+- Extended `test-support/restore-fault-worker.js` with a mode that calls the real OS `fsync` on the staged Restore file descriptor and immediately terminates the child process (exit 83), without executing application cleanup.
+- Added this boundary to the existing disposable-database crash/Inspector matrix. The parent verifies the journal is valid, live and staged artifacts remain present, the Inspector classifies the state conservatively, and `automaticAction` remains `none`.
+- Targeted crash-boundary test passed; full suite remains 191 tests (187 passed, 4 skipped, 0 failed). `npm run check` and `git diff --check` passed on local Node v22.23.2, below the supported >=24.15.0 requirement.
+- This is real process termination after a successful file flush on the current host, not a power-loss test. It does not prove controller-cache behavior, storage durability, directory-entry durability on Windows, or native handle identity. Automatic Restore remains disabled; Phase 5 remains deferred.
+
+### Restore namespace durability review (2026-11-13)
+
+A source-backed transition matrix was added to docs/RESTORE-CRASH-CONSISTENCY-STATE-MACHINE.md. It distinguishes file-content fsync from parent-directory entry durability for journal publication/cleanup, staged snapshot creation, rollback publication, original-name removal, live installation, stage cleanup, and caught-error compensation.
+
+Key findings:
+- POSIX syncDirectory opens and fsyncs the directory descriptor; injected failures propagate, but this Windows host cannot execute the real POSIX directory-fsync test.
+- On Windows, syncDirectory returns supported:false and current Backup/Restore callers ignore that result. Therefore namespace-entry durability is unverified even when file fsync succeeds; this is not Windows durable-restore evidence.
+- Rollback hard-link publication and original-name unlink share one later directory flush rather than separate boundaries.
+- Caught-error compensation flushes the restored live name before removing the redundant rollback name, but does not explicitly flush the parent immediately after that rollback unlink.
+- A namespace syscall followed by directory-flush failure can be possibly-completed; the current path-based implementation has no structured native result model for that condition.
+
+Required native-adapter work is recorded in the state-machine document. No production behavior was changed. Automatic Restore remains disabled/operator-led; no OS/filesystem profile is promoted to eligible, and Phase 5 remains deferred.
+
+Additional source-review findings (2026-11-13):
+- Backup publication and temporary-directory cleanup also ignore the Windows `{ supported: false }` result from `syncDirectory`; this is a shared Backup/Restore durability gap, not Restore-only.
+- On POSIX, `syncDirectory` closes the directory descriptor in `finally`. If `fsync` succeeds but `close` fails, callers receive an exception after the namespace flush syscall completed. The current helper does not classify this as possibly-completed/close-uncertain.
+- The Native Filesystem Adapter Contract now includes deterministic failpoints for before/after namespace mutation, parent flush, handle close, unsupported capability, and fresh-process verification.
+
+### Linux POSIX dirfd feasibility probe (2026-11-13)
+
+- Added `experiments/posix-fd-adapter-probe.py` and `docs/POSIX-EXPERIMENTAL-PROBE.md`. The probe runs only in a fresh temporary directory on the WSL2 distro's virtual-disk-backed ext4 filesystem via `TMPDIR=/home/thelord`; it does not touch project databases or connect to Backup/Restore.
+- The host passed 12 assertions covering retained directory descriptors, `O_NOFOLLOW`, handle-derived `(st_dev, st_ino)` identity, symlink rejection, parent-path rename/replacement resistance, Linux `renameat2(RENAME_NOREPLACE)`, and `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS` (including `..` and symlink escape rejection), plus file and parent-directory fsync. Two additional adversarial checks prove that a pathname replaced after open can be distinguished from the retained original handle, and that an already-open writable descriptor can still mutate its inode after unlink (link count zero). Repeated 10 times (120 assertions total) on WSL2 kernel 6.18.33.2, Python 3.14.4, distro virtual-disk-backed ext4 (`df -T`); this is not a host-crash, power-loss, controller-cache, or physical-storage durability test. Production code must fail closed when required resolution semantics are unavailable.
+- The experiment uses Python/ctypes and is not a native addon or production adapter. It does not prove power-loss durability, arbitrary/privileged writer exclusion (and explicitly demonstrates why pre-existing writers are not excluded), mount/namespace threat resistance, SQLite sidecar coordination, or complete Restore crash consistency.
+- This result justifies proceeding with a reviewed Linux adapter prototype, but does not qualify any filesystem profile for Automatic Restore. Automatic Restore remains disabled; the inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows native handle feasibility probe (2026-11-13)
+
+- Added `experiments/windows-handle-adapter-probe.cpp` and `scripts/windows-handle-adapter-probe.ps1`. The probe compiles with the installed MSVC x64 toolchain using strict warnings-as-errors and runs only against unique temporary files; it does not open project databases or participate in Backup/Restore.
+- Discovered an installed Visual Studio 18 Build Tools compiler (MSVC 19.51.36248) and Windows SDK 10.0.28000.0. This corrects the earlier environment inventory: Windows does have a usable C/C++ compiler, although WSL2 still has no Linux compiler and the repository has no Node addon headers/dependency.
+- On the Windows 11 Pro build 26300 / NTFS host, the native probe passed 14 assertions in each of 10 consecutive runs (140 assertions total): file creation/write/flush, handle-derived FileIdInfo, retained-handle identity after rename and pathname replacement, continued writes through a pre-existing writable handle after rename/replacement, and MoveFileExW no-replace collision preserving destination bytes. The retained-writer result confirms that namespace replacement does not revoke an already-open writable handle; any guard intended to prevent such writers must be acquired before the critical operation and must report its actual share-mode boundary.
+- A separate capability observation found that opening the parent directory with FILE_FLAG_BACKUP_SEMANTICS and calling FlushFileBuffers succeeded on this host. This is not power-loss or controller-cache durability proof and must not be generalized to other filesystems/drivers.
+- Evidence remains path-based for namespace publication and does not test relative opens anchored to retained directory handles, reparse traversal, hostile parent replacement, mapped/privileged writers, remote filesystems, SQLite sidecars, crash transitions, or full Restore. The probe is not a production adapter and does not qualify NTFS for Automatic Restore.
+- This discovery enables focused Windows native prototyping without installing tools. A Linux native implementation still requires a Linux compiler/toolchain; no tool installation was performed. Automatic Restore remains disabled; the inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows NT native rename feasibility probe (2026-11-13)
+
+- Added `experiments/windows-nt-rename-api-probe.cpp` and `scripts/windows-nt-rename-api-probe.ps1`. The probe dynamically resolves `NtSetInformationFile` from `ntdll.dll` and runs only against unique temporary files; it does not open operational or project databases.
+- Microsoft documents `FileRenameInformation` as class 10 and `FileRenameInformationEx` as class 65. On the Windows 11 Pro build 26300 / NTFS host, both classes successfully renamed a source file from a staging subdirectory into the retained root directory using a relative target name and the root directory handle. Ten runs passed all four combinations (legacy/extended Ã— relative/absolute), 40 successful rename operations.
+- Both classes were also tested against an existing target with no-replace semantics. All 20 collision checks returned `STATUS_OBJECT_NAME_COLLISION (0xC0000035)`, preserved the source entry, and preserved the target bytes. Total: 60 successful assertions across 10 runs.
+- This differs from the preceding `SetFileInformationByHandle` matrix, where relative `RootDirectory` variants returned `ERROR_INVALID_PARAMETER (87)`. The direct NT call is a promising native implementation path, but its user-mode API/ABI compatibility and supported-build policy require review. The local collision test is not an adversarial race or cross-filesystem guarantee.
+- No production adapter integration was made. Handle-relative identity, no-follow/reparse policy, complete namespace race testing, SQLite/WAL/SHM coordination, external-writer boundary, parent-directory durability, crash transitions, and security review remain open. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows NT rename API compatibility review (2026-11-13)
+
+- Microsoft Learn identifies `FileRenameInformationEx` as information class 65 and documents availability from Windows 10 version 1709. It defines `FILE_RENAME_INFORMATION` with a `ULONG Flags` union member for this class; zero flags mean no replace request, while `FILE_RENAME_REPLACE_IF_EXISTS` is bit 0x1.
+- The documented `RootDirectory` field is a destination-directory handle for a relative simple filename. Microsoft states rename is same-volume and requires DELETE access to the source plus suitable destination access.
+- The `NtSetInformationFile` reference documents the input structure/class and completion status in `IO_STATUS_BLOCK`, and notes that user-mode callers use the Nt-prefixed name. However, the reference is a driver DDI page and does not itself guarantee a stable supported user-mode application API contract for dynamically resolving this native export.
+- Local host: Windows 11 Pro build 26300, NTFS; installed SDK 10.0.28000.0. Local SDK contains `winternl.h` but no WDK `ntifs.h`, so the prototype's hand-declared ABI has not been independently validated against installed WDK headers.
+- Gate remains open: obtain official WDK headers and compile-time layout assertions; decide whether native user-mode invocation is acceptable; define supported Windows/filesystem matrix; preserve syscall and IO_STATUS_BLOCK status separately; verify same-volume identity and SQLite WAL/SHM concurrency. Do not infer production compatibility from local success.
+- The public Win32 relative-root route still fails with error 87 in the current prototype. Absolute-path fallback remains prohibited because it weakens retained-parent namespace binding.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows SDK ABI probe (2026-11-13)
+
+- Added an isolated x64 compile-time ABI probe against installed Windows SDK 10.0.28000.0 public `WinBase.h` and `winternl.h`.
+- Result: PASS. SDK `FILE_RENAME_INFO` and prototype buffer are both 24 bytes; offsets are RootDirectory=8, FileNameLength=16, FileName=20. `IO_STATUS_BLOCK` is 16 bytes with Information at offset 8. SDK rename flag constants match 0x1 and 0x2.
+- This validates the x64 data layout against the installed public SDK declarations only. It does not validate native user-mode API support, class 65 via an SDK enum, WDK declarations, other architectures, or filesystem semantics. No local `ntifs.h` was installed.
+- Probe files: `experiments/windows-rename-abi-sdk-probe.cpp` and `scripts/windows-rename-abi-sdk-probe.ps1`. Temporary executable/object are created outside the repository and removed in a finally block.
+- Important prototype caveat: the earlier native rename helper collapses immediate syscall and IO_STATUS_BLOCK status into one returned value. A production adapter must preserve both values and correctly implement completion handling; the helper is not suitable for reuse.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows NT rename race feasibility probe (2026-11-13)
+
+- Added experiments/windows-nt-rename-race-probe.cpp and scripts/windows-nt-rename-race-probe.ps1. The experiment uses only unique temporary directories and does not access operational databases.
+- FileRenameInformationEx no-replace publication was raced against a competing CREATE_NEW of the same destination. Across ten runs (100 races per run), all 1,000 races had one valid winner: either rename published the source bytes and CREATE_NEW lost, or CREATE_NEW published its marker and rename returned STATUS_OBJECT_NAME_COLLISION while preserving both marker and source.
+- The probe also moved a directory while retaining its directory handle, recreated a decoy directory at the old path, and published relative to the retained handle. All ten parent-directory checks placed the new entry in the moved original directory and not in the decoy. In three extended runs, the opened source entry was also moved away from its original name and replaced by a decoy; publication by the retained source handle moved the original bytes and left the decoy untouched.
+- This is local feasibility evidence on one Windows 11 Pro build 26300 / NTFS host. It does not establish cross-filesystem, remote filesystem, privileged-actor, kernel-level, power-loss, or directory-entry durability guarantees. The isolated probe is not a complete adapter and does not qualify NTFS for Automatic Restore.
+- The race probe's first implementation left empty temporary directories because its cleanup omitted the original race directory. The probe cleanup was corrected; the five empty directories from the initial runs were inspected (empty, only expected probe subdirectories) and removed. Subsequent runs verified zero residual directories.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows NTSTATUS/completion classification model (2026-11-13)
+
+- Added a pure deterministic model at `experiments/windows-ntstatus-completion-model.cpp`, built/run by `scripts/windows-ntstatus-completion-model.ps1`. It does not invoke native APIs or simulate real kernel completion scheduling.
+- The model preserves syscall `NTSTATUS`, IOSB status, IOSB information, and an explicit completion-observed flag as separate inputs. It covers synchronous success, immediate failure with untouched IOSB, pending then success/failure, cancellation, timeout, unresolved pending, inconsistent statuses, and no-replace collision.
+- Initial model result: 11 assertions passed, 0 failed on the local MSVC x64 toolchain. A follow-up policy extension added explicit gates for ambiguous/possibly-completed outcomes and no-replace conflicts; the latest rerun passed 14 assertions, 0 failed. Temporary build outputs are cleaned in `finally`.
+- The model enforces that `STATUS_PENDING` is not success until completion is observed and that `possibly-completed` is never retryable. It now separately asserts that ambiguous and possibly-completed outcomes never authorize retry or automatic cleanup, and that a no-replace conflict never authorizes destructive cleanup. The policy helper currently authorizes no automatic mutation for any modeled classification. The `not-performed` mapping is deliberately limited to immediate access-denied with an untouched preinitialized IOSB; production must validate those call/initialization semantics.
+- This is classifier logic evidence only, not proof of actual native API completion behavior, cancellation/APC/event races, IOSB lifetime, or namespace postconditions. No production code was changed.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows NTSTATUS capture probe (2026-11-13)
+
+- Added `experiments/windows-nt-rename-status-capture.cpp` and `scripts/windows-nt-rename-status-capture.ps1`. The probe calls the experimental native rename API against unique temporary files only; it does not access the operational database.
+- Ten consecutive runs passed two cases each (20 case executions): successful relative no-replace rename and existing-destination collision.
+- Success case: immediate syscall status and IOSB status were both `STATUS_SUCCESS`; the source name disappeared and the destination retained the expected source bytes.
+- Collision case: immediate syscall status was `STATUS_OBJECT_NAME_COLLISION`, but IOSB.Status and IOSB.Information remained at their preinitialized `0xCC` sentinels. Source and existing destination contents were preserved.
+- This demonstrates that immediate failure status must be recorded independently; IOSB is not guaranteed to mirror it or be updated on immediate failure. The experiment observed synchronous behavior only; it did not test real Pending/event/APC completion or cancellation.
+- This remains one-host feasibility evidence, not an accepted native adapter or a supported user-mode API contract. No production Restore code changed.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+### Windows async-handle rename probe (2026-11-13)
+
+- Added `experiments/windows-nt-rename-async-probe.cpp` and `scripts/windows-nt-rename-async-probe.ps1`.
+- Ten runs passed on Windows 11 Pro build 26300 / NTFS. Each used a source handle opened with `FILE_FLAG_OVERLAPPED`; each rename returned immediate `STATUS_SUCCESS`, IOSB `STATUS_SUCCESS`, and passed source/destination/content postconditions.
+- No run returned `STATUS_PENDING`; the bounded wait path was not exercised. Therefore this is not evidence of actual asynchronous completion, cancellation, APC, or IOCP correctness.
+- Treat Pending completion as unverified/deferred. Do not infer a production wait contract from this result. Automatic Restore remains disabled and Recovery Inspector remains read-only/operator-led.
+### Genuine overlapped Pending/completion control (2026-11-13)
+
+- Named-pipe overlapped ReadFile control produced real `ERROR_IO_PENDING` (997) in all 10 runs.
+- In each run, event wait signaled, `GetOverlappedResult` succeeded, and the exact 28-byte payload was verified.
+- This validates the general Windows overlapped completion mechanism, not the pending behavior or completion contract of `NtSetInformationFile` rename. Rename itself remained synchronous in the tested host runs.
+- This removes the need to treat the host's lack of Pending rename as a general inability to test Pending I/O. The remaining gap is specific to the native rename operation and other filesystem/driver profiles.
+### Integrated Windows native handle-relative publication slice (2026-11-13)
+
+- experiments/windows-native-handle-adapter.cpp now integrates handle-derived stage identity checks and retained-parent-relative no-replace publication through the experimentally successful NtSetInformationFile class-65 path.
+- Ten MSVC /W4 /WX runs passed on Windows 11 Pro build 26300 / NTFS. Each verified relative child open, retained-parent identity, successful publication, collision preservation, and owned-handle unlink.
+- Successful publication recorded immediate STATUS_SUCCESS and IOSB STATUS_SUCCESS; collision recorded immediate STATUS_OBJECT_NAME_COLLISION while the initialized IOSB remained untouched. The prototype asserts both cases independently.
+- Runner: scripts/windows-native-handle-adapter-prototype.ps1. All files are created in unique temp directories and removed.
+- This is an experimental implementation slice, not a production adapter. It does not enable Restore, establish durability, solve arbitrary external writers, or validate native API compatibility across supported Windows versions/filesystems. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+### Windows native handle-based bounded read/hash slice (2026-11-13)
+
+- Added an experimental `NativeContext::readAndHash` path for already-open handles. It checks FileIdInfo, rejects directory/reparse handles, applies a caller-supplied size ceiling, reads in bounded chunks, computes SHA-256 using Windows CNG, and rechecks identity, size, byte count, and parent identity.
+- Ten MSVC x64 `/W4 /WX` runs passed on Windows 11 Pro build 26300 / NTFS. Each verified the exact 20-byte fixture and its known SHA-256 digest, in addition to the existing handle-relative publication/collision/unlink checks.
+- Runner links the inbox `bcrypt.lib`; no package installation and no operational database access.
+- The read is not snapshot-consistent: same-size in-place mutation or pre-existing writable/mapped handles are not excluded. Mutation exclusion, reparse/volume policy, async completion, durability, crash consistency, SQLite WAL/SHM, supported API compatibility, and security review remain open. This remains an experiment only; Automatic Restore stays disabled, Recovery Inspector read-only/operator-led, and Phase 5 deferred.
+
+### Windows native handle-relative directory enumeration (2026-11-13)
+
+- Added bounded `enumerateChildren` using retained directory HANDLE and `GetFileInformationByHandleEx` with `FileIdExtdDirectoryRestartInfo` / `FileIdExtdDirectoryInfo`; validates offsets/name lengths and per-record filename bounds, filters dot entries, rejects separators, and clears partial output on errors/overflow.
+- Each record carries the complete 128-bit `FILE_ID_128` and retained root volume serial. `openEnumeratedChildReadOnly` opens separately relative to the retained parent with no-follow semantics and compares the opened handle identity to the enumeration token; stale-name, modified-high-byte, and volume-token mismatch cases fail closed.
+- Fixture: one regular file and one child directory. Ten MSVC x64 `/W4 /WX` runs passed, including exact two-entry discovery, max-entry overflow refusal with no partial result, directory-as-file rejection, existing hash/read, publication, collision and unlink checks.
+- One Windows 11 Pro build 26300 / NTFS only. No stable snapshot guarantee under concurrent mutation; no successful symlink fixture (CreateSymbolicLinkW returned `ERROR_PRIVILEGE_NOT_HELD` 1314 with both supported flag attempts), recursive traversal, remote/alternate filesystem, power-loss, durability, external-writer exclusion or security review. The identity token detects changed objects at later open but does not freeze namespace state between batches. Symlink-specific assertions are explicitly skipped on this host. Experimental only; Automatic Restore disabled; Recovery Inspector read-only/operator-led; Phase 5 deferred.
+
+### Windows native handle adapter regression rerun (2026-11-13)
+
+- Rebuilt the integrated handle adapter prototype with MSVC `/W4 /WX` and ran it 10 consecutive times on Windows 11 Pro build 26300 / NTFS. All 10 runs passed the existing enumeration, bounded-result, directory rejection, 20-byte SHA-256 read, retained-parent identity, no-replace publication, collision, and handle-unlink assertions.
+- Re-ran the independent NT rename race probe three times: 300 concurrent no-replace races total, zero failures; all three retained-parent/source-path substitution checks passed (303 assertions total).
+- These reruns strengthen repeatability only. The extended-ID experiment binds each enumerated name to a full 128-bit ID and volume serial before accepting a subsequent open, and deterministic stale-name/high-byte/volume-token mismatch tests fail closed. This does not provide snapshot enumeration: namespace changes between batches remain possible. External writers, durability, supported native API policy, and independent security review remain open.
+- Full project validation rerun on 2026-11-13: `npm run check` passed; `npm test` passed (187 pass, 4 skipped, 0 fail); `git diff --check` passed. Local Node is v22.23.2 while the project declares Node >=24.15.0, so this is exploratory local evidence; supported-runtime CI remains required. No commit or push was performed. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows enumeration identity binding experiment (2026-11-13)
+
+- Directory enumeration now returns structured records containing the filename, FILE_ID_EXTD_DIR_INFO complete 128-bit file ID, retained root volume serial, and attributes instead of names alone.
+- Added openEnumeratedChildReadOnly, which opens relative to the retained directory with existing no-follow checks and compares the opened handle's volume serial and complete 128-bit FILE_ID_INFO against the enumeration token. Directory/reparse records are rejected before open.
+- Added a deterministic replacement test: enumerate probe.bin, move the original to another name, create a different file at probe.bin, then attempt to open using the stale enumeration record. The helper rejects the replacement and returns no handle. The independently retained original handle remains valid for subsequent content verification.
+- Ten consecutive MSVC /W4 /WX runs passed, including exact 128-bit identity binding, deliberate high-order full-ID mismatch rejection, volume-token mismatch rejection, stale-name replacement rejection, and all existing bounded enumeration, hash, publication, collision, and unlink checks.
+- The installed Windows SDK 10.0.28000.0 declares `FILE_ID_EXTD_DIR_INFO`, `FileIdExtdDirectoryInfo`, and `FileIdExtdDirectoryRestartInfo`; the host NTFS probe successfully exercised these classes. The adapter fails closed if extended-ID enumeration is unavailable or fails. This closes the prior 64-bit truncation gap on this tested host only; it does not establish support on every Windows version or filesystem.
+- This remains a one-host Windows 11 Pro build 26300 / NTFS experiment. It does not provide snapshot enumeration, arbitrary external-writer exclusion, durability or power-loss guarantees, supported native user-mode API policy, SQLite WAL/SHM validation, or independent security review. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+### Windows concurrent namespace churn probe (2026-11-13)
+
+- Added a background create/flush/delete loop for `race-entry.bin` while the main thread performs 250 retained-handle directory enumerations per run. Each returned racing entry is reopened through `openEnumeratedChildReadOnly`; successful opens must match the full enumerated 128-bit ID and volume serial. Disappeared/replaced entries may fail closed.
+- Ten consecutive MSVC x64 `/W4 /WX` runs passed on Windows 11 Pro build 26300 / NTFS: 2,500 successful enumeration calls, 1,595 file create/flush cycles, 66 stale/disappeared-entry open conflicts, zero accepted identity mismatches.
+- This is a bounded single-host/single-mutator experiment, not snapshot enumeration, exhaustive race proof, external/privileged writer exclusion, cross-filesystem evidence, or production adapter acceptance. Symlink fixture remains skipped because the host returned `ERROR_PRIVILEGE_NOT_HELD` (1314). Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows native namespace/race regression rerun (2026-11-13)
+
+- Latest 10-run integrated native handle prototype: 2,500 successful bounded enumeration calls, 1,721 create/flush cycles, 37 stale/disappeared-entry token-open conflicts, and zero accepted identity mismatches. All ten runs passed on Windows 11 Pro build 26300 / NTFS.
+- Latest independent NT rename race rerun: five runs Ã— 100 competing no-replace races = 500 races, zero failures; all five retained-parent/source-path substitution checks passed (505 assertions including the per-run substitution check).
+- These are repeatability/feasibility results only. The churn workload is still single-mutator-thread, single-enumerator-thread, single-name, and bounded. It is not multiprocess/multiwriter, snapshot, privileged-actor, cross-filesystem, power-loss, or durability evidence. The symlink fixture remains skipped due to host privilege error 1314.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Supplemental Windows multi-process namespace stress (2026-11-13)
+
+- Four independent worker processes Ã— 500 iterations, repeated five times: 20 process executions / 10,000 worker iterations. Shared-directory create-new, write+flush, rename, delete ran concurrently with parent enumeration and reads.
+- Aggregate: 843 enumeration passes, 6,117 successful reads, 1,171 expected read/open conflicts, zero malformed/partial payloads. 81 transient residual entries were present before harness cleanup; all removed, zero cleanup errors, zero final residue. Five of five runs passed.
+- Scope boundary: this is a separate PowerShell/.NET path-based stress test, not a multiprocess run of the native `NativeContext` identity-token API. It adds process-level NTFS namespace churn evidence only and does not close native adapter acceptance gates.
+- Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Direct native API multi-process exercise (2026-11-13)
+
+- The Windows native prototype now launches four independent worker processes, each with its own retained parent-directory HANDLE and `NativeContext`. Every worker performs 100 cycles of stage creation/write/flush, FileIdInfo capture, handle-relative no-replace publication, handle-relative directory enumeration, token-based child open, full volume + 128-bit File ID comparison, and owned-handle unlink.
+- Five consecutive prototype runs passed: 20 worker-process executions / 2,000 complete native transition sequences. All worker exit codes were zero; no token lookup, identity comparison, publication, or owned-unlink failures occurred.
+- Scope: one Windows 11 Pro build 26300 / NTFS host; bounded four-worker test with unique names. No hostile/privileged actors, kill-at-every-transition, remote/cross-volume FS, power-loss, or independent security review. Undocumented `Nt*` user-mode entry points remain a compatibility/supportability blocker despite local success.
+- This closes the earlier gap between generic PowerShell namespace churn and direct multiprocess exercise of the prototype methods, but does not qualify the adapter for production or enable Automatic Restore. Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Handle-owned unlink and outstanding-handle lifetime (2026-11-14)
+
+- Extended the integrated Windows native handle prototype to open a second observer handle to the published file before requesting disposition through the owner handle.
+- After `SetFileInformationByHandle(FileDispositionInfo)` succeeds and the owner handle closes, the observer handle remains usable and reports the same volume/File ID. After the observer also closes, the pathname is absent. This demonstrates that a successful disposition request is not equivalent to immediate object destruction while another handle remains open.
+- Five consecutive full prototype runs passed the observer-open, observer-survives-disposition, and final-name-absent-after-all-close checks, as well as the wrong-identity refusal/preservation checks.
+- Scope: one Windows 11 Pro build 26300 / NTFS host. The test observes synchronous disposition success only; it does not test pending/ambiguous disposition completion, mapped views, remote filesystems, privileged interference, crash/power-loss behavior, or production Restore integration. Callers must treat a disposition request as a state transition requiring postcondition inspection, not proof that storage was immediately reclaimed.
+
+### Handle-owned unlink identity refusal (2026-11-14)
+
+- Extended the integrated Windows native handle prototype with a negative ownership test immediately before the valid unlink. The test flips one high-order bit in the expected 128-bit file ID and calls `unlinkOwned` using the still-open handle.
+- The mismatched identity is refused; the published target remains present. Only a second call using the exact FileIdInfo captured from the opened handle is allowed to mark that object for deletion.
+- Five consecutive full prototype runs passed the new refusal/preservation assertions, along with the existing four-process native publish/enumerate/token-open/unlink workload and three process-termination recovery points per run. No temporary native-adapter directories remained after the runner completed.
+- Scope: this validates the prototype's identity guard against a deliberately incorrect expected token. It does not prove resistance to kernel/privileged tampering, eliminate concurrent in-place writes, or settle the asynchronous completion semantics of disposition-based unlink. It is not production Restore integration.
+
+### Native process-termination and operator-recovery probe (2026-11-13)
+
+- Added a separate native worker process with deliberate termination after stage flush, immediately after handle-relative publication, and after token-based identity validation but before unlink.
+- For each of the three failpoints, a fresh `NativeContext` inspected the post-termination directory, required exactly the expected entry, reopened by the enumerated full identity token, validated the payload, acquired a separate DELETE-capable no-follow handle relative to the retained parent, revalidated identity, removed the owned entry, and verified the directory was empty.
+- Five consecutive prototype runs passed: 15 deliberate process terminations and 15 successful inspect/verify/operator-cleanup sequences.
+- A read-only child handle correctly lacked rights for disposition-based deletion; the probe now separates inspection from operator cleanup and reacquires a DELETE-capable handle with identity revalidation. This is experimental evidence only.
+- Process termination is not power-loss durability evidence. The probe does not cover every transition, controller-cache loss, kernel crash, SQLite WAL/SHM, hostile/privileged writers, remote filesystems, or independent security review. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led.
+
+### Cross-process unlink against pathname substitution (2026-11-14)
+
+- Added a deterministic two-process probe to `experiments/windows-native-handle-adapter.cpp`. The parent opens `unlink-target.bin` through `NativeContext::openChildForDelete`, retaining a DELETE-capable handle and its full volume/File ID identity. A separate child process then renames that original directory entry to `original-moved.bin` and creates a new `unlink-target.bin` containing the distinct `replacement-decoy` payload.
+- Only after the child exits successfully does the parent call `unlinkOwned` using the original retained handle and expected identity. The probe verifies that the replacement at the original pathname remains readable with its exact decoy bytes, while the moved original name disappears after the retained handle is closed. The child and parent use independent processes; the sequence is deterministic rather than timing-dependent.
+- Five consecutive full native prototype runs passed: five independent child-process pathname substitutions, five successful handle-owned disposition requests, five preserved replacement objects, and five removed original objects. Each full run also retained the existing four-worker Ã— 100-iteration native publish/enumerate/token-open/identity-check/unlink workload and three process-termination recovery cases.
+- This demonstrates the tested synchronous `SetFileInformationByHandle(FileDispositionInfo)` behavior on one Windows 11 Pro build 26300 / NTFS host. It does not prove behavior for pending/ambiguous disposition completion, mapped views, remote or alternate filesystems, privileged interference, power loss, or every concurrent interleaving. The prototype still relies on dynamically resolved `NtCreateFile`/`NtSetInformationFile` for other handle-relative operations; supported user-mode API policy and independent security review remain unresolved. No production Restore code changed; Automatic Restore remains disabled, Recovery Inspector remains read-only/operator-led, and Phase 5 remains deferred.
+
+### Cross-process delete with an outstanding observer handle (2026-11-14)
+
+- Added `runNativeDeleteWithObserverProbe` and a separate `--native-delete-observer-worker` process mode to `experiments/windows-native-handle-adapter.cpp`.
+- The parent opens an observer handle to a fixture file with read access and `FILE_SHARE_DELETE`. A child process independently opens the same entry through the retained directory handle, validates its FileIdInfo, requests handle-owned disposition, and closes its DELETE-capable handle.
+- While the parent's observer handle remains open, the parent rechecks the same full file identity and reads the original payload successfully. A fresh open by the original pathname must fail with the expected delete-pending outcomes (`ERROR_ACCESS_DENIED` or `ERROR_FILE_NOT_FOUND`). After the observer handle closes, the original pathname must be absent with `ERROR_FILE_NOT_FOUND`.
+- Five consecutive full prototype runs passed: five child-process delete requests, five surviving/readable observer handles, five expected name-unavailable checks, and five final name-absence checks. Each run also passed the pathname-substitution unlink probe, four-process native publication/enumeration/token-open/unlink workload, three process-termination recovery points, and the bounded namespace churn probe.
+- This is synchronous disposition behavior observed on one Windows 11 Pro build 26300 / NTFS host. It does not validate pending/ambiguous completion, mapped views, remote/alternate filesystems, privileged interference, power-loss durability, or a production Restore path. Symlink fixture remains skipped because the host returned `ERROR_PRIVILEGE_NOT_HELD (1314)`. No production Restore code changed; Automatic Restore remains disabled and Recovery Inspector remains read-only/operator-led.
+
+### Windows native unlink error capture and ambiguous postcondition state (2026-11-14)
+
+
+
+
+### Windows same-name concurrent publication race (2026-11-14)
+
+- A two-process synchronized race targets the same destination with distinct flushed stage files. Across five consecutive native prototype runs, exactly one process published; the other received `STATUS_OBJECT_NAME_COLLISION`. The destination contained one complete contender payload, and the losing stage was removed via its own identity-checked handle. No destination overwrite occurred.
+- Evidence is limited to one Windows 11 Pro build 26300 / NTFS host and five races. It is not power-loss durability or production adapter acceptance. Automatic Restore remains disabled and Recovery Inspector remains read-only/operator-led.
+
+### Windows no-replace publication ambiguous-result fault injection (2026-11-14)
+
+- Added a deterministic probe-only failpoint after the OS reports synchronous rename success but before postcondition acceptance. The API wrapper returns failure and separately reports `possibly-completed`; the raw immediate and IOSB statuses remain available.
+- Five consecutive full native prototype runs observed `STATUS_SUCCESS` in both status locations, source-stage name absent, destination present, and destination FileId/volume identity equal to the retained stage handle. No retry, overwrite, fallback rename, or automatic cleanup was performed. Existing destination-collision behavior remained unchanged. `STATUS_PENDING` is conservatively surfaced as possibly-completed, although a pending rename completion was not observed or tested.
+- This is controlled postcondition-failure evidence on one Windows 11 Pro build 26300 / NTFS host, not genuine kernel failure, async completion, crash durability, or production adapter acceptance. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led.
+### Windows unlink post-disposition ambiguity fault injection (2026-11-14)
+
+- A deterministic probe-only failpoint forces the postcondition check to fail after the OS accepted the file disposition request. The operation returns failure, records `ERROR_INVALID_HANDLE` (6), and marks the result `possibly-completed`; the probe does not retry or perform compensating cleanup.
+- The NTFS host kept the object delete-pending while the disposition handle remained open. Reopening by pathname failed with `ERROR_ACCESS_DENIED` (5); after closing the last handle, the name was absent. Thus, visible pathname metadata during the pending interval must not be interpreted as successful reopenability.
+- Five consecutive integrated native prototype runs passed after the failpoint was added. The standard project test suite was also rerun and passed: 187 passed, 4 skipped, 0 failed. This is injected control-flow evidence, not a genuine kernel failure, power-loss test, asynchronous disposition test, or production acceptance. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led.
+
+
+- `unlinkOwned` now records Win32 errors for precondition/identity failures and disposition API failures. A successful disposition followed by a failed retained-parent post-check is returned as failure with `lastUnlinkMayHaveCompleted=true`; callers must inspect rather than retry or clean up blindly.
+- The integrated negative tests observed `ERROR_INVALID_DATA` (13) for an incorrect expected identity and `ERROR_ACCESS_DENIED` (5) for a read-only handle lacking `DELETE` access. Wrong-identity rejection occurs before the disposition boundary and leaves the flag false. Read-only access denial is returned by the disposition API call and is now conservatively marked possibly-completed; the fixture was observed intact, but that observation is not treated as a general no-mutation guarantee.
+- Five consecutive MSVC `/W4 /WX` integrated runs passed on Windows 11 Pro build 26300 / NTFS, with `ERROR_ACCESS_DENIED` (5) observed in every run. This is prototype diagnostic behavior, not an accepted production adapter result contract. No production Restore path changed; Automatic Restore remains disabled and Recovery Inspector remains read-only/operator-led.
+
+### Windows handle-relative publication versus deletion race (2026-11-14)
+
+- Added a synchronized two-process probe to `experiments/windows-native-handle-adapter.cpp`. The fixture starts with a pre-existing target. One child retains a flushed, identity-checked stage handle and attempts no-replace publication; the other independently opens the original target relative to its retained parent handle with `DELETE` access and calls `unlinkOwned` against the captured full identity. Both wait on a shared event before proceeding.
+- Five consecutive MSVC `/W4 /WX` runs passed. In all five observed schedules, the publisher returned immediate `STATUS_OBJECT_NAME_COLLISION` (`0xC0000035`), the IOSB remained at its sentinel (`0xCCCCCCCC`, unchanged), and `lastPublishMayHaveCompleted` remained false. The deleter returned success with `ERROR_SUCCESS` (0), `possibly-completed=false`; the final target name was absent and the publisher's stage was removed only through its own identity-checked handle. No unexpected publication or overwrite was observed.
+- Interpretation is deliberately narrow: the start barrier synchronizes readiness, not the exact kernel operation order. These five runs observed the collision-before-final-removal outcome; they do not establish every possible interleaving, nor demonstrate a delete-first schedule followed by successful publication into the now-vacant name. A future test should add deterministic operation-order gates and retain raw statuses/postconditions for both orderings.
+- One Windows 11 Pro build 26300 / NTFS host only. This is experimental race evidence, not snapshot isolation, arbitrary external-writer exclusion, power-loss durability, stable user-mode API support, security review, or production Restore acceptance. No production Restore code changed; Automatic Restore remains disabled, Recovery Inspector remains read-only/operator-led, and Phase 5 remains deferred.
+
+### Deterministic publication/deletion orderings (2026-11-14)
+
+- Added `runOrderedPublishDeleteProbe` to the Windows native experimental adapter. Unlike the two-process race, these cases deliberately sequence the kernel operations so both orderings are covered without scheduler assumptions.
+- Publish-first case: with the original target present and identity-bound, no-replace publication returned `STATUS_OBJECT_NAME_COLLISION`; `lastPublishMayHaveCompleted=false`. Identity-checked deletion of the original then succeeded; the target name was absent. The stage was separately removed through its retained identity-checked handle.
+- Delete-first case: identity-checked deletion of the original target completed and its handle was closed before publication. No-replace publication then succeeded; immediate and IOSB statuses were `STATUS_SUCCESS`, ambiguity was false, and reopening the target verified both the expected stage FileId/volume identity and exact payload bytes.
+- Five consecutive full native prototype runs passed both deterministic orderings (10 ordered scenarios total), alongside the synchronized two-process race in each run. This establishes the expected namespace outcomes for these two explicitly ordered sequences on this host; it is not a proof for all possible concurrent interleavings.
+- Evidence remains limited to one Windows 11 Pro build 26300 / NTFS host and the experimental direct `NtSetInformationFile` path. It does not establish a supported stable user-mode API contract, remote or alternate filesystem behavior, arbitrary external-writer exclusion, power-loss durability, or production Restore acceptance. Automatic Restore remains disabled; Inspector remains read-only/operator-led; no production Restore logic was changed.
+
+### Conservative native publication failure classification (2026-11-14)
+
+- Tightened the experimental `publishNoReplace` result policy: once `NtSetInformationFile` has actually been issued, the result defaults to `possibly-completed`. The only native failure currently classified as a proven non-publication is the observed no-replace `STATUS_OBJECT_NAME_COLLISION` (`0xC0000035`).
+- Other failing immediate NTSTATUS values, `STATUS_PENDING`, and non-success IOSB outcomes remain possibly-completed. This avoids the earlier unsafe assumption that every negative immediate NTSTATUS necessarily proves the namespace was untouched. Raw immediate/IOSB status and IOSB-change evidence remain captured.
+- Preflight failures that occur before the native call (invalid context/identity/name or missing entry point) remain not-performed. The policy is intentionally conservative; a future platform profile may narrow definite-no-mutation statuses only with authoritative API semantics and tests.
+- Five consecutive full native prototype runs passed, including no-replace collision (still `possibly-completed=false`), successful publication, injected postcondition ambiguity, both deterministic publish/delete orderings, multiprocess and crash probes. `npm run check`, `npm test` (zero failures), and `git diff --check` passed; temporary residue count was zero.
+- This did not test an actual kernel/driver failure status or pending rename completion; it verifies the existing success/collision paths remain intact after hardening the classification. One Windows 11 Pro build 26300 / NTFS only. Experimental adapter only; no production Restore change, no Automatic Restore enablement.
+
+### Conservative native disposition failure classification (2026-11-14)
+
+- Hardened experimental unlinkOwned: all preflight refusals (invalid context/parent, identity mismatch, or failed identity lookup) remain not-performed. Immediately before the SetFileInformationByHandle(FileDispositionInfo) boundary, the flag is set to possibly-completed.
+- A FALSE return from SetFileInformationByHandle now preserves possibly-completed; the prototype does not infer that a Win32 error proves no disposition occurred. In particular, the read-only-handle fixture still reports ERROR_ACCESS_DENIED (5), but is now conservatively marked possibly-completed. The target was observed preserved in that fixture; this observation is not elevated into a general API guarantee.
+- Added a synthetic uncertain-result failpoint (ERROR_GEN_FAILURE, 31) at the disposition boundary. It intentionally does not issue the OS disposition call; it verifies only that an indeterminate result is surfaced as possibly-completed and that the harness does not auto-retry or clean up. The target remained present.
+- Existing wrong-identity refusal remains ERROR_INVALID_DATA (13), not-performed, with target preserved. Existing successful disposition and post-disposition failpoint remain passing; the latter reports possibly-completed and the name disappears after the final handle closes.
+- Five consecutive full native prototype runs passed, including the synthetic uncertain-result case, post-disposition failpoint, observer lifetime, cross-process tests, deterministic publish/delete orderings, and crash probes. One Windows 11 Pro build 26300 / NTFS only.
+- This does not establish that a real SetFileInformationByHandle failure can mutate the namespace; it deliberately avoids claiming the opposite without an authoritative platform contract. No genuine API-failure injection, pending disposition, power-loss, remote filesystem, or production adapter acceptance was tested. No production Restore code changed; Automatic Restore remains disabled and Inspector remains read-only/operator-led.
+
+### Windows MoveFileEx write-through / no-replace probe (2026-11-14)
+
+- Five runs of a disposable-fixture native probe passed on Windows 11 Pro / NTFS. `MoveFileExW` with `MOVEFILE_WRITE_THROUGH` and without `MOVEFILE_REPLACE_EXISTING` refused an existing target (`ERROR_ALREADY_EXISTS`, 183), preserving both source and original target bytes. A same-volume non-collision rename succeeded and source/destination names and bytes were verified. All fixtures were cleaned.
+- This is pathname-based host evidence only. It does not supply retained-handle/dirfd anchoring, prove race safety against arbitrary namespace writers, or demonstrate power-loss durability.
+- Microsoft documents `MOVEFILE_WRITE_THROUGH` as waiting for a move to complete on disk and explicitly describes flushing for copy/delete moves. Do not infer that same-volume rename parent metadata is durably committed across all filesystems, drivers, and power-loss scenarios. Keep as candidate only; do not replace the native handle-relative no-replace publication path.
+- `FileRenameInformationEx` with `FILE_RENAME_REPLACE_IF_EXISTS` unset matches the required collision semantics in the MS-FSCC contract, but the current dynamically resolved NtSetInformationFile implementation remains experimental, not a stable documented Win32 application contract.
+
+### Windows directory-flush contract cross-check (2026-11-14)
+
+- Added a disposable-directory native probe comparing the prototype access mask, read-attributes-only, and `GENERIC_WRITE` handles. Local Windows 11 Pro build 26300 / NTFS: prototype mask FlushFileBuffers succeeded (0); read-attributes-only returned a genuine `ERROR_ACCESS_DENIED` (5); GENERIC_WRITE succeeded (0); temporary directory cleanup passed.
+- Microsoft Learn documents `GENERIC_WRITE` for FlushFileBuffers. The Directory Handles page lists supported consumers and does not list FlushFileBuffers. Therefore the successful prototype call is a host observation, not a documented/stable application-level directory-durability contract. The read-only failure is an actual access-check failure, not a media/controller failure injection.
+- `MoveFileExW(MOVEFILE_WRITE_THROUGH)` documents waiting for a move to complete on disk and explicitly guarantees flush for copy/delete moves. It does not establish the complete parent/ancestor namespace durability contract or handle-relative no-replace semantics required by Restore; research only.
+- Windows directory flush remains ineligible for acceptance. No production change or Restore integration. Automatic Restore remains disabled; Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows retained-directory-handle flush feasibility (2026-11-14)
+
+- Experimental C++ probe invokes `FlushFileBuffers` on the retained directory HANDLE and verifies the same directory FileId before/after. It records Win32 error and possibly-completed state.
+- Windows 11 Pro build 26300 / local NTFS: five consecutive full runs passed flush before mutation, immediately after no-replace publication, and immediately after identity-bound unlink (15 successful calls, all `ERROR_SUCCESS`).
+- This is host/filesystem feasibility evidence only. It does not establish a documented/stable user-mode durability contract, behavior on other filesystems/drivers, controller-cache semantics, power-loss persistence, or crash-replay correctness. No power interruption was attempted.
+- No production change: Node `syncDirectory` remains unsupported on Windows and current callers ignore `supported:false`. The native operation is not integrated into Restore; Windows is not yet durability-eligible.
+- Automatic Restore remains disabled; Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows native flush/close boundary probes (2026-11-14)
+
+- Added an experimental handle-bound flush operation. It validates the retained parent and expected FileId before FlushFileBuffers, marks the operation possibly-completed at the syscall boundary, and clears ambiguity only after synchronous success plus identity/parent postconditions.
+- Added synthetic pre-call-boundary failure (ERROR_GEN_FAILURE) and post-success postcondition failure (ERROR_INVALID_HANDLE). Both report possibly-completed. The post-success case executes a real FlushFileBuffers first; the failpoint then simulates loss of successful result acceptance. This is not a simulated storage/controller failure.
+- Added a tracked close wrapper for the probe. A synthetic uncertain close result leaves the handle value untouched and reports possibly-completed; the subsequent real close succeeds and invalidates the caller handle. Successful close is reported separately from flush durability.
+- Five consecutive full native prototype runs passed all flush/close boundary assertions, including preflight identity binding, uncertain outcomes, successful flush, uncertain close, and final successful close. The fixture remained present until explicitly removed by the probe.
+- Important semantics: successful FlushFileBuffers is the only flush-success signal in this slice; successful CloseHandle does not substitute for a flush. A CloseHandle failure is tracked as handle-lifetime/result uncertainty, not misreported as proof that a preceding flush failed or succeeded. The synthetic close failure did not call CloseHandle.
+- Evidence is limited to one Windows 11 Pro build 26300 / NTFS host. No power-loss, controller-cache, filesystem crash, real FlushFileBuffers failure, genuine CloseHandle failure, remote filesystem, or production Restore integration was tested. This is experimental adapter evidence only; no production Restore code changed, Automatic Restore remains disabled, and Inspector remains read-only/operator-led.
+
+
+
+### Journal publication-before-directory-flush crash boundary (2026-11-14)
+
+- Reconfirmed the existing `crash-after-journal` child-process failpoint: the worker calls the real `linkSync(temp, journalPath)` and terminates immediately after the link succeeds, before returning to `createRestoreJournal`; therefore the caller has not yet invoked `syncDirectory(parent)`. Exit code is 77. The published journal and its temporary hard link remain, while the live database is still present and no staged replacement or rollback entry exists.
+- Strengthened the crash-matrix test to snapshot every directory entry and file byte before read-only inspection and assert the complete snapshot is unchanged afterward. The Inspector must retain the valid journal, inventory the temporary hard link, classify `live-present-no-rollback`, and report `automaticAction: none`.
+- Platform boundary: on POSIX, the next instruction in the uninterrupted path would open/fsync/close the parent directory; a real process exit at this failpoint bypasses that flush. On Windows, `syncDirectory` returns `{ supported: false }` without attempting a directory flush, and current Backup/Restore callers ignore that result. Thus neither the process-crash test nor current Windows execution establishes directory-entry durability. File fsync of the journal contents is separate from persistence of the journal name.
+- Existing `test/file-system-durability.test.js` explicitly tests Windows unsupported behavior (zero open/fsync/close calls), POSIX injected flush/close behavior, and real POSIX directory fsync when run on a non-Windows host. This Windows local run cannot provide the real POSIX filesystem evidence.
+- Targeted crash matrix, full test suite, `npm run check`, and `git diff --check` passed after strengthening the read-only snapshot assertion. No production durability behavior was changed. Automatic Restore remains disabled; Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Restore journal pre-publication crash and orphan guard (2026-11-14)
+
+- Extended the Restore crash matrix to stop a child process after the journal temporary file has been fully written, flushed, and closed, but immediately before the no-replace hard-link publication of the journal name (`crash-before-journal-publish`, exit 82).
+- The initial regression test exposed a real gap: `inspectDatabaseRestore` inventoried the orphaned journal `.tmp`, but `restoreDatabaseBackupUnlocked` blocked orphaned `.restore` stage files only and could proceed despite the orphaned journal evidence.
+- Fixed the retry preflight to enumerate UUID-shaped `<journal-name>.<uuid>.tmp` entries and fail closed with `Orphaned Restore journal temporary files exist`; it does not delete or rewrite them.
+- The new test verifies: published journal absent; original live DB remains; exactly one orphan journal temp is inventoried; recovery classification is `no-journal-recovery-artifacts-present`; `automaticAction` is `none`; Inspector leaves directory names and bytes unchanged; retry is refused and the orphan remains present.
+- Targeted regression test passed. Full `npm run check`, full `npm test -- --test-reporter=dot`, and `git diff --check` passed. This is process-termination and local filesystem behavior, not power-loss durability or arbitrary external-writer exclusion. The production change is a fail-closed retry guard only; no automatic cleanup or recovery was added. Automatic Restore remains disabled and Inspector remains read-only/operator-led.
+
+### Native crash point after stage-handle close (2026-11-14)
+
+- Added a fourth child-process failpoint after successful stage-file flush and successful `closeOwned`, immediately before publication. The child exits with code 84; a fresh inspector context must find exactly the expected `crash.stage`, verify full FileId/volume identity, read the file through the handle, compute SHA-256, and check the expected byte count before explicit identity-checked cleanup. The probe does not yet compare against a precomputed expected digest.
+- Five consecutive full prototype runs passed all four crash points: after-stage-flush, after-stage-close, after-publish, and after-token-open. Across five runs this is 20 process terminations with successful identity-bound inspection and operator cleanup; no automatic recovery or mutation was introduced.
+- This validates only process termination on one Windows 11 Pro build 26300 / NTFS host. It does not test power loss, kernel/filesystem crash, storage-controller cache loss, directory-entry durability after machine failure, or genuine CloseHandle failure. Automatic Restore remains disabled; Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Win32 FileRenameInfoEx relative-root API probe (2026-11-14)
+
+- Added `experiments/windows-file-rename-info-ex-probe.cpp` and `scripts/windows-file-rename-info-ex-probe.ps1`. The probe compiles against the installed Windows SDK 10.0.28000.0 declarations for `FILE_RENAME_INFO`, `FileRenameInfoEx`, and `FILE_RENAME_FLAG_REPLACE_IF_EXISTS`; it uses only uniquely named disposable files under the host temp directory.
+- On Windows 11 Pro build 26300 / NTFS, ten consecutive runs showed `SetFileInformationByHandle(source, FileRenameInfoEx, ...)` with `Flags=0`, a retained directory `RootDirectory` handle, and a relative single-component destination consistently failed with `ERROR_INVALID_PARAMETER` (87). The same failure occurred when the destination name already existed.
+- Each run verified that rejected calls left the source file and existing collision target unchanged. No path-based fallback was attempted; cleanup removed only the probe's uniquely created fixtures.
+- Interpretation: the public SDK exposes the enum, structure, and flags, but the documented Win32 wrapper still does not provide the required relative-`RootDirectory` behavior on this tested host. This does not justify replacing the current experimental native call. The direct `NtSetInformationFile` route remains experimental and lacks a stable documented Win32 application compatibility guarantee.
+- Evidence is one Windows 11 Pro build 26300 / NTFS host and ten repetitions; it does not establish behavior on other Windows versions/filesystems or explain the underlying error. No production Restore code changed. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows native adapter input-boundary hardening (2026-11-14)
+
+- Tightened the experimental adapter's single-component name validation shared by child-open, delete-open, and no-replace publication. Names must be non-empty, at most `USHORT_MAX / sizeof(WCHAR)` UTF-16 code units before conversion to `UNICODE_STRING.Length`, contain no slash, backslash, colon/alternate-stream delimiter, or embedded NUL, and must not be `.` or `..`.
+- This closes a truncation/overflow gap: the prior child-open methods cast `name.size() * sizeof(wchar_t)` directly to `USHORT`, allowing oversized caller-supplied strings to wrap before the native relative-open call. The native prototype now rejects them before constructing the NT object name.
+- Hardened directory enumeration record parsing to reject nonzero `NextEntryOffset` values not aligned to `alignof(FILE_ID_EXTD_DIR_INFO)`, in addition to existing bounds and filename-length checks, before advancing and interpreting the next record.
+- Added negative cases for empty name, dot, dot-dot, path separator, alternate-stream colon, embedded NUL, and a component exceeding the UNICODE_STRING length ceiling; also verifies delete-open rejects the overlong case.
+- Five consecutive MSVC `/W4 /WX` full native prototype runs passed. All new name-validation cases passed on every run, along with the existing multi-process publication, crash-point, enumeration churn, identity, hash, flush/close ambiguity, and unlink tests. Symlink creation was skipped by the host with `ERROR_PRIVILEGE_NOT_HELD` (1314); the no-follow/token-rejection paths remained covered by the existing conditional logic only when a symlink fixture is available.
+- Evidence is limited to the experimental C++ prototype on one Windows 11 Pro build 26300 / NTFS host. This does not add external-writer exclusion, snapshot-consistent hashing, power-loss durability, or a supported production Win32 adapter contract. No production Restore code changed. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows directory enumeration malformed-buffer tests (2026-11-14)
+
+- Extracted the `FILE_ID_EXTD_DIR_INFO` record validation into a bounded parser used directly by `NativeContext::enumerateChildren`; the parser clears partial results on any malformed record and enforces the caller's aggregate entry ceiling.
+- Added synthetic aligned-buffer tests for: valid single record; truncated fixed header; odd UTF-16 byte length; oversized filename length; `NextEntryOffset` before the filename payload; offset beyond the supplied buffer; unaligned offset; aligned next record with truncated fixed header; embedded NUL; path separator; empty component; zero entry budget; valid two-record chain; aggregate entry-limit overflow; and terminal filename payload truncated at the supplied boundary.
+- The native prototype was rebuilt with MSVC `/W4 /WX`; five consecutive full runs passed, including the malformed-buffer matrix on each run, in addition to existing native namespace/concurrency/crash/identity tests. The symlink fixture remains skipped on this host (`ERROR_PRIVILEGE_NOT_HELD`, 1314).
+- The production enumeration API does not expose a byte-count output for `GetFileInformationByHandleEx`; its parser therefore bounds reads against the actual allocated 64 KiB buffer, while synthetic tests pass explicit shorter byte counts to exercise truncation boundaries. Kernel-returned metadata is still treated as untrusted for structural parsing, and this does not establish a snapshot of a concurrently mutating directory.
+- Evidence remains one Windows 11 Pro build 26300 / NTFS experimental prototype. No production Restore code or platform eligibility changed. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+### Windows enumeration cross-batch consistency guard (2026-11-14)
+
+- `enumerateChildren` now parses each returned native buffer into a temporary batch, then appends it only if the accumulated result contains no repeated exact entry names and the aggregate `maxEntries` ceiling remains satisfied. Any malformed batch, repeated name, or aggregate overflow clears the complete result and fails closed.
+- Duplicate-name validation covers duplicates within one native buffer and across successive `GetFileInformationByHandleEx` calls. It intentionally compares exact UTF-16 names rather than case-folding because Windows directories can be configured as case-sensitive. Distinct names sharing a File ID are not rejected because hard links may legitimately exist.
+- Empty batches are allowed: an empty directory or a batch containing only filtered `.` / `..` entries must not be mistaken for corruption. This behavior was caught during crash-recovery regression tests and corrected before acceptance.
+- Synthetic tests cover distinct successive batches, repeated name across batches, duplicate names within a batch, aggregate-limit overflow, and empty batches; failed appends leave the previously accumulated result unchanged.
+- Five consecutive MSVC native-prototype runs passed, including four process-termination recovery boundaries and 250 concurrent namespace-churn enumeration attempts per run. These tests demonstrate conservative rejection and identity-bound opens on this Windows 11 Pro build 26300 / NTFS host; they do not provide a directory snapshot, guarantee completeness under concurrent mutation, or prove behavior on other filesystems/drivers.
+- No production Restore implementation or platform eligibility changed. Automatic Restore remains disabled; Recovery Inspector remains read-only/operator-led; Phase 5 remains deferred.
+
+- Restore Journal v2 now reuses one operation UUID as the filename token for journal-temp, staged, and rollback artifacts; the Inspector requires the recorded role IDs to equal that operation UUID and validates the staged/rollback name tokens. Legacy v1 journals remain inspectable. This is logical name correlation only, not native identity, complete inventory, ownership proof, or recovery authorization.
+
+
+## Inspector identity boundary
+
+The current JavaScript Restore Inspector is read-only and reports `artifactIdentity.verified = false` with method `path-based-lstat`. Its artifact names, kinds, and sizes are pathname observations only; they are not bound to a retained native handle, volume/file ID, or stable directory-entry token. Concurrent replacement and same-name substitution therefore remain unverified. The Windows native prototype demonstrates handle-derived identities and enumeration-token comparison experimentally, but it is not wired into the production Inspector or Restore path. Do not interpret matching operation UUIDs or path names as native object identity, ownership proof, or authorization to mutate. Automatic Restore remains disabled; operator-led review only.
+
+## Bounded full-directory Restore artifact inventory
+
+The read-only Inspector enumerates up to 4,096 entries in the database parent directory for both absent-journal and valid-journal cases. Each entry is reported with a path-derived role: `live-database`, `journal`, `restore-stage`, `rollback`, UUID-shaped stage/rollback/journal-temp candidate, or `unknown`. The inventory reports total entry count, truncation/completeness, and `identityVerified=false`. Unknown entries are evidence and must be preserved; candidate names do not establish operation ownership. A truncated or failed inventory is incomplete and cannot support an acceptance decision. The inventory is pathname-based and race-prone; it is not a native handle identity inventory and does not authorize cleanup or recovery.
+
+### Inventory stability check
+
+The Inspector performs two directory-name enumerations bracketing pathname inspection and compares their sorted name sets. It also rechecks each enumerated entry with `lstat` and compares device, inode, mode, size, nanosecond modification time, and nanosecond change time fingerprints; transient fingerprints are not exposed as verified identities. A mismatch marks the inventory unstable, marks entries `unstable-inventory`, and forces `artifactInventoryComplete=false`; the recovery classifier therefore fails closed. The second enumeration occurs after the per-entry `lstat` observations, increasing the chance of detecting ordinary changes during inspection. Truncation also forces the inventory incomplete for both absent- and valid-journal paths. The check is a best-effort race detector only: an ABA change between passes, replacement preserving the same name set, metadata/content mutation, or changes after the second pass may not be detected. It does not provide a filesystem snapshot or native identity guarantee.
+
+### Canonical UUID token validation
+
+Restore journal identifiers and orphan-artifact filename candidates share one canonical UUID shape validator (8-4-4-4-12 hexadecimal groups). Malformed 36-character strings are not treated as owned Restore artifacts and cannot validate a v1/v2 journal. This is syntactic validation only; it does not establish filesystem identity or ownership. Inventory remains read-only and unknown entries are preserved.
+
+
+### Deterministic same-name replacement detection
+
+The artifact inventory accepts an injectable filesystem-operation set for deterministic tests. A controlled test replaces a file at the same pathname between the initial lstat and metadata revalidation. The changed inode/metadata causes the inventory to become unstable and incomplete, and the affected entry is labeled unstable-inventory. The test verifies both original and replacement bytes remain intact. This demonstrates detection of this specific observable replacement; it does not close the race after the final check, prove native identity, detect every ABA sequence, or authorize cleanup/recovery.
+
+
+The deterministic inventory test also modifies a file in place (same pathname and inode, larger content) between the initial metadata capture and revalidation. The changed size/timestamps cause an unstable/incomplete result while preserving the modified file. This is a metadata-change detector, not a content-integrity guarantee: same-size writes, timestamp/metadata limitations, and changes after the final check can remain undetected.
+
+
+### Inventory-derived orphan classification
+
+Orphan journal-temporary, rollback-candidate, and restore-stage-candidate lists are now derived from the same bounded inventory result used for stability and completeness. Inspector no longer performs a separate directory enumeration for those lists, avoiding contradictory classifications assembled from different directory snapshots. Entries beyond the 4096 detail limit remain unclassified individually and force artifactInventoryComplete=false; this is deliberately fail-closed.
+
+
+### Explicit metadata and final-check limitation tests
+
+Two deterministic tests document the Inspector's limits. First, a synthetic filesystem view returns an unchanged metadata fingerprint while the underlying same-size file content changes; the inventory remains stable because it does not hash file contents. This is a deliberately simulated metadata-blind condition, not a claim that the host filesystem failed to update timestamps. Second, a controlled mutation immediately after the final lstat observation remains outside the completed inventory window and is not detected. These tests establish that stable=true means only that the implemented name/metadata checks agreed during their observation window; it is not a snapshot, content-integrity guarantee, or promise that entries remain unchanged after return. Native handle-bound snapshots or stronger coordination would be required for stronger guarantees.
+
+
+### Valid-journal incomplete-inventory fail-closed gate
+
+The recovery classifier treats `inventoryComplete=false` as a critical manual-review state for a valid journal as well as for an absent journal. Present runtime/maintenance locks and unknown lock state retain precedence; otherwise an incomplete or unstable parent-directory inventory prevents artifact-state conclusions. The Inspector must explicitly pass `journal.artifactInventoryComplete` into the classifier's `artifacts.inventoryComplete` field; omitting this field would bypass the gate even though the classifier supports it. A regression test creates a valid v2 journal with 4,096+ directory entries and verifies `manual-review-artifact-inventory-incomplete` with `automaticAction: none`. A separate classifier guard maps an uninspectable recorded source/live/stage/rollback path (null existence observation) to `manual-review-artifact-state-unknown` whenever the directory inventory completed; it never treats an unknown path as absent. Both states preserve all evidence and keep `automaticAction: none`.  This prevents a valid journal plus apparently present/missing recorded paths from masking unlisted artifacts when the directory inventory was truncated or unstable.
+
+### Inspector read-error and inventory failure boundaries (2026-11-14)
+
+- Journal reading and JSON parsing are separate outcomes. `readRestoreJournal` reports `unreadable` with the original I/O error or `malformed` with the JSON parse error; neither outcome is treated as an absent journal. Injected EACCES and malformed-JSON tests exercise the branches independently.
+- Artifact inventory directory enumeration failures (initial or confirmation pass) propagate to the Inspector boundary, which marks inventory incomplete and preserves all artifacts. An entry-level lstat failure produces `exists: null`, invalidates stability/completeness, and never becomes evidence of absence.
+- Added deterministic injected tests for initial enumeration EACCES, confirmation enumeration EIO, and per-entry EACCES. These tests validate failure classification and preservation; they do not simulate kernel permission enforcement or filesystem-level races.
+- Lock inspection independently converts unsafe/unresolvable parent-path failures into unknown lock states. No Inspector path performs cleanup or recovery mutation.

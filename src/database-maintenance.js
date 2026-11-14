@@ -5,6 +5,9 @@ import { basename, dirname, parse, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyRestoreRecoveryState } from './restore-recovery-state.js';
 import { LATEST_SCHEMA_VERSION } from './db.js';
+
+const UUID_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuidToken = value => UUID_TOKEN.test(value);
 import { syncDirectory } from './file-system-durability.js';
 
 function pathEntryExists(filename) {
@@ -23,6 +26,13 @@ function inspectPath(filename) {
   }
 }
 
+export function readRestoreJournal(journalPath, read = readFileSync) {
+  let text;
+  try { text = read(journalPath, 'utf8'); }
+  catch (error) { return { status: 'unreadable', error }; }
+  try { return { status: 'read', record: JSON.parse(text) }; }
+  catch (error) { return { status: 'malformed', error }; }
+}
 export function inspectDatabaseRestore(databasePath) {
   const destination = resolve(databasePath);
   const journalPath = destination + '.restore-journal.json';
@@ -31,13 +41,14 @@ export function inspectDatabaseRestore(databasePath) {
   catch (error) { unsafeParentError = error; }
   const report = {
     operation: 'restore-inspect', readOnly: true,
+    artifactIdentity: { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' },
     database: unsafeParentError
       ? { path: destination, exists: null, kind: null, size: null, error: 'unsafe-database-path' }
       : inspectPath(destination),
     locks: inspectDatabaseRuntimeLocks(destination),
     journal: unsafeParentError
-      ? { path: journalPath, exists: null, kind: null, size: null, error: 'unsafe-database-path', status: 'unreadable', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: false, warnings: ['Database parent path traverses a symbolic link or junction. Journal and artifacts were not inspected; no files or locks were changed.'] }
-      : { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: null, warnings: [] }
+      ? { path: journalPath, exists: null, kind: null, size: null, error: 'unsafe-database-path', status: 'unreadable', valid: null, record: null, artifacts: null, artifactInventory: [], orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: false, warnings: ['Database parent path traverses a symbolic link or junction. Journal and artifacts were not inspected; no files or locks were changed.'] }
+      : { ...inspectPath(journalPath), status: 'absent', valid: null, record: null, artifacts: null, artifactInventory: [], orphanedTemporaryFiles: [], orphanedRollbackFiles: [], orphanedRestoreTemporaryFiles: [], artifactInventoryComplete: null, warnings: [] }
   };
   if (unsafeParentError) {
     report.recovery = classifyRestoreRecoveryState({ journalStatus: 'unreadable', locks: report.locks });
@@ -46,23 +57,18 @@ export function inspectDatabaseRestore(databasePath) {
   if (report.journal.exists === false) {
     const directory = dirname(journalPath);
     try {
-      const entries = readdirSync(directory);
-      const journalPrefix = basename(journalPath) + '.';
-      const rollbackPrefix = basename(destination) + '.pre-restore-';
-      const restoreTemporaryPrefix = '.' + basename(destination) + '.';
-      report.journal.orphanedTemporaryFiles = entries
-        .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
-          && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
-        .map(name => resolve(directory, name));
-      report.journal.orphanedRollbackFiles = entries
-        .filter(name => name.startsWith(rollbackPrefix)
-          && /^[0-9a-f-]{36}$/i.test(name.slice(rollbackPrefix.length)))
-        .map(name => inspectPath(resolve(directory, name)));
-      report.journal.orphanedRestoreTemporaryFiles = entries
-        .filter(name => name.startsWith(restoreTemporaryPrefix) && name.endsWith('.restore')
-          && /^[0-9a-f-]{36}$/i.test(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)))
-        .map(name => inspectPath(resolve(directory, name)));
-      report.journal.artifactInventoryComplete = [
+      report.journal.artifactInventory = buildRestoreArtifactInventory(directory, destination, journalPath);
+      const inventoryEntries = report.journal.artifactInventory.entries;
+      report.journal.orphanedTemporaryFiles = inventoryEntries
+        .filter(entry => entry.role === 'journal-temp-candidate')
+        .map(entry => entry.path);
+      report.journal.orphanedRollbackFiles = inventoryEntries
+        .filter(entry => entry.role === 'rollback-candidate')
+        .map(({ path, exists, kind, size }) => ({ path, exists, kind, size }));
+      report.journal.orphanedRestoreTemporaryFiles = inventoryEntries
+        .filter(entry => entry.role === 'restore-stage-candidate')
+        .map(({ path, exists, kind, size }) => ({ path, exists, kind, size }));
+      report.journal.artifactInventoryComplete = report.journal.artifactInventory.complete && [
         ...report.journal.orphanedRollbackFiles,
         ...report.journal.orphanedRestoreTemporaryFiles
       ].every(artifact => artifact.exists === true);
@@ -76,7 +82,7 @@ export function inspectDatabaseRestore(databasePath) {
         report.journal.warnings.push('Staged Restore files remain without a published journal. Preserve them for operator review; they are not verified backups.');
       }
     } catch (error) {
-      if (error.code === 'ENOENT') report.journal.artifactInventoryComplete = true;
+      if (error.code === 'ENOENT') report.journal.artifactInventoryComplete = false;
       else {
         report.journal.artifactInventoryComplete = false;
         report.journal.warnings.push('Restore recovery artifacts could not be fully enumerated (' + (error.code || error.name) + ').');
@@ -100,14 +106,20 @@ export function inspectDatabaseRestore(databasePath) {
     report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, locks: report.locks });
     return report;
   }
-  let record;
-  try { record = JSON.parse(readFileSync(journalPath, 'utf8')); }
-  catch (error) {
-    report.journal.status = 'malformed';
-    report.journal.warnings.push('Journal JSON could not be parsed (' + (error.code || error.name) + '); preserve all artifacts.');
+  const journalRead = readRestoreJournal(journalPath);
+  if (journalRead.status === 'unreadable') {
+    report.journal.status = 'unreadable';
+    report.journal.warnings.push('Journal contents could not be read (' + (journalRead.error.code || journalRead.error.name) + '); preserve all artifacts.');
     report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, locks: report.locks });
     return report;
   }
+  if (journalRead.status === 'malformed') {
+    report.journal.status = 'malformed';
+    report.journal.warnings.push('Journal JSON could not be parsed (' + journalRead.error.name + '); preserve all artifacts.');
+    report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, locks: report.locks });
+    return report;
+  }
+  const record = journalRead.record;
   const required = ['source', 'destination', 'temporary', 'rollback'];
   const absolutePaths = record && required.every(key => typeof record[key] === 'string' && record[key].length > 0 && resolve(record[key]) === record[key]);
   const recordedDestination = absolutePaths ? record.destination : '';
@@ -118,24 +130,32 @@ export function inspectDatabaseRestore(databasePath) {
   const rollbackPrefix = recordedDestination + '.pre-restore-';
   const rollbackToken = record?.rollback?.toLowerCase().startsWith(rollbackPrefix.toLowerCase())
     ? record.rollback.slice(rollbackPrefix.length) : '';
+  const operationIdValid = record?.version === 2
+    ? isUuidToken(record.operationId || '')
+      && temporaryToken.toLowerCase() === record.operationId.toLowerCase()
+      && rollbackToken.toLowerCase() === record.operationId.toLowerCase()
+      && record.temporaryId === record.operationId
+      && record.rollbackId === record.operationId
+      && record.journalTemporaryId === record.operationId
+    : record?.version === 1
+      && isUuidToken(temporaryToken)
+      && isUuidToken(rollbackToken);
   const validShape = Boolean(record && typeof record === 'object' && !Array.isArray(record)
-    && record.version === 1 && record.operation === 'restore' && absolutePaths
+    && (record.version === 1 || record.version === 2) && record.operation === 'restore' && absolutePaths
     && record.source.toLowerCase() !== recordedDestination.toLowerCase()
     && dirname(record.temporary).toLowerCase() === dirname(recordedDestination).toLowerCase()
-    && /^[0-9a-f-]{36}$/i.test(temporaryToken)
-    && /^[0-9a-f-]{36}$/i.test(rollbackToken));
+    && operationIdValid);
   const destinationMatches = validShape && recordedDestination.toLowerCase() === destination.toLowerCase();
   // A crash after the journal hard link is published but before its temporary
   // hard link is removed leaves both names. Inventory these even when the
   // published journal is valid; inspection must never silently omit evidence.
   try {
     const directory = dirname(journalPath);
-    const journalPrefix = basename(journalPath) + '.';
-    report.journal.orphanedTemporaryFiles = readdirSync(directory)
-      .filter(name => name.startsWith(journalPrefix) && name.endsWith('.tmp')
-        && /^[0-9a-f-]{36}$/i.test(name.slice(journalPrefix.length, -'.tmp'.length)))
-      .map(name => resolve(directory, name));
-    report.journal.artifactInventoryComplete = true;
+    report.journal.artifactInventory = buildRestoreArtifactInventory(directory, destination, journalPath, record);
+    report.journal.orphanedTemporaryFiles = report.journal.artifactInventory.entries
+      .filter(entry => entry.role === 'journal-temp-candidate')
+      .map(entry => entry.path);
+    report.journal.artifactInventoryComplete = report.journal.artifactInventory.complete;
     if (report.journal.orphanedTemporaryFiles.length) {
       report.journal.warnings.push('Restore journal temporary hard links remain beside the published journal. Preserve them for operator review; they may contain the same published journal record.');
     }
@@ -145,6 +165,10 @@ export function inspectDatabaseRestore(databasePath) {
   }
   report.journal.record = {
     version: record?.version ?? null, operation: record?.operation ?? null,
+    operationId: typeof record?.operationId === 'string' ? record.operationId : null,
+    temporaryId: typeof record?.temporaryId === 'string' ? record.temporaryId : null,
+    rollbackId: typeof record?.rollbackId === 'string' ? record.rollbackId : null,
+    journalTemporaryId: typeof record?.journalTemporaryId === 'string' ? record.journalTemporaryId : null,
     pid: Number.isSafeInteger(record?.pid) && record.pid > 0 ? record.pid : null,
     startedAt: typeof record?.startedAt === 'string' ? record.startedAt : null,
     source: typeof record?.source === 'string' ? record.source : null,
@@ -161,11 +185,81 @@ export function inspectDatabaseRestore(databasePath) {
     temporary: inspectPath(record.temporary), rollback: inspectPath(record.rollback)
   };
   report.journal.warnings.push('Artifact presence does not establish which database is authoritative. Lock presence does not establish whether its owner is stale. No files or locks were changed.');
-  report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, journalValid: report.journal.valid, locks: report.locks, artifacts: report.journal.artifacts || {} });
+  report.recovery = classifyRestoreRecoveryState({ journalStatus: report.journal.status, journalValid: report.journal.valid, locks: report.locks, artifacts: { ...(report.journal.artifacts || {}), inventoryComplete: report.journal.artifactInventoryComplete } });
   return report;
 }
 
 
+export function buildRestoreArtifactInventory(directory, destination, journalPath, record = null, fsOps = { readdirSync, lstatSync }) {
+  const names = fsOps.readdirSync(directory);
+  const maxEntries = 4096;
+  const selected = names.slice(0, maxEntries);
+  const rollbackPrefix = basename(destination) + '.pre-restore-';
+  const stagePrefix = '.' + basename(destination) + '.';
+  const journalTemporaryPrefix = basename(journalPath) + '.';
+  const expected = new Map([
+    [basename(destination), 'live-database'],
+    [basename(journalPath), 'journal']
+  ]);
+  if (record && typeof record === 'object') {
+    for (const [key, role] of [['temporary', 'restore-stage'], ['rollback', 'rollback']]) {
+      if (typeof record[key] === 'string' && dirname(record[key]) === directory) expected.set(basename(record[key]), role);
+    }
+  }
+  const entries = selected.map(name => {
+    const path = resolve(directory, name);
+    const token = name.startsWith(rollbackPrefix) ? name.slice(rollbackPrefix.length)
+      : name.startsWith(stagePrefix) && name.endsWith('.restore') ? name.slice(stagePrefix.length, -'.restore'.length)
+        : name.startsWith(journalTemporaryPrefix) && name.endsWith('.tmp') ? name.slice(journalTemporaryPrefix.length, -'.tmp'.length) : '';
+    const candidate = Boolean(token && isUuidToken(token));
+    const role = expected.get(name) || (candidate
+      ? name.startsWith(rollbackPrefix) ? 'rollback-candidate'
+        : name.startsWith(stagePrefix) && name.endsWith('.restore') ? 'restore-stage-candidate' : 'journal-temp-candidate'
+      : 'unknown');
+    let exists = null;
+    let kind = null;
+    let size = null;
+    let fingerprint = null;
+    try {
+      const stat = fsOps.lstatSync(path, { bigint: true });
+      exists = true;
+      kind = stat.isSymbolicLink() ? 'symbolic-link' : stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other';
+      size = stat.isFile() ? Number(stat.size) : null;
+      fingerprint = [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs].map(String).join(':');
+    } catch (error) {
+      exists = error.code === 'ENOENT' ? false : null;
+    }
+    return { name, path, role, status: role === 'unknown' ? 'unknown' : candidate && role.endsWith('-candidate') ? 'candidate' : exists === true ? 'present' : 'unavailable', exists, kind, size, identityVerified: false, fingerprint };  });
+  // Confirm names and per-entry metadata after pathname inspection to catch ordinary replacement/churn.
+  const confirmationNames = fsOps.readdirSync(directory);
+  const firstSorted = [...names].sort();
+  const confirmationSorted = [...confirmationNames].sort();
+  let entriesStable = true;
+  for (const entry of entries) {
+    try {
+      const stat = fsOps.lstatSync(entry.path, { bigint: true });
+      const fingerprint = [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs].map(String).join(':');
+      if (entry.fingerprint === null || fingerprint !== entry.fingerprint) entriesStable = false;
+    } catch { entriesStable = false; }
+  }
+  const namesStable = firstSorted.length === confirmationSorted.length
+    && firstSorted.every((name, index) => name === confirmationSorted[index]);
+  const stable = namesStable && entriesStable;
+  if (!stable) {
+    for (const entry of entries) entry.status = 'unstable-inventory';
+  }
+  for (const entry of entries) delete entry.fingerprint;
+  return {
+    complete: names.length <= maxEntries && stable,
+    stable,
+    stabilityMethod: 'two-name-enumerations-plus-entry-metadata-revalidation',
+    entryCount: names.length,
+    confirmationEntryCount: confirmationNames.length,
+    truncated: names.length > maxEntries,
+    identityVerified: false,
+    entries
+  };
+}
 function assertNoSymlinkComponents(filename, label) {
   const absolute = resolve(filename);
   const parsed = parse(absolute);
@@ -267,7 +361,7 @@ function cleanupStaleMaintenanceTemps(directory, baseName, suffix) {
   for (const entry of readdirSync(directory)) {
     if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
     const token = entry.slice(prefix.length, -suffix.length);
-    if (!/^[0-9a-f-]{36}$/i.test(token)) continue;
+    if (!isUuidToken(token)) continue;
     const candidate = resolve(directory, entry);
     const stat = lstatSync(candidate);
     // Backup staging artifacts are directories. A regular file with the same
@@ -379,8 +473,9 @@ function createDatabaseBackupUnlocked(databasePath, backupPath) {
     throw error;
   }
 }
-function createRestoreJournal(journalPath, record) {
-  const temporary = journalPath + '.' + randomUUID() + '.tmp';
+function createRestoreJournal(journalPath, record, operationId) {
+  const temporary = journalPath + '.' + operationId + '.tmp';
+  record.journalTemporaryId = operationId;
   let descriptor;
   let temporaryCreated = false;
   try {
@@ -421,15 +516,26 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   const restoreTemporaryPrefix = '.' + basename(destination) + '.';
   const orphanedRestoreTemporaries = readdirSync(dirname(destination)).filter(name =>
     name.startsWith(restoreTemporaryPrefix) && name.endsWith('.restore')
-    && /^[0-9a-f-]{36}$/i.test(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)));
+    && isUuidToken(name.slice(restoreTemporaryPrefix.length, -'.restore'.length)));
   if (orphanedRestoreTemporaries.length) {
     throw new Error('Orphaned Restore temporary files exist; inspect and preserve them before retrying: '
       + orphanedRestoreTemporaries.map(name => resolve(dirname(destination), name)).join(', '));
   }
+  const journalTemporaryPrefix = basename(journalPath) + '.';
+  const orphanedJournalTemporaries = readdirSync(dirname(journalPath)).filter(name =>
+    name.startsWith(journalTemporaryPrefix) && name.endsWith('.tmp')
+    && isUuidToken(name.slice(journalTemporaryPrefix.length, -'.tmp'.length)));
+  if (orphanedJournalTemporaries.length) {
+    throw new Error('Orphaned Restore journal temporary files exist; inspect and preserve them before retrying: '
+      + orphanedJournalTemporaries.map(name => resolve(dirname(journalPath), name)).join(', '));
+  }
   if (pathEntryExists(destination) && !lstatSync(destination).isFile())
     throw new Error('Restore destination must be a regular file');
-  const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + randomUUID() + '.restore');
-  const rollback = destination + '.pre-restore-' + randomUUID();
+  const operationId = randomUUID();
+  const temporaryId = operationId;
+  const rollbackId = operationId;
+  const temporary = resolve(dirname(destination), '.' + basename(destination) + '.' + temporaryId + '.restore');
+  const rollback = destination + '.pre-restore-' + rollbackId;
   let temporaryCreated = false;
   let rollbackPublished = false;
   let movedOriginal = false;
@@ -437,15 +543,18 @@ function restoreDatabaseBackupUnlocked(backupPath, databasePath) {
   let journalCreated = false;
   try {
     createRestoreJournal(journalPath, {
-      version: 1,
+      version: 2,
       operation: 'restore',
+      operationId,
+      temporaryId,
+      rollbackId,
       pid: process.pid,
       startedAt: new Date().toISOString(),
       source,
       destination,
       temporary,
       rollback
-    });
+    }, operationId);
     journalCreated = true;
     copyFileSync(source, temporary, constants.COPYFILE_EXCL);
     temporaryCreated = true;

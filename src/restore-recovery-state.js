@@ -38,7 +38,7 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
     guidance: 'Preserve the journal and every artifact. Do not retry Restore or infer a recovery copy.'
   };
 
-  let state;
+let state;
   let guidance;
   if (runtimeLock || maintenanceLock) {
     state = 'blocked-lock-present';
@@ -46,6 +46,12 @@ export function classifyRestoreRecoveryState({ journalStatus, journalValid, lock
   } else if (lockStateUnknown) {
     state = 'manual-review-lock-state-unknown';
     guidance = 'At least one runtime or maintenance lock could not be inspected. Preserve all artifacts and verify filesystem and database users before any operator action.';
+  } else if (artifacts.inventoryComplete === false) {
+    state = 'manual-review-artifact-inventory-incomplete';
+    guidance = 'The Restore journal is valid, but the parent-directory artifact inventory is incomplete or unstable. Preserve every artifact and require operator review; do not infer that unlisted recovery files are absent.';
+  } else if (artifacts.inventoryComplete === true && [live, rollback, temporary, source].some(value => value === null)) {
+    state = 'manual-review-artifact-state-unknown';
+    guidance = 'The parent-directory inventory completed, but one or more recorded artifact paths could not be inspected reliably. Preserve all evidence and do not infer that an unknown path is absent.';
   } else if (!live && rollback) {
     state = 'live-missing-rollback-present';
     guidance = 'A rollback candidate exists while the live path is absent. Preserve all files; validate a separate copy and require explicit operator selection.';
