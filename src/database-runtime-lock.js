@@ -73,7 +73,10 @@ function openLockDatabase(lockPath) {
   try {
     // The lock transaction performs no data writes. OFF avoids leaving a hot
     // rollback journal if the owning process is terminated without cleanup.
-    database.exec('PRAGMA journal_mode=OFF');
+    // Query first: reissuing journal_mode=OFF on every inspection can perform
+    // SQLite header/journal I/O. Only initialize or migrate a non-OFF lock DB.
+    const journalMode = database.prepare('PRAGMA journal_mode').get().journal_mode;
+    if (journalMode !== 'off') database.exec('PRAGMA journal_mode=OFF');
     // Reject legacy JSON lock files and other non-SQLite artifacts; preserve them.
     database.exec('PRAGMA schema_version');
     return database;
