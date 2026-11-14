@@ -73,10 +73,7 @@ function openLockDatabase(lockPath) {
   try {
     // The lock transaction performs no data writes. OFF avoids leaving a hot
     // rollback journal if the owning process is terminated without cleanup.
-    // Query first: reissuing journal_mode=OFF on every inspection can perform
-    // SQLite header/journal I/O. Only initialize or migrate a non-OFF lock DB.
-    const journalMode = database.prepare('PRAGMA journal_mode').get().journal_mode;
-    if (journalMode !== 'off') database.exec('PRAGMA journal_mode=OFF');
+    database.exec('PRAGMA journal_mode=OFF');
     // Reject legacy JSON lock files and other non-SQLite artifacts; preserve them.
     database.exec('PRAGMA schema_version');
     return database;
@@ -223,6 +220,19 @@ export function inspectDatabaseFileLock(lockPath) {
   }
 }
 
+function inspectDatabaseFileLockPresence(lockPath) {
+  let stat;
+  try { stat = lstatSync(lockPath); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { path: lockPath, exists: false, kind: null, active: false, error: null };
+    return { path: lockPath, exists: null, kind: null, active: null, error: error.code || 'inspection-failed' };
+  }
+  const kind = stat.isSymbolicLink() ? 'symbolic-link' : stat.isFile() ? 'sqlite-lock-candidate' : stat.isDirectory() ? 'directory' : 'other';
+  if (!stat.isFile()) return { path: lockPath, exists: true, kind, active: null, error: 'not-a-regular-file' };
+  // Do not open a lock database while inspecting Restore state. A SQLite open
+  // may perform hot-journal recovery; path presence is enough to block review.
+  return { path: lockPath, exists: true, kind, active: null, error: null };
+}
 export function inspectDatabaseRuntimeLocks(databasePath) {
   const absolute = resolve(databasePath);
   const parentDirectory = dirname(absolute);
@@ -251,8 +261,8 @@ export function inspectDatabaseRuntimeLocks(databasePath) {
     return { runtime: unknown('.runtime.lock'), maintenance: unknown('.maintenance.lock') };
   }
   return {
-    runtime: inspectDatabaseFileLock(database + '.runtime.lock'),
-    maintenance: inspectDatabaseFileLock(database + '.maintenance.lock')
+    runtime: inspectDatabaseFileLockPresence(database + '.runtime.lock'),
+    maintenance: inspectDatabaseFileLockPresence(database + '.maintenance.lock')
   };
 }
 

@@ -873,7 +873,7 @@ test('SQLite backup captures committed WAL data and restores a validated databas
     writeFileSync(staleRestoreTemp, 'stale partial restore');
     assert.throws(() => restoreDatabaseBackup(backup, restored), /Orphaned Restore temporary files exist/);
     const orphanReport = inspectDatabaseRestore(restored);
-    assert.equal(orphanReport.recovery.state, 'no-journal-recovery-artifacts-present');
+    assert.equal(orphanReport.recovery.state, 'no-pending-restore-lock-present');
     assert.equal(orphanReport.journal.orphanedRestoreTemporaryFiles.length, 1);
     assert.equal(existsSync(staleRestoreTemp), true, 'Restore must preserve an orphaned staged file until explicit operator review');
     unlinkSync(staleRestoreTemp); // Exact-path cleanup after reviewing the reported artifact.
@@ -1144,7 +1144,8 @@ test('restore crash simulation classifies journal publication and staging bounda
       } else {
         assert.deepEqual(report.journal.orphanedTemporaryFiles, []);
       }
-      assert.equal(report.recovery.state, scenario.temporary ? 'live-present-temporary-present-no-rollback' : 'live-present-no-rollback');
+      assert.equal(report.recovery.state, 'blocked-lock-present');
+      assert.equal(report.recovery.observations.maintenanceLock, true);
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, scenario.live);
       assert.equal(report.recovery.observations.temporary, scenario.temporary);
@@ -1193,7 +1194,7 @@ test('restore crash before journal publication leaves an inventoried orphan and 
     assert.equal(report.journal.orphanedTemporaryFiles.length, 1,
       'the fully written but unpublished journal temporary must be inventoried');
     assert.equal(existsSync(report.journal.orphanedTemporaryFiles[0]), true);
-    assert.equal(report.recovery.state, 'no-journal-recovery-artifacts-present');
+    assert.equal(report.recovery.state, 'no-pending-restore-lock-present');
     assert.equal(report.recovery.automaticAction, 'none');
     assert.equal(report.recovery.observations.journalTemporary, true);
     assert.deepEqual(
@@ -1261,7 +1262,7 @@ test('restore crash after no-replace rollback link publication preserves both na
     assert.equal(readFileSync(database, 'base64'), readFileSync(journal.rollback, 'base64'));
     const report = inspectDatabaseRestore(database);
     assert.equal(report.journal.status, 'valid');
-    assert.equal(report.recovery.state, 'live-and-rollback-present-ambiguous');
+    assert.equal(report.recovery.state, 'blocked-lock-present');
     assert.equal(report.recovery.automaticAction, 'none');
     db = openDatabase(database);
     assert.equal(new ControlCenter(db).listTasks().some(task => task.type === 'restore.rollback.link.original'), true);
@@ -1311,7 +1312,7 @@ test('restore can recover the original database after a crash between move and i
     assert.equal(report.readOnly, true);
     assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
     assert.equal(report.journal.status, 'valid');
-    assert.equal(report.recovery.state, 'live-missing-rollback-present');
+    assert.equal(report.recovery.state, 'blocked-lock-present');
     assert.equal(report.recovery.automaticAction, 'none');
     assert.equal(report.recovery.observations.live, false);
     assert.equal(report.recovery.observations.rollback, true);
@@ -1370,7 +1371,7 @@ test('restore keeps both installed snapshot and rollback copy if the process cra
     assert.equal(report.readOnly, true);
     assert.deepEqual(report.artifactIdentity, { verified: false, method: 'path-based-lstat', limitation: 'Path inspection does not bind names to native file identities; replacement races and same-name substitutions remain unverified.' });
     assert.equal(report.journal.status, 'valid');
-    assert.equal(report.recovery.state, 'live-and-rollback-present-ambiguous');
+    assert.equal(report.recovery.state, 'blocked-lock-present');
     assert.equal(report.recovery.automaticAction, 'none');
     assert.equal(report.recovery.observations.live, true);
     assert.equal(report.recovery.observations.rollback, true);
@@ -1439,11 +1440,11 @@ test('restore refuses a backup path replaced after validation but before staging
   }
 });
 
-test('restore cleanup crash boundaries retain artifacts and classify released SQLite locks', () => {
+test('restore cleanup crash boundaries preserve lock sidecars as read-only blockers', () => {
   const worker = new URL('../test-support/restore-fault-worker.js', import.meta.url);
   const scenarios = [
-    { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'live-and-rollback-present-ambiguous' },
-    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-journal-recovery-artifacts-present' }
+    { mode: 'crash-after-temp-cleanup', status: 80, journal: true, temporary: false, state: 'blocked-lock-present' },
+    { mode: 'crash-after-journal-cleanup', status: 81, journal: false, temporary: false, state: 'no-pending-restore-lock-present' }
   ];
   for (const scenario of scenarios) {
     const directory = mkdtempSync(join(tmpdir(), 'raya-cc-restore-cleanup-crash-'));
@@ -1481,8 +1482,8 @@ test('restore cleanup crash boundaries retain artifacts and classify released SQ
       assert.equal(report.recovery.automaticAction, 'none');
       assert.equal(report.recovery.observations.live, true);
       assert.equal(report.recovery.observations.rollback, true);
-      assert.equal(report.recovery.observations.runtimeLock, false);
-      assert.equal(report.recovery.observations.maintenanceLock, false);
+      assert.equal(report.recovery.observations.runtimeLock, true);
+      assert.equal(report.recovery.observations.maintenanceLock, true);
       assert.equal(existsSync(journalPath), scenario.journal, 'inspection must not mutate journal state');
       db = openDatabase(database);
       assert.equal(db.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 1);
@@ -1789,7 +1790,7 @@ test('simultaneous process contenders produce exactly one SQLite lock owner', as
   }
   assert.equal(inspectDatabaseFileLock(lockPath).exists, false);
 });
-test('restore inspection probes an idle SQLite sidecar without changing its files', () => {
+test('restore inspection reports lock-sidecar presence without opening or changing it', () => {
   const directory = mkdtempSync(join(tmpdir(), 'raya-cc-lock-inspect-readonly-'));
   const database = join(directory, 'live.sqlite');
   const lockPath = database + '.maintenance.lock';
@@ -1803,8 +1804,9 @@ test('restore inspection probes an idle SQLite sidecar without changing its file
     const report = inspectDatabaseRestore(database);
     assert.equal(report.locks.maintenance.exists, true);
     assert.equal(readFileSync(lockPath).length, 0, 'lock sidecar remains an empty rendezvous file');
-    assert.equal(report.locks.maintenance.active, false);
-    assert.equal(report.recovery.observations.maintenanceLock, false);
+    assert.equal(report.locks.maintenance.active, null);
+    assert.equal(report.recovery.observations.maintenanceLock, true);
+    assert.equal(report.recovery.state, 'no-pending-restore-lock-present');
     assert.deepEqual(readdirSync(directory).sort(), beforeNames);
     assert.deepEqual(readFileSync(lockPath), beforeBytes);
     assert.equal(existsSync(lockPath + '-journal'), false);
