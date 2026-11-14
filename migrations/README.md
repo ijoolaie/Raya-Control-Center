@@ -1,0 +1,2 @@
+-- Initial schema is applied transactionally by src/db.js (PRAGMA user_version = 1).
+-- This file is a human-readable migration reference; runtime migration source is authoritative.

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Raya Control Center</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div><p class="eyebrow">LOCAL OPERATIONS</p><h1>Raya Control Center</h1><p class="muted">Operator dashboard · loopback only</p></div>
+    <div class="health"><span id="health-dot" class="dot"></span><span id="health-label">Checking API…</span></div>
+  </header>
+  <main>
+    <section class="panel auth">
+      <div><h2>Operator session</h2><p class="muted">The token stays in this page's memory and is not saved in browser storage.</p></div>
+      <form id="auth-form">
+        <label for="operator-token">Operator token</label>
+        <div class="auth-row"><input id="operator-token" type="password" autocomplete="off" spellcheck="false" required minlength="32" placeholder="Paste saved operator token"><button type="submit">Connect</button><button id="disconnect" type="button" class="secondary">Disconnect</button></div>
+      </form>
+      <p id="auth-status" class="status" role="status">Not connected</p>
+    </section>
+    <section class="metrics" aria-label="Operational summary">
+      <article class="metric"><span>Active (loaded)</span><strong id="metric-active">—</strong></article>
+      <article class="metric"><span>Queued</span><strong id="metric-queued">—</strong></article>
+      <article class="metric"><span>Blocked</span><strong id="metric-blocked">—</strong></article>
+      <article class="metric"><span>Active claim-capable participants</span><strong id="metric-participants">—</strong></article>
+      <article class="metric"><span>Unmatched queued tasks</span><strong id="metric-unmatched">-</strong></article>
+    </section>
+    <section class="panel">
+      <div class="section-head"><div><h2>Tasks</h2><p class="muted">Latest 100 tasks. Payloads and results are intentionally omitted.</p></div><button id="refresh" type="button" class="secondary" disabled>Refresh</button></div>
+      <div class="filters"><label>Status <select id="task-status"><option value="">All</option><option>queued</option><option>claimed</option><option>running</option><option>waiting_approval</option><option>blocked</option><option>cancellation_requested</option><option>succeeded</option><option>failed</option><option>cancelled</option></select></label><label>Type <input id="task-type" maxlength="160" placeholder="Filter by task type"></label></div>
+      <div class="table-wrap"><table><thead><tr><th>Task</th><th>Type</th><th>Required capabilities</th><th>Status</th><th>Progress</th><th>Updated</th><th>Operator</th></tr></thead><tbody id="tasks-body"><tr><td colspan="7" class="empty">Connect to load tasks.</td></tr></tbody></table></div>
+    </section>
+    <section class="panel inspector" id="task-inspector" hidden aria-live="polite">
+      <div class="section-head"><div><h2>Task inspection &amp; recovery</h2><p class="muted">Only bounded task metadata and append-only event history are shown. Payloads and results are never rendered.</p></div><button id="close-inspector" type="button" class="secondary">Close</button></div>
+      <p id="inspector-summary" class="inspector-summary"></p>
+      <h3>Recent task events</h3>
+      <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Sequence</th></tr></thead><tbody id="inspector-events"><tr><td colspan="4" class="empty">Select a task to inspect.</td></tr></tbody></table></div>
+      <div id="recovery-panel" class="recovery-panel" hidden>
+        <h3>Controlled requeue</h3>
+        <p class="warning-text">This may repeat external work. Continue only after independently verifying the previous Worker has stopped and reviewing whether its external side effects already occurred.</p>
+        <p id="recovery-block-event" class="muted"></p>
+        <label for="recovery-reason">Reason for recovery (required)</label>
+        <textarea id="recovery-reason" maxlength="500" rows="3" placeholder="Describe what you verified before requeueing"></textarea>
+        <label class="check-row"><input id="confirm-worker-stopped" type="checkbox"> I verified that the previous Worker has stopped.</label>
+        <label class="check-row"><input id="confirm-side-effects" type="checkbox"> I reviewed external side effects and determined re-execution is safe.</label>
+        <div class="recovery-actions"><button id="requeue-task" type="button" disabled>Confirm requeue</button><span id="recovery-status" class="muted" role="status"></span></div>
+      </div>
+      <p id="inspector-error" class="error" role="alert"></p>
+    </section>
+    <section class="panel">
+      <div class="section-head"><div><h2>Participants</h2><p class="muted">Latest 100 participants. Credentials are never returned by this view.</p></div></div>
+      <div class="filters"><label>Status <select id="participant-status"><option value="">All</option><option>active</option><option>disabled</option><option>revoked</option></select></label><label>Kind <select id="participant-kind"><option value="">All</option><option>worker</option><option>adapter</option><option>operator_client</option></select></label></div>
+      <div class="table-wrap"><table><thead><tr><th>Participant</th><th>Kind</th><th>Status</th><th>Scopes</th><th>Capabilities</th><th>Last seen</th><th>Actions</th></tr></thead><tbody id="participants-body"><tr><td colspan="7" class="empty">Connect to load participants.</td></tr></tbody></table></div>
+    </section>
+    <section id="participant-inspector" class="panel" hidden aria-live="polite">
+      <div class="section-head"><div><h2>Participant inspection</h2><p id="participant-summary" class="muted inspector-summary"></p></div><button id="close-participant-inspector" class="secondary" type="button">Close</button></div>
+      <div class="participant-details">
+        <p><strong>Status:</strong> <span id="participant-detail-status"></span></p>
+        <p><strong>Kind:</strong> <span id="participant-detail-kind"></span></p>
+        <p><strong>Scopes:</strong> <span id="participant-detail-scopes"></span></p>
+        <p><strong>Capabilities:</strong> <span id="participant-detail-capabilities"></span></p>
+        <p><strong>Created:</strong> <span id="participant-detail-created"></span></p>
+        <p><strong>Updated:</strong> <span id="participant-detail-updated"></span></p>
+        <p><strong>Last seen:</strong> <span id="participant-detail-last-seen"></span></p>
+      </div>
+      <section id="participant-capability-editor" class="capability-editor" hidden>
+        <h3>Manage capabilities</h3>
+        <p class="warning-text">Changes affect future task claims only. Existing active Leases are not changed. Capabilities are scheduling labels, not security permissions.</p>
+        <label for="participant-capability-input">Capabilities (one identifier per line)</label>
+        <textarea id="participant-capability-input" maxlength="5200" rows="4" spellcheck="false" placeholder="worker:python&#10;tool:browser"></textarea>
+        <div class="capability-diff">
+          <p><strong>Added:</strong> <span id="participant-capability-added">None</span></p>
+          <p><strong>Removed:</strong> <span id="participant-capability-removed">None</span></p>
+        </div>
+        <label class="check-row"><input id="participant-capability-confirm" type="checkbox"> I reviewed this exact change and understand it applies only to future claims.</label>
+        <div class="recovery-actions"><button id="participant-capability-save" type="button" disabled>Apply capability changes</button><span id="participant-capability-status" class="muted" role="status"></span></div>
+      </section>
+      <h3>Participant audit history</h3>
+      <p class="muted">Append-only events. Capability changes apply to future claims only; revocation details include tasks blocked by that action.</p>
+      <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Details</th><th>Sequence</th></tr></thead><tbody id="participant-events"><tr><td colspan="4" class="empty">Select a participant to inspect its history.</td></tr></tbody></table></div>
+      <p id="participant-inspector-error" class="error" role="alert"></p>
+    </section>
+    <section class="panel">
+      <div class="section-head"><div><h2>Audit events</h2><p class="muted">Latest 100 append-only events.</p></div></div>
+      <div class="filters"><label>Entity type <select id="event-entity"><option value="">All</option><option>task</option><option>participant</option><option>system</option></select></label><label>Entity ID <input id="event-id" maxlength="100" placeholder="Optional exact ID"></label></div>
+      <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Entity</th><th>Actor</th><th>Sequence</th></tr></thead><tbody id="events-body"><tr><td colspan="5" class="empty">Connect to load events.</td></tr></tbody></table></div>
+    </section>
+    <p id="error" class="error" role="alert"></p>
+    <footer>Raya Control Center · Local-only · Operator-authenticated · No credentials persisted</footer>
+  </main>
+</body>
+</html>
